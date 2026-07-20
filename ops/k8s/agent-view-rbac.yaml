@@ -1,0 +1,62 @@
+# Read-only credential for the DevOps agent (P1).
+#
+# Provisions a ServiceAccount bound to the built-in `view` ClusterRole plus a long-lived
+# token Secret. The `view` role is read-only AND excludes Secrets, so even a total policy
+# bypass using this credential is "read-only, no-secrets" (a plan invariant, PLAN.md §1).
+#
+# Apply once per target cluster:
+#   kubectl apply -f ops/k8s/agent-view-rbac.yaml
+# Then generate the scoped kubeconfig and verify the secrets denial:
+#   ops/k8s/gen-kubeconfig.sh <context> [more contexts...]
+#   ops/k8s/verify-secrets-denied.sh
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opendevops
+  labels:
+    app.kubernetes.io/name: opendevops
+    app.kubernetes.io/component: rbac
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sa-agent-view
+  namespace: opendevops
+  labels:
+    app.kubernetes.io/name: opendevops
+    app.kubernetes.io/component: rbac
+# Do not auto-mount into pods; this SA is used only via the generated kubeconfig token.
+automountServiceAccountToken: false
+---
+# Bind the ServiceAccount to the built-in, read-only `view` ClusterRole cluster-wide.
+# `view` intentionally excludes Secrets (upstream RBAC), which is the server-side control.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agent-view-binding
+  labels:
+    app.kubernetes.io/name: opendevops
+    app.kubernetes.io/component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: sa-agent-view
+    namespace: opendevops
+---
+# Long-lived token for the ServiceAccount. The annotation makes the token controller
+# populate .data.token / .data.ca.crt, which gen-kubeconfig.sh extracts.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sa-agent-view-token
+  namespace: opendevops
+  labels:
+    app.kubernetes.io/name: opendevops
+    app.kubernetes.io/component: rbac
+  annotations:
+    kubernetes.io/service-account.name: sa-agent-view
+type: kubernetes.io/service-account-token

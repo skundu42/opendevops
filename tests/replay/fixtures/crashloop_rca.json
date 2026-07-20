@@ -1,0 +1,53 @@
+{
+  "scenario": "crashloop-rca",
+  "environment": "staging",
+  "user": "the web pods keep restarting in namespace web — find the root cause",
+  "golden": [
+    { "role": "user", "content": "the web pods keep restarting in namespace web — find the root cause" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "name": "run_command", "args": { "argv": ["kubectl", "get", "pods", "-n", "web"] }, "id": "c1", "type": "tool_call" }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "c1", "content": "NAME READY STATUS RESTARTS" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "name": "run_command", "args": { "argv": ["kubectl", "describe", "pod", "web-7d9c8b6f5-abcde", "-n", "web"] }, "id": "c2", "type": "tool_call" }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "c2", "content": "Last State: Terminated" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "name": "run_command", "args": { "argv": ["kubectl", "logs", "web-7d9c8b6f5-abcde", "-n", "web", "--previous"] }, "id": "c3", "type": "tool_call" }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "c3", "content": "traceback" },
+    {
+      "role": "assistant",
+      "content": "Root cause: the web pod is in CrashLoopBackOff. The previous container terminated with exit code 137 (SIGKILL/OOMKilled) — its memory limit (128Mi) is too low for the workload, which allocates a large in-memory cache on startup. The previous-container logs confirm the process was killed mid-startup. Remediation: raise the memory limit (or fix the startup allocation) and redeploy."
+    }
+  ],
+  "replay": [
+    {
+      "argv": ["kubectl", "get", "pods", "-n", "web"],
+      "exit_code": 0,
+      "output": "NAME                        READY   STATUS             RESTARTS         AGE\nweb-7d9c8b6f5-abcde         0/1     CrashLoopBackOff   7 (2m14s ago)    21m\nweb-7d9c8b6f5-fghij         1/1     Running            0                21m\nredis-0                     1/1     Running            0                6d"
+    },
+    {
+      "argv": ["kubectl", "describe", "pod", "web-7d9c8b6f5-abcde", "-n", "web"],
+      "exit_code": 0,
+      "output": "Name:             web-7d9c8b6f5-abcde\nNamespace:        web\nContainers:\n  web:\n    State:          Waiting\n      Reason:       CrashLoopBackOff\n    Last State:     Terminated\n      Reason:       OOMKilled\n      Exit Code:    137\n      Started:      Thu, 18 Jul 2026 09:12:03 +0000\n      Finished:     Thu, 18 Jul 2026 09:12:41 +0000\n    Restart Count:  7\n    Limits:\n      memory:  128Mi\n    Requests:\n      memory:  128Mi\nEvents:\n  Type     Reason     Age                    From     Message\n  ----     ------     ----                   ----     -------\n  Warning  BackOff    35s (x91 over 20m)     kubelet  Back-off restarting failed container web"
+    },
+    {
+      "argv": ["kubectl", "logs", "web-7d9c8b6f5-abcde", "-n", "web", "--previous"],
+      "exit_code": 0,
+      "output": "[startup] loading catalogue into in-memory cache ...\n[startup] allocated 512MiB cache buffer\nfatal: runtime: out of memory: cannot allocate 268435456 bytes\nruntime stack:\nruntime.throw({0x9c1f2a, 0x12})\n\t/usr/local/go/src/runtime/panic.go:1077 +0x5c"
+    }
+  ]
+}

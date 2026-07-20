@@ -1,0 +1,10 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "devops": "./src/opendevops/agent.py:server_graph"
+  },
+  "http": {
+    "app": "./src/opendevops/interfaces/webapp.py:app"
+  },
+  "env": ".env"
+}

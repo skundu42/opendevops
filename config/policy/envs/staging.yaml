@@ -1,0 +1,12 @@
+# staging.yaml — environment overlay for staging.
+#
+# Overlay contract (enforced by the loader): overlays may ONLY ADD rules with effect deny
+# or escalate. They may NOT introduce allow/rewrite/hook rules and carry no tool_family —
+# an overlay tightens policy, it never loosens it. An empty rules list is valid and is the
+# P1 default (staging inherits base + packs unchanged).
+version: 1
+metadata:
+  name: staging-overlay
+  owner: opendevops
+  updated: "2026-07-18"
+rules: []

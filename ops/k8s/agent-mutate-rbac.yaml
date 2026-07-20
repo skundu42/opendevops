@@ -1,0 +1,88 @@
+# agent-mutate-rbac.yaml — P2 read-write credential for the DevOps agent (staging mutations).
+#
+# Grants ONLY the narrow mutation surface the P2 `kubectl-mutate` policy pack allows —
+# apply/rollout/scale on Deployments/ReplicaSets/StatefulSets (+ the deployments/replicasets
+# `scale` subresource) and ConfigMaps — and nothing else. Server-side defense-in-depth behind
+# the policy layer: NO Secrets, NO RBAC, NO CRDs, and NO `delete` on anything. So even a total
+# policy bypass using this credential can only patch/scale workloads in the target namespace;
+# it can neither read Secret contents nor delete resources.
+#
+# per-namespace: the Role + RoleBinding are NAMESPACED — apply them once per target app
+# namespace. Edit `target-namespace` below, or set it per apply with
+#   kustomize edit set namespace <ns>   (or)   kubectl apply -n <ns> -f - <<< ...
+# The ServiceAccount + token live ONCE in the central `opendevops` namespace (created by
+# ops/k8s/agent-view-rbac.yaml); each per-namespace RoleBinding grants that one identity mutate
+# rights in its namespace.
+#
+# Apply (central identity, once):   kubectl apply -f ops/k8s/agent-mutate-rbac.yaml
+#   then re-apply the Role+RoleBinding with the namespace set for each app namespace.
+# Generate the rw kubeconfig and verify the secrets denial + patch capability:
+#   ops/k8s/gen-kubeconfig.sh --rw <context> [more contexts...]
+#   MUTATE_NAMESPACE=<ns> ops/k8s/verify-secrets-denied.sh
+---
+# Central read-write ServiceAccount (lives alongside sa-agent-view in `opendevops`).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sa-agent-mutate
+  namespace: opendevops
+  labels:
+    app.kubernetes.io/name: opendevops
+    app.kubernetes.io/component: rbac
+# Do not auto-mount into pods; this SA is used only via the generated kubeconfig token.
+automountServiceAccountToken: false
+---
+# Namespaced Role: the exact mutate surface. NO secrets, NO rbac, NO CRDs, NO delete.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-mutate
+  namespace: target-namespace # per-namespace: edit for each app namespace
+  labels:
+    app.kubernetes.io/name: opendevops
+    app.kubernetes.io/component: rbac
+rules:
+  # Core workload objects: read + patch/update (covers `apply` and `rollout undo/restart`).
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  # The `scale` subresource: `kubectl scale deploy/... --replicas N`.
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "replicasets/scale"]
+    verbs: ["get", "patch", "update"]
+  # ConfigMaps: read + patch/update (apply config changes). Secrets are deliberately absent.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "patch", "update"]
+---
+# Bind the central mutate SA to the namespaced Role in this target namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-mutate-binding
+  namespace: target-namespace # per-namespace: edit for each app namespace
+  labels:
+    app.kubernetes.io/name: opendevops
+    app.kubernetes.io/component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agent-mutate
+subjects:
+  - kind: ServiceAccount
+    name: sa-agent-mutate
+    namespace: opendevops
+---
+# Long-lived token for the mutate ServiceAccount. The annotation makes the token controller
+# populate .data.token / .data.ca.crt, which gen-kubeconfig.sh --rw extracts.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sa-agent-mutate-token
+  namespace: opendevops
+  labels:
+    app.kubernetes.io/name: opendevops
+    app.kubernetes.io/component: rbac
+  annotations:
+    kubernetes.io/service-account.name: sa-agent-mutate
+type: kubernetes.io/service-account-token

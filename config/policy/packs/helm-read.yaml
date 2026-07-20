@@ -1,0 +1,50 @@
+# helm-read.yaml — the P2 read-only helm pack (list / status / history / get / version).
+#
+# tool_family binds this pack's allow rule to the "helm" credential family; at boot (T8) the
+# loader's check_credential_coverage() refuses to start if no helm credential is configured.
+#
+# RBAC PREREQUISITE / no-secrets caveat. Helm reads release state from Secrets labelled
+# `helm.sh/release.v1`, and the P1 `view` ClusterRole (sa-agent-view) excludes Secrets — so
+# `helm list/status/get` cannot work against the P1 read-only ServiceAccount as shipped.
+# Enabling this pack requires applying ops/k8s/agent-helm-release-read-rbac.yaml, a
+# NAMESPACED Role granting `secrets get,list` in designated app namespaces to sa-agent-view.
+# RBAC cannot filter by secret TYPE, so this Role weakens the "total bypass is
+# read-only-no-secrets" invariant (PLAN.md §3.3) — accepted only with the compensating
+# control that the policy-layer `no-secret-reads` deny (base.yaml) still blocks any
+# `kubectl get/describe secret`, so the model can never read secret contents directly.
+#
+# flags_allowed is THIS pack's own complete helm allowlist (no cross-pack merge).
+version: 1
+metadata:
+  name: helm-read
+  owner: opendevops
+  updated: "2026-07-19"
+tool_family: helm
+
+flags_allowed:
+  helm:
+    - --namespace
+    - --all-namespaces
+    - --output
+    - --max
+    - --filter
+    - --revision
+
+rules:
+  # Read-only helm verbs, permitted in staging and prod. `get` covers `helm get
+  # values/manifest/notes/hooks/all` (the sub-selector is a positional). No install/upgrade/
+  # uninstall/rollback here — those are mutations and fall through to __default_deny__.
+  - id: helm-read-verbs
+    match:
+      argv0: helm
+      verb:
+        in:
+          - list
+          - status
+          - history
+          - get
+          - version
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only helm verbs are permitted in staging and prod"

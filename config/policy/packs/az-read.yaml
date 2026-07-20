@@ -1,0 +1,421 @@
+# az-read.yaml — the P5a read-only Azure CLI pack (curated read-command ALLOWLIST).
+#
+# tool_family binds this pack's allow rules to the "az" credential family: at boot (T8) the loader's
+# check_credential_coverage() refuses to start unless targets.azure.credential_env names ≥1 env var
+# (e.g. AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_CLIENT_SECRET for a read-only service principal).
+# NOTE the family/argv0 is `az` but the config target is spelled `azure` (executor._CLOUD_FAMILY_
+# TARGET maps az -> azure). The executor injects ONLY those vars for an az-family exec, plus
+# KUBECONFIG=/dev/null.
+#
+# MATCHING NOTE (P5a fix round 3 — ALLOWLIST INVERSION, fail-CLOSED not fail-open). `az` is a
+# SUBCOMMAND_BINARY (parsing.py), so verb=<top-group> (e.g. `vm`). az commands take their TARGET via
+# flags (`--name`, `--resource-group`), NOT positional args, so the group SUBPATH + action verb are
+# `positionals`: `az vm list` -> verb=vm, positionals=[list]; `az storage account show -n x` ->
+# verb=storage, positionals=[account, show] (flags/operands consumed by VALUE_FLAGS).
+#
+# Fix rounds 1-2 keyed the read allow on `last_positional in [list, show]` — it fired for ANY az
+# command whose LAST positional is a read token, for ANY group, and subtracted mutations via a
+# *denylist*. For parity with the gcloud allowlist inversion, fix round 3 REPLACES that broad rule
+# with a CURATED POSITIVE ALLOWLIST of read command PATHS, one allow rule per service group. Each
+# rule pins `verb: <top-group>` AND the exact `[<subgroup...>, <read-verb>]` sequence(s) via
+# `positional_seq_prefix_any`, so an UNKNOWN verb, an unlisted mutation, an unknown GROUP, or a
+# secret SUBGROUP path (`keyvault secret`, `acr credential`, `cosmosdb keys`) does NOT match and
+# falls to __default_deny__.
+#
+# The mutation/secret denies below are KEPT as belt-and-braces (deny > allow):
+#   * az-no-delete + az-no-mutations: bare mutation verbs at ANY positional.
+#   * az-no-compound-mutations: a PREFIX guard denying any positional whose prefix-before-the-first-
+#     `-` is a mutation verb (COMPOUND `verb-noun` forms: `run-command`, ...).
+# Secret-material reads (keyvault secret / * keys list / acr|sp credential) and subscription/identity
+# overrides are denied in base.yaml (az-no-secret-reads / az-no-subscription-override), which win by
+# precedence (base loads first).
+#
+# `--subscription` is DENIED (base.yaml) — JUDGMENT documented in task-21-report: an Azure
+# subscription can belong to a different TENANT, so it is treated as an identity retarget (unlike an
+# AWS region or a GCP project). flags_allowed is a curated read-safe set; any unlisted flag denies.
+#
+# SHORT FLAGS: `-n/-g/-o` are now registered in the parser's alias table (parsing.py ALIAS_TABLES)
+# and canonicalize to --name/--resource-group/--output (their operand is consumed), so both short
+# and long forms parse. Other az short flags remain unregistered and fail-closed by design.
+version: 1
+metadata:
+  name: az-read
+  owner: opendevops
+  updated: "2026-07-19"
+tool_family: az
+
+flags_allowed:
+  az:
+    - --output
+    - --query
+    - --resource-group
+    - --name
+    - --ids
+    - --all
+    - --show-details
+    - --only-show-errors
+    - --tag
+    - --location
+
+rules:
+  # ---------------------------------------------------------------------------------------------
+  # CURATED READ-COMMAND ALLOWLIST (fix round 3 — fail-CLOSED). One allow rule per service group.
+  # Each rule pins `verb: <top-group>` AND the exact `[<subgroup...>, <read-verb>]` sequence(s) via
+  # `positional_seq_prefix_any` (az targets are flags, so there are no trailing positionals after the
+  # read verb). An unknown verb, an unlisted mutation, an unknown group, or a secret subgroup path
+  # (`keyvault secret`, `acr credential`, `cosmosdb keys`) does NOT match and default-denies.
+  # Operator-extensible: add a service group's read paths here as needed.
+  # ---------------------------------------------------------------------------------------------
+
+  # az vm list|show
+  - id: az-read-vm
+    match:
+      argv0: az
+      verb: {eq: vm}
+      positional_seq_prefix_any:
+        - [list]
+        - [show]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only az vm list/show is permitted in staging and prod"
+
+  # az group list|show
+  - id: az-read-group
+    match:
+      argv0: az
+      verb: {eq: group}
+      positional_seq_prefix_any:
+        - [list]
+        - [show]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only az group list/show is permitted in staging and prod"
+
+  # az storage account list|show (NOT `az storage account keys list` — access keys, denied in base)
+  - id: az-read-storage
+    match:
+      argv0: az
+      verb: {eq: storage}
+      positional_seq_prefix_any:
+        - [account, list]
+        - [account, show]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only az storage account list/show is permitted in staging and prod"
+
+  # az network vnet|nsg|public-ip|lb|nic list|show
+  - id: az-read-network
+    match:
+      argv0: az
+      verb: {eq: network}
+      positional_seq_prefix_any:
+        - [vnet, list]
+        - [vnet, show]
+        - [nsg, list]
+        - [nsg, show]
+        - [public-ip, list]
+        - [public-ip, show]
+        - [lb, list]
+        - [lb, show]
+        - [nic, list]
+        - [nic, show]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only az network vnet/nsg/public-ip/lb/nic list/show is permitted in staging and prod"
+
+  # az aks list|show
+  - id: az-read-aks
+    match:
+      argv0: az
+      verb: {eq: aks}
+      positional_seq_prefix_any:
+        - [list]
+        - [show]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only az aks list/show is permitted in staging and prod"
+
+  # az acr list|show (NOT `az acr credential show` — registry creds, denied in base.yaml)
+  - id: az-read-acr
+    match:
+      argv0: az
+      verb: {eq: acr}
+      positional_seq_prefix_any:
+        - [list]
+        - [show]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only az acr list/show is permitted in staging and prod"
+
+  # az keyvault list|show (NOT `az keyvault secret ...` — secret material, denied in base.yaml)
+  - id: az-read-keyvault
+    match:
+      argv0: az
+      verb: {eq: keyvault}
+      positional_seq_prefix_any:
+        - [list]
+        - [show]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only az keyvault list/show (vault metadata) is permitted in staging and prod"
+
+  # az sql server|db list|show
+  - id: az-read-sql
+    match:
+      argv0: az
+      verb: {eq: sql}
+      positional_seq_prefix_any:
+        - [server, list]
+        - [server, show]
+        - [db, list]
+        - [db, show]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only az sql server/db list/show is permitted in staging and prod"
+
+  # az cosmosdb list|show (NOT `az cosmosdb keys list` — account keys, denied in base.yaml)
+  - id: az-read-cosmosdb
+    match:
+      argv0: az
+      verb: {eq: cosmosdb}
+      positional_seq_prefix_any:
+        - [list]
+        - [show]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only az cosmosdb list/show is permitted in staging and prod"
+
+  # az monitor metrics|activity-log list
+  - id: az-read-monitor
+    match:
+      argv0: az
+      verb: {eq: monitor}
+      positional_seq_prefix_any:
+        - [metrics, list]
+        - [activity-log, list]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only az monitor metrics/activity-log list is permitted in staging and prod"
+
+  # az resource list|show
+  - id: az-read-resource
+    match:
+      argv0: az
+      verb: {eq: resource}
+      positional_seq_prefix_any:
+        - [list]
+        - [show]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only az resource list/show is permitted in staging and prod"
+
+  # az account list|show
+  - id: az-read-account
+    match:
+      argv0: az
+      verb: {eq: account}
+      positional_seq_prefix_any:
+        - [list]
+        - [show]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only az account list/show is permitted in staging and prod"
+
+  # High-value mutation deny for audit clarity (kept as its own id for the corpus pin).
+  # `az vm delete` / `az group delete` -> positional "delete"; denies deletes across services.
+  - id: az-no-delete
+    match:
+      argv0: az
+      resource_any: [delete]
+    effect: deny
+    environments: [staging, prod]
+    reason: "az delete is destructive and not permitted in read-only mode"
+
+  # Mutation deny table (property pin): known az mutation verbs at ANY positional depth are denied
+  # so deny > allow catches a mutation that also trails a literal read verb (e.g.
+  # `az vm delete -g g --name x list`, `az vm generalize list`) — closing the P5a fail-open where
+  # mutations relied solely on __default_deny__. Fix round 2 COMPLETES this bare-verb table and adds
+  # az-no-compound-mutations (a prefix guard) below, for parity with the gcloud hardening. `delete`
+  # is handled by az-no-delete above (kept separate for its corpus rule-id pin); everything else
+  # destructive lands here. Operator-extensible per deployment.
+  - id: az-no-mutations
+    match:
+      argv0: az
+      resource_any:
+        - create
+        - update
+        - set
+        - add
+        - remove
+        - start
+        - stop
+        - restart
+        - reset
+        - deallocate
+        - redeploy
+        - deploy
+        - purge
+        - move
+        - attach
+        - detach
+        - enable
+        - disable
+        - regenerate
+        - renew
+        - invoke
+        - import
+        - export
+        - restore
+        - failover
+        # Fix round 2: reviewer-named (`generalize`) + common bare verbs the table missed. az
+        # targets are FLAGS, so a trailing `list`/`show` is rejected by the real az CLI (the az
+        # residual is non-executable) — but harden it anyway for defense-in-depth + audit honesty.
+        # `delete` stays in az-no-delete above.
+        - generalize
+        - capture
+        - clone
+        - upgrade
+        - downgrade
+        - migrate
+        - cancel
+        - wait
+        - revoke
+        - activate
+        - deactivate
+        - rotate
+        - approve
+        - reject
+        - sync
+        - reimage
+        - convert
+        - run
+        - execute
+        - promote
+        - provision
+        - deprovision
+    effect: deny
+    environments: [staging, prod]
+    reason: "az mutation verbs are not permitted in read-only mode"
+
+  # Compound-verb-prefix guard (Fix round 2 — defense-in-depth + audit honesty). Some az actions are
+  # COMPOUND `verb-noun` forms (`run-command`, `reset-ssh`, ...). This rule DENIES when ANY
+  # positional's prefix (before the first `-`) is a mutation verb, catching the whole
+  # `set-*`/`add-*`/`run-*`/... family and every bare mutation verb without enumerating each. az
+  # targets are flags so its residual is non-executable, but this keeps az at parity with gcloud.
+  # Ordered AFTER az-no-delete so `delete` keeps its `az-no-delete` audit id.
+  - id: az-no-compound-mutations
+    match:
+      argv0: az
+      positional_verb_prefix_any:
+        - set
+        - add
+        - remove
+        - delete
+        - create
+        - update
+        - patch
+        - replace
+        - put
+        - insert
+        - start
+        - stop
+        - restart
+        - reset
+        - suspend
+        - resume
+        - deploy
+        - apply
+        - import
+        - export
+        - migrate
+        - clone
+        - copy
+        - move
+        - rename
+        - attach
+        - detach
+        - mount
+        - unmount
+        - enable
+        - disable
+        - activate
+        - deactivate
+        - promote
+        - failover
+        - rollback
+        - undelete
+        - purge
+        - clear
+        - expire
+        - revoke
+        - resize
+        - scale
+        - upgrade
+        - downgrade
+        - recreate
+        - rebuild
+        - redeploy
+        - reimage
+        - abandon
+        - drain
+        - cordon
+        - uncordon
+        - evict
+        - cancel
+        - abort
+        - kill
+        - terminate
+        - destroy
+        - rotate
+        - regenerate
+        - renew
+        - refresh
+        - backup
+        - restore
+        - snapshot
+        - invoke
+        - run
+        - exec
+        - execute
+        - call
+        - ssh
+        - scp
+        - tunnel
+        - connect
+        - diagnose
+        - simulate
+        - wait
+        - bind
+        - unbind
+        - grant
+        - generalize
+        - capture
+        - deallocate
+        - override
+        - provision
+        - deprovision
+        - convert
+        - encrypt
+        - decrypt
+        - sync
+        - replicate
+        - approve
+        - reject
+        - wipe
+        - lock
+        - unlock
+    effect: deny
+    environments: [staging, prod]
+    reason: "az compound mutation verbs (verb-noun, e.g. run-command) are not permitted in read-only mode"

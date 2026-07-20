@@ -1,0 +1,109 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "schemaVersion": 39,
+  "tags": ["opendevops"],
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "utc",
+  "title": "opendevops — service ops",
+  "uid": "opendevops-ops",
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Runs started (rate)",
+      "description": "Agent runs kicked off by the webhook app, by originating interface.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (interface) (rate(opendevops_runs_started_total[5m]))",
+          "legendFormat": "{{interface}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Policy / webhook denials (rate)",
+      "description": "LIVE: webhook unauthorized. PRE-PROVISIONED: tool-layer policy denials (needs the audit-metrics exporter).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(opendevops_webhook_requests_total{outcome=\"unauthorized\"}[5m]))",
+          "legendFormat": "webhook unauthorized",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(opendevops_policy_denials_total[5m]))",
+          "legendFormat": "policy denials (pre-provisioned)",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "gauge",
+      "title": "Daily spend vs cap (global)",
+      "description": "PRE-PROVISIONED: fraction of the global daily USD envelope consumed (needs the spend exporter).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.8 },
+              { "color": "red", "value": 1.0 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "opendevops_daily_spend_usd{scope=\"global\"} / opendevops_daily_cap_usd{scope=\"global\"}",
+          "legendFormat": "global",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Audit shipper throughput / lag",
+      "description": "Vector: events read from the per-run chains vs written to the durable spool (a gap = shipper lag).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "eps" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(vector_component_received_events_total{component_id=\"audit_chains\"}[5m]))",
+          "legendFormat": "read from chains",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(vector_component_sent_events_total{component_id=\"durable_spool\"}[5m]))",
+          "legendFormat": "written to spool",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}

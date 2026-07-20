@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Sync dependencies
+        # p2 (AsyncSqliteSaver) + server (langgraph-sdk, redis, fastapi) + dev (pytest, fakeredis)
+        # are all exercised by the test suite.
+        run: uv sync --extra p2 --extra server --extra dev
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: Mypy
+        # ops/ (the P3 ops-tool CLIs) is included deliberately — it is not in the shipped wheel.
+        run: uv run mypy src ops
+
+      - name: Pytest
+        run: uv run pytest

@@ -1,0 +1,56 @@
+# kubectl-read.yaml — the P1 read-only kubectl pack.
+#
+# tool_family binds this pack's allow rule to the "kubectl" credential family: at boot (T8)
+# the loader's check_credential_coverage() refuses to start if no kubectl credential is
+# configured, so an allow can never outrun its credentials.
+#
+# flags_allowed is the per-binary flag allowlist the engine enforces AFTER an allow matches:
+# any flag on the argv that is not listed here is denied (__flag_not_allowed__). Note the
+# deliberate omission of --watch: it hangs a non-interactive run and is never permitted.
+version: 1
+metadata:
+  name: kubectl-read
+  owner: opendevops
+  updated: "2026-07-18"
+tool_family: kubectl
+
+flags_allowed:
+  kubectl:
+    - --namespace
+    - --all-namespaces
+    - --output
+    - --selector
+    - --context
+    - --tail
+    - --previous
+    - --since
+    - --field-selector
+    - --show-labels
+    - --container
+    - --sort-by
+    - --no-headers
+
+rules:
+  # Read-only kubectl verbs, permitted in staging and prod. `auth` covers `kubectl auth
+  # can-i` self-checks (harmless, read-only). Secret reads are still blocked by base.yaml's
+  # no-secret-reads, which is evaluated as a hard deny.
+  - id: kubectl-read-verbs
+    match:
+      argv0: kubectl
+      verb:
+        in:
+          - get
+          - describe
+          - logs
+          - top
+          - events
+          - explain
+          - api-resources
+          - api-versions
+          - cluster-info
+          - version
+          - auth
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only kubectl verbs are permitted in staging and prod"

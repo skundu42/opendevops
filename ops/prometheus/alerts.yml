@@ -1,0 +1,106 @@
+# Prometheus alert rules for opendevops (P3, T18) — the PLAN §6 cross-checks.
+#
+# Honesty note on metric availability (which alerts fire TODAY vs are PRE-PROVISIONED):
+#   * LIVE now — series the P3 webhook app (prometheus_client) and Vector already export:
+#       opendevops_webhook_requests_total{route,outcome}, opendevops_runs_started_total{...},
+#       vector_component_* / up{}.
+#   * PRE-PROVISIONED — series emitted by components that land in P4 / with a spend exporter:
+#       opendevops_policy_denials_total (tool-layer denials — a metrics exporter over the audit
+#       stream), opendevops_daily_spend_usd (a spend exporter mirroring the RedisDailyCounter),
+#       opendevops_scheduler_last_success_timestamp_seconds (the P4 APScheduler service).
+#     Prometheus tolerates a rule whose series does not exist yet — it simply never fires until the
+#     series appears, so wiring the alerting now means it is ready the moment the exporter ships.
+
+groups:
+  # -- policy-denial spike (bypass-probing signal, PLAN §6) -------------------------------------
+  - name: opendevops-policy
+    rules:
+      # LIVE: a burst of webhook-layer auth failures — someone probing the ingress with bad tokens.
+      - alert: WebhookUnauthorizedSpike
+        expr: sum(rate(opendevops_webhook_requests_total{outcome="unauthorized"}[5m])) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated unauthorized webhook requests (possible ingress probing)"
+          description: "> 0.2 unauthorized webhook req/s for 10m — check source IPs and the gateway token."
+
+      # PRE-PROVISIONED: a spike in tool-layer policy DENY decisions (argv-bypass probing) — fires
+      # once an audit-metrics exporter publishes opendevops_policy_denials_total{rule_id}.
+      - alert: PolicyDenialSpike
+        expr: sum(rate(opendevops_policy_denials_total[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Policy-denial rate elevated (possible bypass probing)"
+          description: "Tool-call denials > 0.5/s for 10m — inspect the audit log for the offending run."
+
+  # -- daily spend > 80% of cap (PLAN §6) ------------------------------------------------------
+  - name: opendevops-budget
+    rules:
+      # PRE-PROVISIONED: needs opendevops_daily_spend_usd{scope} + opendevops_daily_cap_usd{scope}
+      # from a spend exporter mirroring the RedisDailyCounter (see ops/maintenance.py spend-report).
+      - alert: DailySpendOver80Percent
+        expr: |
+          opendevops_daily_spend_usd{scope="global"}
+            / on() opendevops_daily_cap_usd{scope="global"} > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Global daily spend over 80% of cap"
+          description: "Daily USD envelope {{ $value | humanizePercentage }} consumed — runs will start refusing at 100%."
+
+  # -- scheduler silence > 1.5x period (PRE-PROVISIONED for P4, PLAN §6) ------------------------
+  - name: opendevops-scheduler
+    rules:
+      # PRE-PROVISIONED: the P4 APScheduler service exports its last-success timestamp; alert when a
+      # job hasn't succeeded for > 1.5x its 24h period (the drift/cert/backup hygiene jobs).
+      - alert: SchedulerSilence
+        expr: time() - opendevops_scheduler_last_success_timestamp_seconds > 1.5 * 86400
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scheduled job silent for > 1.5x its period"
+          # No {{ $labels.* }} interpolation: the P4 scheduler metric's label schema isn't defined
+          # yet, so the description must not reference a label that does not exist. Rule stays inert
+          # until opendevops_scheduler_last_success_timestamp_seconds ships (see header note).
+          description: "No successful scheduled run in over 36h (> 1.5x the 24h period) — the scheduler may be down."
+
+  # -- audit-shipper lag (PLAN §6) -------------------------------------------------------------
+  - name: opendevops-audit-shipper
+    rules:
+      # LIVE: Vector is down / unscrapable — audit lines stop reaching the durable sink.
+      - alert: AuditShipperDown
+        expr: up{job="vector"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Vector audit shipper is down"
+          description: "The audit shipper has been unscrapable for 5m — audit lines are not reaching the durable sink."
+
+      # LIVE: Vector is receiving audit events but the durable sink has sent none for 10m (a stalled
+      # or erroring sink) — the lag signal.
+      - alert: AuditShipperLag
+        expr: |
+          sum(rate(vector_component_received_events_total{component_id="audit_chains"}[10m])) > 0
+            and sum(rate(vector_component_sent_events_total{component_id="durable_spool"}[10m])) == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Audit shipper is lagging"
+          description: "Vector is reading audit events but the durable spool sink has emitted none for 10m."
+
+      # LIVE: the sink is erroring outright.
+      - alert: AuditShipperErrors
+        expr: sum(rate(vector_component_errors_total{component_id="durable_spool"}[10m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Audit shipper sink errors"
+          description: "Vector's durable_spool sink is reporting errors — audit shipping may be partial."

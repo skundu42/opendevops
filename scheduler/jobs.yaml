@@ -1,0 +1,63 @@
+# scheduler/jobs.yaml — the jobs our own APScheduler service runs (P4, T20; PLAN §3.7).
+#
+# We schedule on OUR scheduler, never LangGraph Server crons: it removes the server-license
+# dependency and unifies cron + event triggers under one mechanism. Each job's schema is validated
+# fail-closed by opendevops.interfaces.scheduler.jobs (extra keys / bad triggers are a boot error).
+#
+# Per-job shape:
+#   id          unique job id (used as the APScheduler job id + log label)
+#   trigger     exactly one of {cron: "<5-field crontab>"} | {interval: {<unit>: <n>}} (UTC)
+#               interval units: weeks|days|hours|minutes|seconds
+#   command     the agent TASK TEXT a fresh scheduled run executes (drift/cert/backup RCA prompts)
+#     -- OR --
+#   job_type    a registered non-agent runner: hygiene | escalation-sweep
+#   timeout_s   caller-side cancel deadline the service bounds the run with (belt to the gateway
+#               wall-clock)
+#   environment policy overlay for a command run (staging|prod; default staging)
+#
+# The FIXED per-job knobs are NOT configurable here — the loader applies them to EVERY job:
+#   misfire_grace_time=300  coalesce=true  max_instances=1  jitter=60s
+# (run a job missed by <5min, collapse a backlog into one, never overlap a job with itself, and
+# spread the fleet ~60s off the cron edge so N jobs never fire simultaneously).
+
+jobs:
+  # --- agent jobs (a scheduled run whose task text is an RCA/verification prompt) ---
+
+  - id: drift-detection
+    trigger: {cron: "0 * * * *"}          # hourly, on the hour (+ jitter)
+    command: >-
+      Detect configuration drift in the managed Kubernetes namespaces: compare the live cluster
+      state against the declared manifests, and for every resource that differs, report the object,
+      the drifted fields, and the most likely cause. Do not remediate — read-only investigation.
+    timeout_s: 600
+    environment: staging
+
+  - id: cert-expiry
+    trigger: {cron: "30 6 * * *"}         # daily 06:30 UTC (+ jitter)
+    command: >-
+      Check TLS certificate expiry across the managed ingress and service endpoints. List every
+      certificate expiring within 30 days with its subject, issuer, and days remaining, and flag any
+      already expired. Read-only — do not rotate anything.
+    timeout_s: 600
+    environment: staging
+
+  - id: backup-verification
+    trigger: {cron: "0 4 * * *"}          # daily 04:00 UTC (+ jitter)
+    command: >-
+      Verify last night's backups: confirm each expected backup artifact exists, is non-empty, is
+      within its freshness SLA, and (where a restore-check manifest exists) passes its integrity
+      probe. Report any missing, stale, or failed backup. Read-only investigation.
+    timeout_s: 900
+    environment: staging
+
+  # --- non-agent jobs (registered job_type runners; not an agent turn) ---
+
+  - id: hygiene
+    trigger: {cron: "0 3 * * *"}          # daily 03:00 UTC (+ jitter)
+    job_type: hygiene                     # ops/maintenance.py: prune idle threads, spend mirror, pg-dump
+    timeout_s: 1800
+
+  - id: escalation-sweep
+    trigger: {interval: {minutes: 5}}     # every 5 min (+ jitter): the on_timeout: deny enforcer
+    job_type: escalation-sweep            # ops/maintenance.py sweep_timed_out_escalations
+    timeout_s: 300

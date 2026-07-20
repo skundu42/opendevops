@@ -1,0 +1,62 @@
+# opendevops executor ingress restriction + egress allowlist + IMDS block (P5d). Applies to every
+# executor pod in the namespace.
+#
+# INGRESS (defense-in-depth): default-deny ingress except from the agent workload — only the agent
+# pod may reach POST /execute. The token binds INTEGRITY at the app layer (only a policy-authorized,
+# signed decision executes); this ingress rule adds NETWORK reachability restriction so nothing else
+# in the cluster can even open a connection. RECOMMENDED transport hardening: mTLS between the agent
+# and the service (e.g. a service mesh) to add transport-level authentication on top of the signed
+# token — doc-only here; cert management is out of scope.
+#
+# EGRESS: default-deny except DNS and an allowlisted CIDR range with the cloud instance metadata
+# endpoint (169.254.169.254) and the whole link-local range EXCLUDED — so a compromised tool cannot
+# reach IMDS to steal node credentials (SSRF / credential-theft blast-radius control).
+#
+# tests/unit/test_executor_manifests.py asserts the Ingress restriction (non-vacuous from-selector)
+# + the Egress policyType + the IMDS 169.254.169.254/32 except entry are present.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opendevops-executor-netpol
+  namespace: opendevops-executor
+  labels:
+    app: opendevops-executor
+spec:
+  podSelector:
+    matchLabels:
+      app: opendevops-executor
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # ONLY the agent workload may reach /execute (pods labelled app: opendevops in the
+    # opendevops namespace). namespaceSelector AND podSelector in ONE peer = the intersection.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: opendevops
+          podSelector:
+            matchLabels:
+              app: opendevops
+      ports:
+        - protocol: TCP
+          port: 8090
+  egress:
+    # 1. DNS resolution only (kube-dns).
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 2. Allowlisted egress to the cluster API / cloud control-plane, with IMDS + link-local blocked.
+    #    Narrow the 0.0.0.0/0 base to the concrete API/endpoint CIDRs per environment before deploy;
+    #    the `except` list is the fail-closed guard that must remain regardless of how it is narrowed.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.169.254/32   # cloud instance metadata service (IMDS) — BLOCKED
+              - 169.254.0.0/16       # link-local (covers IMDSv2 hop + fd00:ec2 aliases' v4)
+      ports:
+        - protocol: TCP
+          port: 443

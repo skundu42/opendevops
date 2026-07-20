@@ -1,0 +1,28 @@
+{
+  "scenario": "escalated-delete",
+  "environment": "staging",
+  "user": "the pod web-7d9c8b6f5-abcde in namespace web is wedged — delete it so it gets recreated",
+  "approver": "alice",
+  "golden": [
+    { "role": "user", "content": "the pod web-7d9c8b6f5-abcde in namespace web is wedged — delete it so it gets recreated" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "name": "run_command", "args": { "argv": ["kubectl", "delete", "pod", "web-7d9c8b6f5-abcde", "-n", "web"] }, "id": "del1", "type": "tool_call" }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "del1", "content": "pod deleted" },
+    {
+      "role": "assistant",
+      "content": "Deleted pod web-7d9c8b6f5-abcde in namespace web (after human approval). Its Deployment/ReplicaSet will recreate a fresh pod automatically; watch `kubectl get pods -n web` to confirm the replacement reaches Ready."
+    }
+  ],
+  "replay": [
+    {
+      "argv": ["kubectl", "delete", "pod", "web-7d9c8b6f5-abcde", "-n", "web"],
+      "exit_code": 0,
+      "output": "pod \"web-7d9c8b6f5-abcde\" deleted"
+    }
+  ]
+}

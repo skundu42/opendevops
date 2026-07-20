@@ -1,0 +1,75 @@
+# Vector: audit-chain shipper for opendevops (P3, T18).
+#
+# The agent writes per-run hash-chained audit files: /audit/<run_id>.jsonl (one JSON line per
+# event; PLAN §3.6). Vector tails every per-run file and MERGES them into a durable spool sink,
+# APPEND-ONLY and dedupe-free: each line is copied verbatim (raw JSONL preserved in `.message`) and
+# in append order, so `opendevops audit verify --dir <spool>` re-groups the merged stream by each
+# event's `run_id` field and verifies every per-run subsequence as an independent hash chain (the
+# CLI auto-detects a merged file — >1 run_id — and regroups; a single-run file verifies as one
+# chain). Vector never rewrites or reorders a line, and each per-run source file is single-writer, so
+# line order WITHIN a run_id is preserved across the merge — the hash chain survives shipping
+# byte-for-byte.
+#
+# Durable sink (OQ7 — audit durable sink + retention, compliance owner): the DEFAULT is a local
+# spool directory (a bind/volume the agent role cannot reach — see PLAN §3.6 "the durable sink
+# whose bucket/table policy denies every agent role"). S3 Object Lock / Loki blocks are provided
+# commented for the operator to choose per OQ7.
+
+# Persist file read-checkpoints so a Vector restart resumes tailing where it left off (never
+# re-ships already-shipped lines, never skips).
+data_dir: /spool/.vector
+
+sources:
+  # The per-run audit chains. read_from: beginning so no event is ever missed on first boot.
+  audit_chains:
+    type: file
+    include:
+      - /audit/*.jsonl
+    read_from: beginning
+    # `message_start_indicator` is unset: each physical line is one whole event, so the default
+    # newline framing is exactly right — no multiline reassembly that could corrupt a chain line.
+
+  # Vector's own health/throughput metrics — scraped by Prometheus to alert on shipper lag.
+  vector_internal:
+    type: internal_metrics
+
+sinks:
+  # DEFAULT durable sink: a local spool directory, one merged file per UTC day. `codec: text`
+  # emits the raw `.message` (the original JSONL line) verbatim — append-only, no re-encoding.
+  durable_spool:
+    type: file
+    inputs:
+      - audit_chains
+    path: /spool/audit-merged-%Y-%m-%d.jsonl
+    encoding:
+      codec: text
+
+  # Vector's health/lag metrics for Prometheus (buffer depth, events sent, errors) at :9598/metrics.
+  vector_metrics:
+    type: prometheus_exporter
+    inputs:
+      - vector_internal
+    address: 0.0.0.0:9598
+
+  # --- OQ7 alternatives — uncomment ONE and point the durable retention at it -------------------
+  #
+  # S3 with Object Lock (WORM retention; the bucket policy denies every agent IAM role):
+  # durable_s3:
+  #   type: aws_s3
+  #   inputs: [audit_chains]
+  #   bucket: opendevops-audit
+  #   region: us-east-1
+  #   key_prefix: "audit/date=%Y-%m-%d/"
+  #   encoding:
+  #     codec: text
+  #   # Enable Object Lock (governance/compliance) + a retention period on the bucket itself.
+  #
+  # Loki / SIEM forwarding (INSERT-only stream; label by run_id for per-chain queries):
+  # durable_loki:
+  #   type: loki
+  #   inputs: [audit_chains]
+  #   endpoint: http://loki:3100
+  #   encoding:
+  #     codec: text
+  #   labels:
+  #     job: opendevops-audit

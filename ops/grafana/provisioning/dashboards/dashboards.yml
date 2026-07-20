@@ -1,0 +1,13 @@
+# Grafana dashboard provider (P3, T18): loads the JSON dashboards mounted at the path below.
+apiVersion: 1
+
+providers:
+  - name: opendevops
+    orgId: 1
+    folder: opendevops
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

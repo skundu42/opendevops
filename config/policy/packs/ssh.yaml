@@ -1,0 +1,116 @@
+# ssh.yaml — the P5b read-only remote-exec pack for the structured ssh_run(host, argv) tool.
+#
+# ssh_run is NOT run_command: `ssh` as a run_command argv0 is hard-denied by base.yaml
+# (interpreters-hard-deny). This pack authorizes the SEPARATE, credential-pinned ssh_run tool,
+# matched by tool_name. It gates the remote command with a fail-CLOSED positive allowlist on the
+# remote command PATH (argv0 + read subcommand), not a bare argv0 pin.
+#
+# WHY a path allowlist (the multi-mode hazard). A pin on argv[0] ALONE is fail-OPEN for a
+# multi-mode binary, because its MUTATING modes share the same program name:
+#   * systemctl restart/stop/start/reload/enable/disable/mask/isolate/poweroff/reboot/halt/kexec
+#   * journalctl --vacuum-*/--rotate/--flush/--sync/... (its mutations are FLAGS, not subcommands)
+#   * hostname <name> SETS the hostname; ss -K / -tnK (bundled) kills sockets
+# A "read-only" (channel: ro) pack must NEVER authorize any of those. So — exactly as the P5a
+# cloud packs invert to a positive `positional_seq_prefix_any` read-path allowlist — the multi-mode
+# binaries are pinned to their READ command PATHS (`[systemctl, status]`, ...), the vetted pure-read
+# SINGLE-mode binaries keep the argv0 pin, journalctl's mutating flags are compensated by a DENY
+# (deny > allow), and `hostname`/`ss` are DROPPED entirely (no clean positive read-path pin exists;
+# `uname -n` covers host identity). Anything not positively allowlisted -> default-deny (fail-closed).
+#
+# The host predicate is unchanged: ssh_host_in requires the model's `host` to be in the config
+# allowlist ${targets.ssh.hosts} (the SAME list the tool re-validates against — single source of
+# truth). This is REMOTE code execution, so the read allowlist is deliberately conservative:
+# status / diagnostic commands only — no shells, editors, pagers, package managers, and no arbitrary
+# file-content readers (`cat`/`less`/`tail` are intentionally EXCLUDED).
+#
+# tool_family: ssh binds the allow to the ssh credential family (the config-pinned key +
+# known_hosts); the boot coverage gate refuses to start unless targets.ssh.key_env is configured.
+# channel: ro — remote reads only (no rw channel in P5b). There is NO remote shell: ssh_run sends
+# argv shell-quoted (shlex.join), so ';', '&&', '|', '$(...)', globs and redirects are transmitted
+# as LITERAL argv elements, never interpreted by the remote POSIX login shell (a non-POSIX login
+# shell — csh/fish/cmd — is out of the stated threat model; the Linux-tool allowlist keeps the
+# residual narrow). A host or command outside the allowlists matches no allow rule and
+# DEFAULT-DENYs (fail-closed).
+version: 1
+metadata:
+  name: ssh-read
+  owner: opendevops
+  updated: "2026-07-19"
+tool_family: ssh
+
+rules:
+  # DENY (deny > allow, and independent of host — a mutation flag is refused everywhere): journalctl's
+  # destructive modes are FLAGS that share argv[0] with its reads, so the bare `[journalctl]` allow
+  # below cannot exclude them; this pins them out. Prefix + '='-split match (see _remote_flag_prefix_hit)
+  # catches `--vacuum-time=1s`, the `--vacuum-size`/`--vacuum-files` family, `--rotate`, `--flush`, etc.
+  - id: ssh-run-no-remote-mutation-flags
+    match:
+      tool_name: ssh_run
+      ssh_remote_flag_prefix_any:
+        - "--vacuum"                # --vacuum-time / --vacuum-size / --vacuum-files (deletes journal)
+        - "--rotate"                # rotate journal files
+        - "--flush"                 # flush /run journal into /var/log
+        - "--sync"                  # force a journal sync to disk
+        - "--relinquish-var"        # stop writing to /var journal
+        - "--smart-relinquish-var"  # conditional relinquish-var
+        - "--update-catalog"        # rebuild the message-catalog index
+        - "--setup-keys"            # generate FSS journal signing keys
+    effect: deny
+    environments: [staging, prod]
+    reason: "journalctl journal-mutation flags (vacuum/rotate/flush/...) are not permitted on a read-only ssh pack"
+
+  # ALLOW — MULTI-MODE binaries pinned to their READ command PATH (argv0 + read subcommand). Only the
+  # listed sequences match; the mutating modes (restart/stop/mask/poweroff/reboot/... for systemctl)
+  # are simply ABSENT -> default-deny. A flag-before-verb form like `[systemctl, --user, restart, x]`
+  # matches no sequence -> default-deny (this also fail-closed-denies `[systemctl, --user, status, x]`,
+  # an acceptable read loss). journalctl is a bare `[journalctl]` prefix — its mutation flags are denied
+  # by ssh-run-no-remote-mutation-flags above (deny > allow).
+  - id: ssh-run-read-commands-multimode
+    match:
+      tool_name: ssh_run
+      ssh_host_in: "${targets.ssh.hosts}"
+      ssh_remote_argv_seq_prefix_any:
+        - [systemctl, status]             # unit status
+        - [systemctl, show]               # unit/property inspection
+        - [systemctl, cat]                # show unit file contents
+        - [systemctl, is-active]          # active-state query
+        - [systemctl, is-enabled]         # enablement query
+        - [systemctl, is-failed]          # failed-state query
+        - [systemctl, list-units]         # loaded units
+        - [systemctl, list-unit-files]    # installed unit files
+        - [systemctl, list-sockets]       # socket units
+        - [systemctl, list-timers]        # timer units
+        - [systemctl, list-dependencies]  # unit dependency tree
+        - [systemctl, list-jobs]          # queued jobs
+        - [systemctl, get-default]        # default target
+        - [systemctl, show-environment]   # manager environment block
+        - [journalctl]                    # journal/log reads (mutation FLAGS denied above)
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only ssh_run remote status/diagnostic commands on an allowlisted host are permitted"
+
+  # ALLOW — vetted pure-read SINGLE-mode binaries: each has NO subcommand and NO state-changing flag
+  # (verified from their man pages), so a bare argv0 pin is safe here. `hostname` and `ss` are
+  # deliberately DROPPED (see header): `hostname <name>` SETS the hostname and `ss -K`/`-tnK` kills
+  # sockets — neither is argv0-safe and neither has a clean positive read-path pin (ss's kill is a
+  # bundlable SHORT flag); `uname -n` covers host identity. A dropped/unlisted binary -> default-deny.
+  - id: ssh-run-read-commands-singlemode
+    match:
+      tool_name: ssh_run
+      ssh_host_in: "${targets.ssh.hosts}"
+      ssh_remote_argv0:
+        in:
+          - df        # filesystem disk usage (read-only report)
+          - free      # memory usage (read-only report)
+          - uptime    # load / uptime (read-only report)
+          - uname     # kernel / architecture / host identity (`uname -n`)
+          - ps        # process listing (read-only report)
+          - vmstat    # virtual-memory / cpu stats (read-only report)
+          - iostat    # io stats (read-only report)
+          - lsblk     # block devices (read-only report)
+          - lscpu     # cpu topology (read-only report)
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only ssh_run remote status/diagnostic commands on an allowlisted host are permitted"

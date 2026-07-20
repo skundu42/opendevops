@@ -1,0 +1,238 @@
+# base.yaml — global deny/guard rules. Loaded FIRST, before any pack or env overlay.
+#
+# This file declares NO tool_family and contains NO allow rules: it only denies. Allows
+# live in packs/. Env overlays (envs/) may only ADD more denies/escalations.
+#
+# NOTE for the engine (T4): the deepagents filesystem built-ins
+#   write_todos / ls / read_file / write_file / edit_file / glob / grep
+# are allowed by tool_name at the ENGINE level, NOT via YAML. This file stays about
+# executables (argv0) and explicitly-denied tool_names only.
+version: 1
+metadata:
+  name: base
+  owner: opendevops
+  updated: "2026-07-18"
+acknowledged_default_deny: []
+
+rules:
+  # Interpreters, exec-wrappers, and net tools are never available: they would re-open the
+  # shell-string / arbitrary-exec surface the whole design deletes. Denied by argv0.
+  - id: interpreters-hard-deny
+    match:
+      argv0:
+        in:
+          - bash
+          - sh
+          - zsh
+          - dash
+          - ksh
+          - fish
+          - python
+          - python3
+          - perl
+          - ruby
+          - node
+          - awk
+          - gawk
+          - sed
+          - xargs
+          - find
+          - env
+          - eval
+          - watch
+          - expect
+          - socat
+          - nc
+          - ncat
+          - curl
+          - wget
+          - ssh
+          - scp
+          - sudo
+          - su
+          - doas
+    effect: deny
+    reason: "interpreters/exec-wrappers/net tools are not available; use direct commands"
+
+  # Credentials and identity are pinned by the executor; the model may not override them.
+  - id: kubectl-no-cred-override
+    match:
+      argv0: kubectl
+      flags_any: ["--kubeconfig", "--token", "--server", "--as", "--as-group"]
+    effect: deny
+    reason: "credential/identity flags are pinned by the executor"
+
+  - id: helm-no-cred-override
+    match:
+      argv0: helm
+      flags_any: ["--kubeconfig", "--kube-context", "--kube-token", "--kube-apiserver"]
+    effect: deny
+    reason: "credential/identity flags are pinned by the executor"
+
+  - id: gh-no-host-override
+    match:
+      argv0: gh
+      flags_any: ["--hostname"]
+    effect: deny
+    reason: "the GitHub host is pinned by the executor"
+
+  # Cloud credential/identity is pinned by the executor env (the read-only role/SA/SP behind
+  # targets.{aws,gcloud,azure}.credential_env); the model may not retarget identity or endpoint.
+  # Region/project selection is NOT identity (aws --region / gcloud --project stay allowed).
+  #
+  # aws: --endpoint-url re-points the API endpoint (could hit an attacker-controlled endpoint);
+  # AWS_* identity vars can only come from the process env, never argv, so no argv rule is needed.
+  - id: aws-no-endpoint-override
+    match:
+      argv0: aws
+      flags_any: ["--endpoint-url"]
+    effect: deny
+    reason: "the AWS endpoint/identity is pinned by the executor; --endpoint-url is not allowed"
+
+  # gcloud: --account / --impersonate-service-account / --configuration all retarget the active
+  # identity (a different principal or a stored named configuration with its own credentials).
+  - id: gcloud-no-cred-override
+    match:
+      argv0: gcloud
+      flags_any: ["--account", "--impersonate-service-account", "--configuration"]
+    effect: deny
+    reason: "the gcloud identity is pinned by the executor; account/impersonation is not allowed"
+
+  # az: --subscription is denied (JUDGMENT, documented in task-21-report). Unlike an AWS region or
+  # a GCP project (pure scope within one identity), an Azure subscription can belong to a DIFFERENT
+  # tenant, so letting the model choose it could cross a tenant boundary the operator did not pin.
+  # The subscription/tenant rides the injected credential context, not argv.
+  - id: az-no-subscription-override
+    match:
+      argv0: az
+      flags_any: ["--subscription"]
+    effect: deny
+    reason: "the Azure subscription/tenant is pinned by the executor; --subscription is not allowed"
+
+  # Secret objects are never read, even in read-only mode.
+  - id: no-secret-reads
+    match:
+      argv0: kubectl
+      verb: {in: [get, describe]}
+      resource_any: [secret, secrets]
+    effect: deny
+    reason: "reading Secret objects is not permitted"
+
+  # Cloud secret-material reads are denied even though they are technically "reads" — they
+  # exfiltrate secret bytes. This is the compensating control ATOP the read-only role's IAM Denies
+  # (PLAN §3.5): the role should already Deny these, and the policy layer denies them again.
+  #
+  # MATCHING (P5a fix round 1). aws/gcloud/az are now SUBCOMMAND_BINARIES (parsing.py), so
+  # `aws <service> <action>` parses with verb=<service> and action=positionals[0]; gcloud/az put
+  # the action at the LAST positional after their variable-depth groups. Secret-material actions
+  # are pinned at their position (aws: first_positional; gcloud/az: the distinctive GROUP token via
+  # resource_any, e.g. `secret`/`keys`/`credential`, which sits before the read verb) so a leaked
+  # or embedded read token in an argument can no longer launder the call. deny > allow, so these
+  # win over the read allows in the packs.
+  #
+  # aws: Secrets Manager get-secret-value, KMS decrypt, EC2 get-password-data (Windows admin
+  # password), STS get-session-token/get-federation-token (short-lived creds), ECR
+  # get-login-password/get-authorization-token (registry creds), RDS generate-db-auth-token (db
+  # auth token) all return secret/credential material. The action is positionals[0] after the
+  # service verb, so it is pinned with first_positional (NOT any-positional).
+  - id: aws-no-secret-reads
+    match:
+      argv0: aws
+      first_positional:
+        in:
+          - get-secret-value
+          - decrypt
+          - get-password-data
+          - get-login-password
+          - get-session-token
+          - get-federation-token
+          - get-authorization-token
+          - generate-db-auth-token
+    effect: deny
+    reason: "reading cloud secret/credential material (get-secret-value / kms decrypt / password-data / session tokens / registry creds / db auth token) is not permitted"
+
+  # aws: ssm get-parameter[s][-by-path] --with-decryption returns SecureString plaintext. The flag
+  # is unique to that decrypt path, so denying it wherever it appears is precise and robust.
+  - id: aws-no-ssm-decrypt
+    match:
+      argv0: aws
+      flags_any: ["--with-decryption"]
+    effect: deny
+    reason: "ssm parameter decryption (--with-decryption) returns secret material and is not permitted"
+
+  # gcloud: `secrets versions access` prints the secret payload. `access` is the exfiltration verb.
+  - id: gcloud-no-secret-access
+    match:
+      argv0: gcloud
+      resource_any: [access]
+    effect: deny
+    reason: "gcloud secret version access returns secret material and is not permitted"
+
+  # gcloud: `auth print-access-token` / `auth print-identity-token` print the ACTIVE credential's
+  # bearer/ID token to stdout — a direct credential exfiltration path. Pinned by the print verb.
+  - id: gcloud-no-token-print
+    match:
+      argv0: gcloud
+      resource_any: [print-access-token, print-identity-token]
+    effect: deny
+    reason: "gcloud auth print-access-token/print-identity-token exfiltrates the active credential and is not permitted"
+
+  # gcloud: `iam service-accounts keys create|list` mints/enumerates service-account KEY material.
+  # `keys` under the `iam` group is the discriminator (verb pins to iam, `keys` to the key path).
+  - id: gcloud-no-sa-keys
+    match:
+      argv0: gcloud
+      verb: {eq: iam}
+      resource_any: [keys]
+    effect: deny
+    reason: "gcloud iam service-accounts keys (create/list) exposes service-account key material and is not permitted"
+
+  # az: secret-material reads across services. `secret` (Key Vault secret show/download/list),
+  # `keys` (`az cosmosdb|storage account|servicebus|eventhub|redis|webapp|functionapp keys list` —
+  # connection strings / access keys), and `credential` (`az acr credential show`, `az ad sp
+  # credential *`) are the discriminating GROUP tokens; they precede the list/show verb, so matching
+  # them by resource_any denies the whole path regardless of the trailing read verb.
+  - id: az-no-secret-reads
+    match:
+      argv0: az
+      resource_any: [secret, keys, credential]
+    effect: deny
+    reason: "az secret-material reads (keyvault secret / * keys list / acr|sp credential) return secret material and are not permitted"
+
+  # kubectl --context must resolve to a configured allowed context. The value below is a
+  # raw config-interpolation reference resolved by the engine at decision time (T4).
+  - id: kubectl-context-allowlist
+    match:
+      argv0: kubectl
+      flag_value_not_in: {"--context": "${targets.kubernetes.allowed_contexts}"}
+    effect: deny
+    reason: "kubectl --context must be one of the configured allowed contexts"
+
+  # Subagent delegation is restricted to the single named log-summarizer (P5c). The deepagents
+  # `task` tool names its target in the `subagent_type` arg; this denies EVERY other target — and a
+  # missing/malformed one (fail-closed, see subagent_type_not_in). The log-summarizer itself is
+  # allowed at the ENGINE level (rule id `__subagent_allowed__`), like the built-in FS tools, because
+  # base.yaml declares no tool_family and carries no allow rules. deny > allow, so this rule always
+  # wins for any target other than the one permitted name.
+  - id: no-arbitrary-subagents
+    match:
+      tool_name: task
+      subagent_type_not_in: [log-summarizer]
+    effect: deny
+    reason: "only the log-summarizer subagent may be spawned; arbitrary subagents are disabled"
+
+  # Manual conversation compaction stays disabled in this deployment.
+  - id: no-compaction-tool
+    match:
+      tool_name: compact_conversation
+    effect: deny
+    reason: "manual conversation compaction is disabled in this deployment"
+
+  # deepagents 0.6.12 binds a shell-string `execute` tool even on StateBackend (see
+  # docs/api-notes.md D1). It is inert on StateBackend but still advertised to the model, so
+  # it is hard-denied here (T8 additionally unbinds it at the factory level).
+  - id: no-builtin-shell-execute
+    match:
+      tool_name: execute
+    effect: deny
+    reason: "the deepagents built-in shell tool is disabled; use run_command with argv"

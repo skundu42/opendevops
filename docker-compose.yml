@@ -1,0 +1,170 @@
+# opendevops service-mode stack (P3, T18).
+#
+# The self-hosted LangGraph Server (Postgres queue+checkpointer, Redis) fronted by Caddy
+# (bearer-token gate), with the audit trail shipped by Vector to a durable local spool and
+# Prometheus + Grafana for the operability dashboards/alerts.
+#
+# IMPORTANT (PLAN §3.7): this stack MUST NOT run on a Kubernetes cluster the agent itself manages
+# — a blast-radius rule. Run it on a dedicated ops VM (or a separate ops cluster). See
+# docs/DEPLOY.md.
+#
+# The langgraph-server image is BUILT from this repo, not pulled:
+#     langgraph build -t opendevops-langgraph:latest
+# (bakes the graph from langgraph.json). Everything else pulls upstream images.
+#
+# Validate this file without pulling/running anything:
+#     docker compose -f docker-compose.yml config -q
+#
+# Secrets are read from the environment (or a sibling .env); unset ones fall back to safe defaults
+# here so `config` stays quiet. Set GATEWAY_TOKEN + LANGSMITH_API_KEY before `up`.
+
+name: opendevops
+
+volumes:
+  postgres-data:
+  redis-data:
+  agent-audit:      # the per-run <run_id>.jsonl chain files (writer: server; reader: vector)
+  audit-spool:      # Vector's durable merged sink (OQ7 default: local spool dir)
+  prometheus-data:
+  grafana-data:
+  caddy-data:
+
+networks:
+  agent-net:
+
+services:
+  # -- the self-hosted LangGraph Server (our graph + webhook app) ------------------------------
+  langgraph-server:
+    image: ${LANGGRAPH_IMAGE:-opendevops-langgraph:latest}
+    working_dir: /deploy   # so config's relative ./audit and ./config/policy resolve under /deploy
+    restart: unless-stopped
+    expose:
+      - "8000"             # internal only — Caddy is the sole ingress (no host port published)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # The platform's own persistence + queue (NOT our LocalGateway saver — the server injects it).
+      DATABASE_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres?sslmode=disable
+      REDIS_URI: redis://redis:6379/1
+      # LangSmith licensing / tracing key — passed through from the environment (never baked).
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      # Our config: OPENDEVOPS_CONFIG names the config.yaml; load_config reads its sibling
+      # models.yaml / budgets.yaml + policy dir from the mounted ./config (grandparent = /deploy).
+      OPENDEVOPS_CONFIG: /deploy/config/config.yaml
+      # The webhook app runs INSIDE this container; its ServerGateway must reach the LOCAL server
+      # API directly on the loopback port (8000) — NOT the external Caddy URL (config.yaml
+      # server.url = :8123, a DIFFERENT container). This bypasses Caddy + its bearer on the
+      # in-process path (no api_key needed); external clients still go through Caddy. See DEPLOY.md.
+      OPENDEVOPS_SELF_URL: http://localhost:8000
+      # Webhook-app + server-client secrets (names are configured in config.yaml; values live here).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./config:/deploy/config:ro     # config.yaml + models.yaml + budgets.yaml + policy/
+      - agent-audit:/deploy/audit      # per-run audit chains (shared read-only with vector)
+    networks:
+      - agent-net
+
+  # -- Postgres: the server's durable queue + checkpointer store -------------------------------
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agent-net
+
+  # -- Redis: the server's task queue AND the shared RedisDailyCounter (budgets.daily) ----------
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - agent-net
+
+  # -- Caddy: TLS + bearer-token ingress gate in front of the server ---------------------------
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - langgraph-server
+    ports:
+      - "8123:8123"        # the public API port (matches config.yaml server.url)
+    environment:
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:-change-me-before-deploy}
+    volumes:
+      - ./ops/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    networks:
+      - agent-net
+
+  # -- Vector: ship the per-run audit chains to the durable spool sink (OQ7 default) ------------
+  vector:
+    image: timberio/vector:0.41.1-debian
+    restart: unless-stopped
+    depends_on:
+      - langgraph-server
+    expose:
+      - "9598"             # prometheus_exporter (Vector's own health/lag metrics)
+    volumes:
+      - ./ops/vector/vector.yaml:/etc/vector/vector.yaml:ro
+      - agent-audit:/audit:ro          # read the per-run chain files
+      - audit-spool:/spool:rw          # write the merged durable stream
+    command: ["--config", "/etc/vector/vector.yaml"]
+    networks:
+      - agent-net
+
+  # -- Prometheus: scrape the server /metrics + Vector lag metrics ------------------------------
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    depends_on:
+      - langgraph-server
+      - vector
+    expose:
+      - "9090"
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    networks:
+      - agent-net
+
+  # -- Grafana: provisioned Prometheus datasource + the ops dashboard ---------------------------
+  grafana:
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    networks:
+      - agent-net

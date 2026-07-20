@@ -1,0 +1,195 @@
+# aws-read.yaml — the P5a read-only AWS CLI pack (describe-* / list-* / get-* reads).
+#
+# tool_family binds this pack's allow rule to the "aws" credential family: at boot (T8) the
+# loader's check_credential_coverage() refuses to start unless targets.aws.credential_env names
+# ≥1 env var (the read-only role's AWS_* creds — see config.py CloudTarget). The executor injects
+# ONLY those vars for an aws-family exec (executor.build_env), plus KUBECONFIG=/dev/null.
+#
+# MATCHING NOTE (P5a fix round 1 — closed the fail-open). `aws` is now a SUBCOMMAND_BINARY
+# (parsing.py), so `aws <service> <action>` parses with verb=<service> and the ACTION is
+# ALWAYS positionals[0] (aws v2 is strictly `aws SERVICE OPERATION [args]` — one service level).
+# The read allow therefore pins the action with `first_positional` (NOT `resource_any`, which
+# matched a read token at ANY positional depth and was the fail-open). Because the action is
+# pinned at positionals[0], a mutation carrying a leaked/embedded read token in an argument
+# (e.g. `aws cloudformation delete-stack --stack-name describe-stacks`) parses with
+# first_positional=delete-stack and falls to __default_deny__ — the read allow cannot fire. This
+# holds even for an unknown value-flag: a leaked operand becomes positionals[1..], never [0].
+# This is a compensating control ATOP the read-only IAM role (PLAN §3.5); mutations not in the
+# allow-set fall to __default_deny__. Secret-material reads and cred/identity overrides are denied
+# in base.yaml (aws-no-secret-reads / aws-no-ssm-decrypt / aws-no-endpoint-override), deny > allow.
+#
+# flags_allowed is a curated, read-safe set (output/pagination/query + common read identifiers). It
+# is intentionally not exhaustive — AWS has thousands of per-command flags; operators extend it per
+# deployment. Its security role is third-order: the injection-capable / retargeting flags
+# (--cli-input-json, --endpoint-url, --with-decryption) are handled by denies / omission, so any
+# unlisted flag on an allowed read denies with __flag_not_allowed__ (defense-in-depth).
+version: 1
+metadata:
+  name: aws-read
+  owner: opendevops
+  updated: "2026-07-19"
+tool_family: aws
+
+flags_allowed:
+  aws:
+    # output / pagination / query
+    - --region
+    - --profile
+    - --output
+    - --query
+    - --page-size
+    - --max-items
+    - --max-results
+    - --starting-token
+    - --next-token
+    - --no-paginate
+    - --no-cli-pager
+    - --filters
+    - --filter
+    # common read identifiers (harmless selectors; the read-only role bounds what they can reach)
+    - --instance-ids
+    - --volume-ids
+    - --snapshot-ids
+    - --image-ids
+    - --subnet-ids
+    - --vpc-ids
+    - --group-ids
+    - --group-names
+    - --bucket
+    - --key
+    - --prefix
+    - --db-instance-identifier
+    - --db-cluster-identifier
+    - --cluster
+    - --clusters
+    - --services
+    - --stack-name
+    - --log-group-name
+    - --log-stream-name
+    - --log-stream-names
+    - --start-time
+    - --end-time
+    - --filter-pattern
+    - --function-name
+    - --name
+    - --names
+    - --path
+    - --parameter-filters
+    - --secret-id
+    - --table-name
+    - --key-id
+    - --alias-name
+    - --load-balancer-arns
+    - --target-group-arn
+    - --queue-url
+    - --topic-arn
+    - --resource-arn
+    - --namespace
+    - --metric-name
+    - --alarm-names
+    - --statistics
+    - --period
+
+rules:
+  # Read-only AWS actions, permitted in staging and prod. The action is pinned at first_positional
+  # (positionals[0] after the service verb) — see the MATCHING NOTE above. This set is
+  # representative of the describe-*/list-*/get-* read surface across the common services; it
+  # deliberately EXCLUDES the secret-material getters (get-secret-value / kms decrypt /
+  # password-data / session tokens / registry creds), which base.yaml denies, and iam reads (this
+  # pack denies iam wholesale below).
+  - id: aws-read-actions
+    match:
+      argv0: aws
+      first_positional:
+        in:
+        - get-caller-identity
+        - ls
+        - describe-instances
+        - describe-instance-status
+        - describe-security-groups
+        - describe-vpcs
+        - describe-subnets
+        - describe-volumes
+        - describe-snapshots
+        - describe-images
+        - describe-addresses
+        - describe-network-interfaces
+        - describe-availability-zones
+        - describe-regions
+        - describe-route-tables
+        - describe-load-balancers
+        - describe-target-groups
+        - describe-target-health
+        - describe-listeners
+        - describe-auto-scaling-groups
+        - describe-db-instances
+        - describe-db-clusters
+        - describe-db-snapshots
+        - describe-clusters
+        - list-clusters
+        - describe-services
+        - list-services
+        - describe-tasks
+        - list-tasks
+        - describe-task-definition
+        - describe-stacks
+        - list-stacks
+        - describe-stack-events
+        - describe-stack-resources
+        - list-stack-resources
+        - list-buckets
+        - list-objects
+        - list-objects-v2
+        - head-bucket
+        - head-object
+        - get-bucket-location
+        - list-functions
+        - get-function-configuration
+        - describe-log-groups
+        - describe-log-streams
+        - get-log-events
+        - filter-log-events
+        - describe-alarms
+        - list-metrics
+        - get-metric-statistics
+        - get-metric-data
+        - list-tables
+        - describe-table
+        - describe-key
+        - list-keys
+        - list-aliases
+        - list-secrets
+        - describe-secret
+        - describe-parameters
+        - get-parameter
+        - get-parameters
+        - get-parameters-by-path
+        - list-topics
+        - list-queues
+        - get-queue-attributes
+        - describe-account-attributes
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only aws describe-*/list-*/get-* actions are permitted in staging and prod"
+
+  # IAM is denied wholesale (audit clarity + defense-in-depth): iam reads enumerate principals and
+  # policies, and iam writes are mutations. `aws iam ...` -> verb=iam (the service); deny wins over
+  # any allow that might also match.
+  - id: aws-no-iam
+    match:
+      argv0: aws
+      verb: {eq: iam}
+    effect: deny
+    environments: [staging, prod]
+    reason: "aws iam is not permitted in read-only mode (principal/policy enumeration + writes)"
+
+  # High-value mutation deny for audit clarity (mutations otherwise fall to __default_deny__). The
+  # action is pinned at first_positional so an embedded read token cannot mask it.
+  - id: aws-no-terminate-instances
+    match:
+      argv0: aws
+      first_positional: {eq: terminate-instances}
+    effect: deny
+    environments: [staging, prod]
+    reason: "aws ec2 terminate-instances is destructive and not permitted"

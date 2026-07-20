@@ -1,0 +1,14 @@
+trip_ratio: 0.9
+fail_mode_on_counter_outage: closed
+per_run:
+  default:     {usd: 2.00, model_calls: 50, tool_calls: 100, shell_calls: 30,
+                recursion_limit: 250, wall_clock_s: 900}
+  profiles:
+    interactive: {usd: 5.00, wall_clock_s: 1800}
+    scheduled:   {usd: 2.00, model_calls: 40}
+    incident:    {usd: 10.00, wall_clock_s: 3600}
+daily:
+  global_usd: 50.00
+  per_principal_usd: 25.00
+  backend: sqlite            # P3: "sqlite" (default, durable local file) | "redis" (shared cross-worker/restart-surviving)
+  # redis_url: redis://redis:6379/0   # REQUIRED when backend: redis — the compose stack's redis service

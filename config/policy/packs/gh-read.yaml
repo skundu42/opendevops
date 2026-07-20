@@ -1,0 +1,88 @@
+# gh-read.yaml — the P2 read-only GitHub CLI pack (run / pr / issue read sub-subcommands).
+#
+# tool_family binds this pack's allow rules to the "gh" credential family (GH_TOKEN, pinned by
+# the executor env); at boot (T8) the loader's check_credential_coverage() refuses to start if
+# no gh credential is configured. The GitHub host is pinned too — base.yaml's gh-no-host-
+# override denies any --hostname.
+#
+# Sub-subcommand scoping. gh verbs (`gh pr ...`) take a further sub-subcommand as the first
+# positional (`gh pr view` -> verb=pr, first_positional=view). These rules constrain that
+# first positional to read-only actions via `first_positional`. That predicate is enforced by
+# the engine's _rule_matches (engine.py) — until the engine reads first_positional, a
+# mutating sub-subcommand (e.g. `gh pr merge`) would match on verb alone; see the corpus
+# tests marked xfail for the exact expected default-deny.
+#
+# Deliberately excluded: `gh run watch`/`download` (watch hangs a non-interactive run),
+# `--web` (opens a browser), and `gh api` (arbitrary REST; PR-based flows land in P5).
+#
+# flags_allowed is THIS pack's own complete gh allowlist (no cross-pack merge). --web is
+# intentionally omitted so `gh ... --web` denies with __flag_not_allowed__.
+version: 1
+metadata:
+  name: gh-read
+  owner: opendevops
+  updated: "2026-07-19"
+tool_family: gh
+
+flags_allowed:
+  gh:
+    - --repo
+    - --limit
+    - --json
+    - --jq
+    - --log
+    - --log-failed
+    - --branch
+    - --workflow
+
+rules:
+  # `gh run view|list` — CI run inspection. `watch`/`download` deliberately excluded.
+  - id: gh-read-run
+    match:
+      argv0: gh
+      verb: {eq: run}
+      first_positional: {in: [view, list]}
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only `gh run view|list` is permitted"
+
+  # `gh pr view|list|diff|checks|status` — PR inspection.
+  - id: gh-read-pr
+    match:
+      argv0: gh
+      verb: {eq: pr}
+      first_positional: {in: [view, list, diff, checks, status]}
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only `gh pr view|list|diff|checks|status` is permitted"
+
+  # `gh issue view|list|status` — issue inspection.
+  - id: gh-read-issue
+    match:
+      argv0: gh
+      verb: {eq: issue}
+      first_positional: {in: [view, list, status]}
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only `gh issue view|list|status` is permitted"
+
+  # `gh api` READS stay denied. P5f (gh-write) PARTIALLY LIFTS this deny: it is NARROWED from
+  # "deny every `gh api`" to "deny `gh api` whose METHOD is a READ (GET/HEAD)" so it no longer
+  # shadows the gh-write POST/PATCH/PUT allow (deny > allow — a broad deny here would keep the
+  # write allow DEAD). Net after narrowing: an allowlisted write method+path -> the gh-write
+  # `gh-api-write` allow wins; a GET/HEAD `gh api` (incl. the default, method-less form) -> this
+  # deny; every OTHER unlisted `gh api` (a non-allowlisted repo/path, DELETE, /orgs, actions
+  # secrets) -> the gh-write explicit denies AND/OR __default_deny__. Reads via `gh api` NEVER
+  # become allowed. The `gh_api` predicate is enforced by the engine (engine.py `_rule_matches`).
+  - id: gh-no-api
+    match:
+      argv0: gh
+      verb: {eq: api}
+      gh_api:
+        methods: [GET, HEAD]
+    effect: deny
+    environments: [staging, prod]
+    reason: "gh api reads are not allowed; only PR-based writes to allowlisted repos are permitted"

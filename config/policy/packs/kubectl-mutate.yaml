@@ -1,0 +1,131 @@
+# kubectl-mutate.yaml — the P2 staging-only mutation pack (apply / rollout / scale).
+#
+# tool_family binds this pack's allow rules to the "kubectl" credential family (the rw
+# kubeconfig — cfg.targets.kubernetes.kubeconfig_rw). At boot (T8) the loader's
+# check_credential_coverage() refuses to start if no kubectl credential is configured.
+#
+# SCOPE: every allow here is `environments: [staging]` and `channel: rw`. Production gets NO
+# mutate allows — a prod apply/rollout/scale therefore falls through to __default_deny__.
+#
+# flags_allowed is THIS pack's own complete kubectl allowlist. The engine enforces the
+# *winning rule's* pack list (no cross-pack merge), so this list must stand alone — it is not
+# extended by kubectl-read.yaml. Any flag on the argv not listed here is denied
+# (__flag_not_allowed__).
+#
+# DRY-RUN ENFORCEMENT (T12): a deploy must be dry-run-first and ENFORCED. Two rules cooperate
+# with the plain `kubectl-apply` allow below (engine precedence: deny > escalate > hook >
+# rewrite > allow; a hook that returns None ABSTAINS and precedence re-applies to the rest):
+#   * force-server-dry-run-first (rewrite) — a bare `apply` (no --dry-run) is rewritten to add
+#     `--dry-run=server`, so the first apply the model issues always dry-runs.
+#   * require-dry-run-before-real-apply (hook: dry_run_before_apply) — a REAL apply
+#     (`--dry-run=none`) is denied unless the identical staged manifest (by content sha256)
+#     already dry-ran on the server successfully in this run; `--dry-run=client` and a
+#     file-less apply are denied outright. The hook is a gatekeeper: it only DENIES or ABSTAINS,
+#     never allows — every permit still flows through `kubectl-apply` and its flags_allowed check.
+version: 1
+metadata:
+  name: kubectl-mutate
+  owner: opendevops
+  updated: "2026-07-19"
+tool_family: kubectl
+
+flags_allowed:
+  kubectl:
+    - --namespace
+    - --context
+    - --filename
+    - --kustomize
+    - --dry-run
+    - --output
+    - --selector
+    - --replicas
+    - --to-revision
+    - --record
+    - --current-replicas
+    - --resource-version
+
+rules:
+  # Dry-run-first: a bare `apply` (no --dry-run) is rewritten to add `--dry-run=server` so the
+  # first apply always validates against the server. flags_absent:[--dry-run] means an apply that
+  # already carries any --dry-run (server/client/none) is left untouched for the hook to judge.
+  - id: force-server-dry-run-first
+    match:
+      argv0: kubectl
+      verb: {eq: apply}
+      flags_absent: ["--dry-run"]
+    effect: rewrite
+    environments: [staging]
+    rewrite:
+      inject_flags: ["--dry-run=server"]
+    reason: "apply must be dry-run-first; injecting --dry-run=server"
+
+  # Enforce dry-run-before-real-apply: the hook denies a `--dry-run=none` apply whose manifest
+  # has no recorded successful server dry-run this run (and denies --dry-run=client / file-less
+  # applies). It returns None (abstain) for server/absent/already-verified, so those fall through
+  # to the kubectl-apply allow below.
+  - id: require-dry-run-before-real-apply
+    match:
+      argv0: kubectl
+      verb: {eq: apply}
+    effect: hook
+    environments: [staging]
+    hook: dry_run_before_apply
+    reason: "a real apply requires a prior successful server-side dry-run of the same manifest"
+
+  # Apply a manifest / kustomization. Staging-rw only. Reached only after the hook abstains (see
+  # above): a bare apply arrives here post-rewrite carrying --dry-run=server.
+  - id: kubectl-apply
+    match:
+      argv0: kubectl
+      verb: {eq: apply}
+    effect: allow
+    channel: rw
+    environments: [staging]
+    reason: "kubectl apply is permitted in staging (read-write)"
+
+  # rollout status / history / undo / restart — all acceptable at staging-rw.
+  - id: kubectl-rollout
+    match:
+      argv0: kubectl
+      verb: {eq: rollout}
+    effect: allow
+    channel: rw
+    environments: [staging]
+    reason: "kubectl rollout (status/history/undo/restart) is permitted in staging (read-write)"
+
+  # Scale a workload. Staging-rw only.
+  - id: kubectl-scale
+    match:
+      argv0: kubectl
+      verb: {eq: scale}
+    effect: allow
+    channel: rw
+    environments: [staging]
+    reason: "kubectl scale is permitted in staging (read-write)"
+
+  # Destructive delete of a workload → HUMAN APPROVAL (P2 escalate via interrupt()). delete has
+  # NO allow rule anywhere, so escalation IS the only path to a delete: on approve the tool runs
+  # once using channel rw; on reject/timeout it is denied. A --force/--cascade/--grace-period
+  # delete is caught by kubectl-mutate-no-force below (deny > escalate), so those never escalate.
+  # channel rw is REQUIRED on an escalate rule (an approved escalation executes) — see schema.py.
+  - id: kubectl-delete-workload-escalate
+    match:
+      argv0: kubectl
+      verb: {eq: delete}
+      resource_any: [pod, pods, pvc, persistentvolumeclaim, deployment, deployments]
+    effect: escalate
+    channel: rw
+    environments: [staging]
+    escalation: {timeout_s: 1800, on_timeout: deny}
+    reason: "destructive delete requires human approval"
+
+  # Defense-in-depth + audit clarity: force/cascade/grace-period semantics are never allowed,
+  # even on the otherwise-permitted apply. delete/replace have no allow at all — this deny
+  # makes the refusal explicit (and denies win over any allow by precedence).
+  - id: kubectl-mutate-no-force
+    match:
+      argv0: kubectl
+      verb: {in: [apply, delete, replace]}
+      flags_any: ["--force", "--grace-period", "--cascade"]
+    effect: deny
+    reason: "force/cascade semantics are not allowed; use plain apply/rollout undo"

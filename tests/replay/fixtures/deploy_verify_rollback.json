@@ -1,0 +1,74 @@
+{
+  "scenario": "deploy-verify-rollback",
+  "environment": "staging",
+  "user": "deploy the updated app config to staging, watch the rollout, and roll it back if it fails",
+  "golden": [
+    { "role": "user", "content": "deploy the updated app config to staging, watch the rollout, and roll it back if it fails" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "name": "write_file", "args": { "file_path": "/manifests/app.yaml", "content": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-config\n  namespace: web\ndata:\n  cache_size_mb: \"256\"\n  log_level: info\n" }, "id": "w1", "type": "tool_call" }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "w1", "content": "wrote /manifests/app.yaml" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "name": "run_command", "args": { "argv": ["kubectl", "apply", "-f", "/manifests/app.yaml"] }, "id": "a1", "type": "tool_call" }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "a1", "content": "server dry run ok" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "name": "run_command", "args": { "argv": ["kubectl", "apply", "-f", "/manifests/app.yaml", "--dry-run=none"] }, "id": "a2", "type": "tool_call" }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "a2", "content": "configured" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "name": "run_command", "args": { "argv": ["kubectl", "rollout", "status", "deployment/app", "-n", "web"] }, "id": "r1", "type": "tool_call" }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "r1", "content": "progress deadline exceeded" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "name": "run_command", "args": { "argv": ["kubectl", "rollout", "undo", "deployment/app", "-n", "web"] }, "id": "r2", "type": "tool_call" }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "r2", "content": "rolled back" },
+    {
+      "role": "assistant",
+      "content": "The config was validated with a server-side dry run, then applied for real. The deployment rollout did NOT become healthy — it hit its progress deadline (new pods never went Ready), so I rolled the deployment back to the previous revision, which succeeded. The applied ConfigMap change is still in place; recommend investigating why the new pods fail readiness before re-attempting the rollout."
+    }
+  ],
+  "replay": [
+    {
+      "argv": ["kubectl", "apply", "-f", "/manifests/app.yaml", "--dry-run=server"],
+      "exit_code": 0,
+      "output": "configmap/app-config configured (server dry run)"
+    },
+    {
+      "argv": ["kubectl", "apply", "-f", "/manifests/app.yaml", "--dry-run=none"],
+      "exit_code": 0,
+      "output": "configmap/app-config configured"
+    },
+    {
+      "argv": ["kubectl", "rollout", "status", "deployment/app", "-n", "web"],
+      "exit_code": 1,
+      "output": "Waiting for deployment \"app\" rollout to finish: 1 out of 3 new replicas have been updated...\nWaiting for deployment \"app\" rollout to finish: 1 old replicas are pending termination...\nerror: deployment \"app\" exceeded its progress deadline"
+    },
+    {
+      "argv": ["kubectl", "rollout", "undo", "deployment/app", "-n", "web"],
+      "exit_code": 0,
+      "output": "deployment.apps/app rolled back"
+    }
+  ]
+}

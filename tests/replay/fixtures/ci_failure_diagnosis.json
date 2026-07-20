@@ -1,0 +1,40 @@
+{
+  "scenario": "ci-failure-diagnosis",
+  "environment": "staging",
+  "user": "the CI run on main just went red — figure out which check broke and why",
+  "golden": [
+    { "role": "user", "content": "the CI run on main just went red — figure out which check broke and why" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "name": "run_command", "args": { "argv": ["gh", "run", "list", "--branch", "main", "--limit", "10"] }, "id": "g1", "type": "tool_call" }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "g1", "content": "run list" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "name": "run_command", "args": { "argv": ["gh", "run", "view", "8123456789", "--log-failed"] }, "id": "g2", "type": "tool_call" }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "g2", "content": "log failed" },
+    {
+      "role": "assistant",
+      "content": "The failing run is the most recent `CI` workflow on main (run 8123456789). The broken check is the `pytest` job: `tests/test_orders.py::test_discount_applies_once` failed with an AssertionError — the discount is being applied twice (expected total 90.0, got 81.0). This is a logic regression in the discount code, not flaky infra: the failure is deterministic and isolated to one test. Fix the double-application in the order-total calculation and re-run CI."
+    }
+  ],
+  "replay": [
+    {
+      "argv": ["gh", "run", "list", "--branch", "main", "--limit", "10"],
+      "exit_code": 0,
+      "output": "STATUS  TITLE                     WORKFLOW  BRANCH  EVENT  ID          ELAPSED  AGE\nX       fix: order totals         CI        main    push   8123456789  1m42s    3m\n✓       chore: bump deps          CI        main    push   8123400001  2m10s    2h\n✓       feat: add coupons         CI        main    push   8123399820  2m05s    5h"
+    },
+    {
+      "argv": ["gh", "run", "view", "8123456789", "--log-failed"],
+      "exit_code": 0,
+      "output": "CI\tpytest\t2026-07-19T11:04:12Z\t=================================== FAILURES ===================================\nCI\tpytest\t2026-07-19T11:04:12Z\t____________________ test_discount_applies_once ____________________\nCI\tpytest\t2026-07-19T11:04:12Z\t\nCI\tpytest\t2026-07-19T11:04:12Z\t    def test_discount_applies_once():\nCI\tpytest\t2026-07-19T11:04:12Z\t        cart = Cart(items=[Item(price=100.0)])\nCI\tpytest\t2026-07-19T11:04:12Z\t        cart.apply_discount(0.10)\nCI\tpytest\t2026-07-19T11:04:12Z\t>       assert cart.total() == 90.0\nCI\tpytest\t2026-07-19T11:04:12Z\tE       assert 81.0 == 90.0\nCI\tpytest\t2026-07-19T11:04:12Z\tE        +  where 81.0 = <Cart>.total()\nCI\tpytest\t2026-07-19T11:04:12Z\ttests/test_orders.py:42: AssertionError\nCI\tpytest\t2026-07-19T11:04:13Z\t=========================== short test summary info ============================\nCI\tpytest\t2026-07-19T11:04:13Z\tFAILED tests/test_orders.py::test_discount_applies_once - assert 81.0 == 90.0\nCI\tpytest\t2026-07-19T11:04:13Z\t1 failed, 341 passed in 27.13s"
+    }
+  ]
+}

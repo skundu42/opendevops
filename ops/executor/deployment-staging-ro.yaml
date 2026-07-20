@@ -1,0 +1,68 @@
+# opendevops executor service — hardened deployment (staging/ro) — P5d.
+#
+# Separate deployment per (environment, channel) so each holds EXACTLY ONE credential set: the
+# staging ro infra credential + secret source live in THIS pod's env only (never the agent's).
+# Every hardening field below is asserted by tests/unit/test_executor_manifests.py (parsed as YAML,
+# no live cluster): gVisor runtimeClass, non-root, read-only rootfs, cap-drop ALL, seccomp
+# RuntimeDefault, and a tmpfs /work. The egress allowlist + IMDS block live in networkpolicy.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opendevops-executor-staging-ro
+  namespace: opendevops-executor
+  labels: {app: opendevops-executor, env: staging, channel: ro}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: opendevops-executor, env: staging, channel: ro}
+  template:
+    metadata:
+      labels: {app: opendevops-executor, env: staging, channel: ro}
+    spec:
+      runtimeClassName: gvisor            # gVisor sandbox (PLAN §3.5)
+      automountServiceAccountToken: false
+      serviceAccountName: opendevops-executor-staging-ro
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: executor
+          image: opendevops-executor:latest
+          args:
+            - uvicorn
+            - opendevops.executor_service.service:build_app_from_env
+            - --factory
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8090"
+          ports:
+            - containerPort: 8090
+          env:
+            - name: OPENDEVOPS_EXECUTOR_ENV
+              value: "staging"
+            - name: OPENDEVOPS_EXECUTOR_CHANNEL
+              value: "ro"
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: work
+              mountPath: /work
+          resources:
+            limits: {cpu: "1", memory: 512Mi}
+            requests: {cpu: 100m, memory: 128Mi}
+      volumes:
+        - name: work                       # per-call tmpfs scratch (staging tmpdir + sandbox HOME)
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi

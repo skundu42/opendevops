@@ -1,0 +1,209 @@
+# gh-write.yaml — the P5f staging-only GitHub WRITE pack: PR-based remediation ONLY.
+#
+# This is the sharp edge of the whole system's write surface. It grants exactly three narrow,
+# staging-only, channel-rw capabilities backed by a fine-grained WRITE PAT (the gh `rw`
+# credential — targets.github.token_env_rw, injected as GH_TOKEN by the executor for a gh+rw
+# decision; NEVER the read PAT). Production stays read-only: every allow here is
+# `environments: [staging]`, mirroring kubectl-mutate's staging-only stance, so a prod attempt
+# falls through to __default_deny__.
+#
+# tool_family binds these allows to the "gh" credential family; the BOOT coverage gate
+# (check_credential_coverage) additionally requires the rw sub-credential ("gh-rw") because this
+# pack carries `channel: rw` allows — so a gh-write allow with no token_env_rw configured REFUSES
+# TO BOOT (agent.py `_configured_credential_families` + loader `_RW_BOOT_GATED_FAMILIES`).
+#
+# RO-ONLY DEPLOYMENTS: this pack ALWAYS loads (load_policy globs packs/*.yaml), so a gh READ-ONLY
+# deployment (token_env set, token_env_rw null) will REFUSE TO BOOT by design (fail-closed). An
+# operator who wants gh read-only must either configure the write PAT (token_env_rw) or physically
+# REMOVE this pack file.
+#
+# THE `gh api` WRITE ALLOW IS A FAIL-CLOSED POSITIVE ALLOWLIST, not a repo-scoped denylist. `gh api`
+# is arbitrary REST; the write allow permits ONLY a curated METHOD + repo + SUB-PATH combination
+# (POST/PATCH/PUT to `contents`/`pulls` under an allowlisted repo) and default-denies EVERYTHING
+# else — keys/hooks/collaborators/env+dependabot secrets/branch-protection/merges/git-refs/releases
+# all fall to __default_deny__ because their sub-path is not in `repo_subpath_prefix_any`. Explicit
+# high-risk denies backstop it for audit clarity + defense-in-depth (deny > allow OVERRIDES the
+# allow). The net (verified in tests/unit/policy/test_corpus_gh_write.py):
+#   * POST/PATCH/PUT to /repos/{allowlisted}/{contents,pulls}[/...]   -> gh-api-write ALLOW (rw)
+#   * POST/PATCH/PUT to any OTHER sub-path under an allowlisted repo   -> __default_deny__ (positive allowlist)
+#   * a GET/HEAD (incl. the default method-less) `gh api`             -> gh-read `gh-no-api` DENY
+#   * DELETE anything                                                 -> gh-api-no-delete DENY
+#   * any path containing /secrets/ (actions/env/dependabot)          -> gh-api-no-secrets DENY (belt-and-braces)
+#   * any path under /orgs/...                                        -> gh-api-no-orgs DENY
+#   * any path under .github/workflows/ (CI authoring -> RCE)         -> gh-api-no-workflows DENY
+#   * any path containing '..' (traversal)                            -> gh-api-no-traversal DENY
+#   * gh pr create / gh run rerun --repo NOT in write_repos           -> gh-write-repo-not-allowed DENY
+#   * a non-allowlisted repo/path, or any of the above in prod        -> __default_deny__
+#   * --hostname (host retarget)                                      -> base.yaml gh-no-host-override DENY
+#
+# The `gh_api` predicate (methods / repo_prefix_from / repo_subpath_prefix_any / path_prefix_any /
+# path_contains_any) is an ADDITIVE engine matcher (schema.py GhApiMatch + engine.py
+# `_rule_matches`): it reads the parsed `gh api` METHOD (--method/-X, default GET) and PATH (first
+# positional after `api`). It does not disturb gh-read's verb/first_positional matching or any
+# other pack.
+#
+# flags_allowed is THIS pack's own complete gh allowlist for its allow rules (the winning rule's
+# pack list — no cross-pack merge). Any flag not listed here on a gh-write-allowed call denies with
+# __flag_not_allowed__. --draft is a boolean flag (no value); --method/--input and the pr-create
+# value flags are all consumed as values by the parser (VALUE_FLAGS, parsing.py).
+#
+# I3: `--field`/`--raw-field` (and their short forms -F/-f, which parsing.py canonicalizes to those
+# long forms) are DELIBERATELY OMITTED. gh's `--field key=@/abs/path` reads a REAL local file at
+# exec time and transmits it — captured in neither the argv audit nor execution.staged_files — an
+# un-audited local-file exfil. Omitting them means any `gh api ... --field`/`-F`/`--raw-field`/`-f`
+# denies with __flag_not_allowed__. They REMAIN in VALUE_FLAGS so their operand is still consumed
+# (never leaked into positionals where it could be misread as the api PATH). The audited authoring
+# flow uses `--input` (a staged, sha'd virtual-FS file) instead.
+version: 1
+metadata:
+  name: gh-write
+  owner: opendevops
+  updated: "2026-07-20"
+tool_family: gh
+
+flags_allowed:
+  gh:
+    - --repo
+    - --title
+    - --body
+    - --base
+    - --head
+    - --draft
+    - --method
+    - --input
+
+rules:
+  # --- airtight `gh api` denies (deny > allow; these OVERRIDE gh-api-write) ------------------
+
+  # DELETE is never permitted (destructive REST). Pinned by method; default-deny also backstops it
+  # (DELETE is not in the write allow's method set), but the explicit deny is for audit clarity.
+  - id: gh-api-no-delete
+    match:
+      argv0: gh
+      verb: {eq: api}
+      gh_api:
+        methods: [DELETE]
+    effect: deny
+    environments: [staging, prod]
+    reason: "gh api DELETE is never permitted"
+
+  # Secret-write endpoints all sit UNDER an allowlisted repo. C1's positive sub-path allowlist
+  # already default-denies them (not contents/pulls), but this explicit deny (deny > allow) is kept
+  # for audit clarity + defense-in-depth. The `/secrets/` substring (BOTH slashes) matches
+  # .../actions/secrets/X, .../environments/{env}/secrets/X, and .../dependabot/secrets/X — the
+  # sibling secret namespaces the old "actions/secrets"-only match let escape (I1) — but NOT a file
+  # literally named contents/secretsauce.txt. Secret material is never written via gh api.
+  - id: gh-api-no-secrets
+    match:
+      argv0: gh
+      verb: {eq: api}
+      gh_api:
+        path_contains_any: ["/secrets/"]
+    effect: deny
+    environments: [staging, prod]
+    reason: "gh api writes to secrets (actions/environments/dependabot) are not permitted"
+
+  # Org-level administration is out of scope. Anchored path prefix so it cannot false-fire on a
+  # repo sub-path that merely contains 'orgs'. default-deny also backstops it (not under /repos).
+  - id: gh-api-no-orgs
+    match:
+      argv0: gh
+      verb: {eq: api}
+      gh_api:
+        path_prefix_any: ["orgs/"]
+    effect: deny
+    environments: [staging, prod]
+    reason: "gh api org-level (/orgs) endpoints are not permitted"
+
+  # I4 (RCE): authoring a CI workflow file yields arbitrary code execution in the repo's Actions
+  # runners (with whatever secrets/permissions CI holds). `.github/workflows/...` is a `contents/`
+  # path, so it SURVIVES C1's positive contents+pulls allowlist — it needs its own deny (all
+  # methods, deny > allow). Matches the sub-path substring anywhere in the normalized PATH.
+  - id: gh-api-no-workflows
+    match:
+      argv0: gh
+      verb: {eq: api}
+      gh_api:
+        path_contains_any: [".github/workflows/"]
+    effect: deny
+    environments: [staging, prod]
+    reason: "gh api writes to .github/workflows (CI authoring -> RCE) are not permitted"
+
+  # M1 (path traversal): a `repos/{allowed}/../../orgs/...` path can bypass the anchored carve-out
+  # denies (the `repos/{allowed}/` prefix matches; the anchored `orgs/` deny never fires). C1's
+  # positive sub-path allowlist already default-denies it (`../../orgs/...` is not contents/pulls),
+  # but this explicit deny is belt-and-braces: no legitimate GitHub REST path contains `..`.
+  - id: gh-api-no-traversal
+    match:
+      argv0: gh
+      verb: {eq: api}
+      gh_api:
+        path_contains_any: [".."]
+    effect: deny
+    environments: [staging, prod]
+    reason: "gh api paths containing '..' (path traversal) are not permitted"
+
+  # I2: enforce write_repos on `gh pr create` / `gh run rerun`. Unlike `gh api` (whose repo is in
+  # the PATH and checked by gh-api-write), these two verbs took `--repo` with NO allowlist check, so
+  # `gh pr create --repo evil-org/victim` / `gh run rerun N --repo evil-org/victim` reached ANY repo
+  # the write PAT could touch. `flag_value_not_in` FIRES (denies, deny > allow) when `--repo` is
+  # present AND its value is NOT in write_repos. Scoped to the two WRITE verbs (verb+first_positional)
+  # so it bounds exactly the pr-create/run-rerun capabilities WITHOUT touching gh-read's `--repo`
+  # reads (a read to a non-write repo, e.g. `gh pr view --repo other/repo`, stays allowed). A
+  # `--repo`-absent call is not this finding (it errors at runtime with no repo context) and is left
+  # to the allow.
+  - id: gh-write-repo-not-allowed
+    match:
+      argv0: gh
+      verb: {in: [pr, run]}
+      first_positional: {in: [create, rerun]}
+      flag_value_not_in: {"--repo": "${targets.github.write_repos}"}
+    effect: deny
+    environments: [staging, prod]
+    reason: "gh pr create / gh run rerun --repo must target an allowlisted write repo"
+
+  # --- the write allowlist (staging-rw) -----------------------------------------------------
+
+  # `gh api` POST/PATCH/PUT to an ALLOWLISTED repo (owner/repo from targets.github.write_repos),
+  # FURTHER narrowed to a POSITIVE sub-path allowlist: the contents-commit endpoints that author
+  # files (`PUT /repos/{repo}/contents/{path}`) and the PR endpoints (`POST /repos/{repo}/pulls`).
+  # `repo_subpath_prefix_any` is fail-closed on a SEGMENT boundary — the sub-path AFTER
+  # `repos/{owner}/{repo}/` must be `contents`/`pulls` or a path under them (`pulls`, `pulls/1`,
+  # `contents/app.py`), but NOT `pullspam`, `keys`, `hooks`, `collaborators/...`, `merges`,
+  # `git/refs`, `releases`, `branches/*/protection`, `environments/*/secrets/*`, etc. — every one of
+  # those default-denies. Reached only after the deny rules above abstain.
+  - id: gh-api-write
+    match:
+      argv0: gh
+      verb: {eq: api}
+      gh_api:
+        methods: [POST, PATCH, PUT]
+        repo_prefix_from: "${targets.github.write_repos}"
+        repo_subpath_prefix_any: [contents, pulls]
+    effect: allow
+    channel: rw
+    environments: [staging]
+    reason: "gh api write (POST/PATCH/PUT) to contents/pulls under an allowlisted repo (staging)"
+
+  # `gh run rerun` — re-run a failed CI run. verb=run, first_positional=rerun.
+  - id: gh-write-run-rerun
+    match:
+      argv0: gh
+      verb: {eq: run}
+      first_positional: {eq: rerun}
+    effect: allow
+    channel: rw
+    environments: [staging]
+    reason: "gh run rerun is permitted in staging (re-run a failed CI run)"
+
+  # `gh pr create` — open a remediation PR. verb=pr, first_positional=create. The create-form
+  # flags (--title/--body/--base/--head/--draft/--repo) are in flags_allowed above.
+  - id: gh-write-pr-create
+    match:
+      argv0: gh
+      verb: {eq: pr}
+      first_positional: {eq: create}
+    effect: allow
+    channel: rw
+    environments: [staging]
+    reason: "gh pr create is permitted in staging (open a remediation PR)"

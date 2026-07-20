@@ -1,0 +1,51 @@
+# agent-helm-release-read-rbac.yaml — P2 opt-in: let the read-only agent read Helm release state.
+#
+# Helm stores release state in Secrets labelled `helm.sh/release.v1`. The P1 `view` ClusterRole
+# excludes Secrets, so `helm list/status/get` CANNOT work against sa-agent-view as shipped. This
+# manifest grants sa-agent-view `secrets: get,list` (NO watch) in a designated app namespace so
+# the `helm-read` policy pack can function there.
+#
+# CAVEAT (weakens the no-secrets invariant). RBAC cannot filter Secrets by type, so this Role
+# technically lets sa-agent-view read the contents of ALL Secrets in the namespace — not just
+# Helm release Secrets. That weakens the "even a total policy bypass is read-only, no-secrets"
+# invariant (PLAN.md §1, §3.3). Apply it ONLY in namespaces where that trade-off is accepted.
+#
+# COMPENSATING CONTROL. The policy-layer `no-secret-reads` deny (config/policy/base.yaml) still
+# blocks every `kubectl get/describe secret`, so the model can never read Secret contents
+# directly through kubectl — only helm's own release-state reads are enabled by this Role.
+#
+# per-namespace: edit `target-namespace` below (or `kustomize edit set namespace <ns>`) and
+# apply once per app namespace:
+#   kubectl apply -f ops/k8s/agent-helm-release-read-rbac.yaml
+---
+# Namespaced Role: read Secrets in this namespace (get,list — NO watch). Nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-helm-release-read
+  namespace: target-namespace # per-namespace: edit for each app namespace
+  labels:
+    app.kubernetes.io/name: opendevops
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+---
+# Bind the read-only SA (sa-agent-view, in `opendevops`) to the Role in this namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-helm-release-read-binding
+  namespace: target-namespace # per-namespace: edit for each app namespace
+  labels:
+    app.kubernetes.io/name: opendevops
+    app.kubernetes.io/component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agent-helm-release-read
+subjects:
+  - kind: ServiceAccount
+    name: sa-agent-view
+    namespace: opendevops

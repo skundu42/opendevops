@@ -1,0 +1,446 @@
+# gcloud-read.yaml — the P5a read-only Google Cloud CLI pack (curated read-command ALLOWLIST).
+#
+# tool_family binds this pack's allow rules to the "gcloud" credential family: at boot (T8) the
+# loader's check_credential_coverage() refuses to start unless targets.gcloud.credential_env names
+# ≥1 env var (e.g. GOOGLE_APPLICATION_CREDENTIALS pointing at a read-only service-account key). The
+# executor injects ONLY those vars for a gcloud-family exec, plus KUBECONFIG=/dev/null.
+#
+# MATCHING NOTE (P5a fix round 3 — ALLOWLIST INVERSION, fail-CLOSED not fail-open). `gcloud` is a
+# SUBCOMMAND_BINARY (parsing.py), so verb=<top-group> (e.g. `compute`) and the group SUBPATH + action
+# are `positionals` (`gcloud compute instances list` -> verb=compute, positionals=[instances, list]).
+#
+# Fix rounds 1-2 keyed the read allow on `last_positional in [list, describe]` /
+# `second_last_positional == describe` — i.e. it fired for ANY command whose LAST/second-to-last
+# positional is a read token, and subtracted mutations via a *denylist* (`*-no-mutations`). That is
+# fail-open BY CONSTRUCTION: an UNKNOWN verb or an unlisted mutation ending in a read token slipped
+# through because a denylist can never be complete. Proof: `gcloud logging write list list`
+# (log-entry forgery — no required flags) and `gcloud compute instances frobnicate list` (an INVENTED
+# verb) both resolved to `allow / gcloud-read-verbs`.
+#
+# Fix round 3 REPLACES those two broad rules with a CURATED POSITIVE ALLOWLIST of read command PATHS,
+# one allow rule per service group. Each rule pins `verb: <top-group>` AND
+# `positional_seq_prefix_any: [[<subgroup...>, <read-verb>], ...]` — the read verb sits at its REAL,
+# DETERMINATE position for that path, so an unknown verb there (or an unknown group) does NOT match
+# and falls to __default_deny__. Trailing positionals after the verb (the resource NAME for
+# `describe <NAME>`, the FILTER for `logging read <FILTER>`, the URI for `storage cat <URI>`) are
+# permitted; a mutation cannot hide after a terminal read verb at the same group level. So
+# `gcloud logging write list list`, `gcloud <anything> frobnicate <anything>`, `gcloud container
+# clusters get-credentials list`, and `gcloud pubsub subscriptions modify-push-config list` all
+# DEFAULT-DENY — the allow is the PRIMARY fail-closed gate.
+#
+# The mutation/secret denies below are KEPT as belt-and-braces (deny > allow) — if a curated read
+# path ever admits a resource NAMED like a mutation token, these still deny:
+#   * gcloud-no-delete + gcloud-no-mutations: bare mutation verbs at ANY positional.
+#   * gcloud-no-compound-mutations: a PREFIX guard denying any positional whose prefix-before-the-
+#     first-`-` is a mutation verb (COMPOUND `verb-noun` forms: `set-machine-type`, ...).
+# VALUE_FLAGS (parsing.py) consume space-form operands, so `... describe my-vm --project list` no
+# longer leaks `list` into positionals. Secret access, credential/token exfiltration, and identity
+# overrides are denied in base.yaml (gcloud-no-secret-access / gcloud-no-token-print /
+# gcloud-no-sa-keys / gcloud-no-cred-override), which win by precedence (base loads first).
+#
+# --project selects scope within the ONE pinned identity (like an AWS region), so it is allowed;
+# --account / --impersonate-service-account / --configuration retarget identity and are denied
+# (base.yaml). flags_allowed is a curated read-safe set; any unlisted flag denies
+# (__flag_not_allowed__).
+version: 1
+metadata:
+  name: gcloud-read
+  owner: opendevops
+  updated: "2026-07-19"
+tool_family: gcloud
+
+flags_allowed:
+  gcloud:
+    - --project
+    - --format
+    - --filter
+    - --limit
+    - --page-size
+    - --sort-by
+    - --region
+    - --zone
+    - --uri
+    - --flatten
+    - --quiet
+
+rules:
+  # ---------------------------------------------------------------------------------------------
+  # CURATED READ-COMMAND ALLOWLIST (fix round 3 — fail-CLOSED). One allow rule per service group.
+  # Each rule pins `verb: <top-group>` AND the exact `[<subgroup...>, <read-verb>]` sequence(s) via
+  # `positional_seq_prefix_any`, so the read verb sits at its DETERMINATE position: an UNKNOWN verb
+  # there (`frobnicate`), an unlisted mutation (`write`, `get-credentials`, `modify-push-config`),
+  # or an unknown GROUP does NOT match and falls to __default_deny__. Trailing positionals after the
+  # verb (the NAME for `describe <NAME>`, the FILTER for `logging read`, the URI for `storage cat`)
+  # are allowed. Operator-extensible: add a service group's read paths here as needed.
+  # ---------------------------------------------------------------------------------------------
+
+  # gcloud compute instances|disks|networks|addresses list|describe
+  - id: gcloud-read-compute
+    match:
+      argv0: gcloud
+      verb: {eq: compute}
+      positional_seq_prefix_any:
+        - [instances, list]
+        - [instances, describe]
+        - [disks, list]
+        - [disks, describe]
+        - [networks, list]
+        - [networks, describe]
+        - [addresses, list]
+        - [addresses, describe]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only gcloud compute list/describe is permitted in staging and prod"
+
+  # gcloud container clusters list|describe
+  - id: gcloud-read-container
+    match:
+      argv0: gcloud
+      verb: {eq: container}
+      positional_seq_prefix_any:
+        - [clusters, list]
+        - [clusters, describe]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only gcloud container clusters list/describe is permitted in staging and prod"
+
+  # gcloud sql instances list|describe
+  - id: gcloud-read-sql
+    match:
+      argv0: gcloud
+      verb: {eq: sql}
+      positional_seq_prefix_any:
+        - [instances, list]
+        - [instances, describe]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only gcloud sql instances list/describe is permitted in staging and prod"
+
+  # gcloud pubsub topics|subscriptions list|describe (NOT modify-push-config etc.)
+  - id: gcloud-read-pubsub
+    match:
+      argv0: gcloud
+      verb: {eq: pubsub}
+      positional_seq_prefix_any:
+        - [topics, list]
+        - [topics, describe]
+        - [subscriptions, list]
+        - [subscriptions, describe]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only gcloud pubsub topics/subscriptions list/describe is permitted in staging and prod"
+
+  # gcloud projects list|describe
+  - id: gcloud-read-projects
+    match:
+      argv0: gcloud
+      verb: {eq: projects}
+      positional_seq_prefix_any:
+        - [list]
+        - [describe]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only gcloud projects list/describe is permitted in staging and prod"
+
+  # gcloud iam service-accounts list|describe (NOT `keys` — SA key material, denied in base.yaml)
+  - id: gcloud-read-iam
+    match:
+      argv0: gcloud
+      verb: {eq: iam}
+      positional_seq_prefix_any:
+        - [service-accounts, list]
+        - [service-accounts, describe]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only gcloud iam service-accounts list/describe is permitted in staging and prod"
+
+  # gcloud logging logs list / gcloud logging read <FILTER> (read only — NOT `write`, which forges
+  # log entries). `gcloud logging write ...` has positionals starting with `write`, matching neither
+  # sequence, so it default-denies.
+  - id: gcloud-read-logging
+    match:
+      argv0: gcloud
+      verb: {eq: logging}
+      positional_seq_prefix_any:
+        - [logs, list]
+        - [read]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only gcloud logging logs list / logging read is permitted in staging and prod"
+
+  # gcloud storage ls|cat (read). `cp`/`rm`/`rsync`/... start with a different token and default-deny.
+  - id: gcloud-read-storage
+    match:
+      argv0: gcloud
+      verb: {eq: storage}
+      positional_seq_prefix_any:
+        - [ls]
+        - [cat]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only gcloud storage ls/cat is permitted in staging and prod"
+
+  # gcloud config list
+  - id: gcloud-read-config
+    match:
+      argv0: gcloud
+      verb: {eq: config}
+      positional_seq_prefix_any:
+        - [list]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only gcloud config list is permitted in staging and prod"
+
+  # gcloud run services list|describe
+  - id: gcloud-read-run
+    match:
+      argv0: gcloud
+      verb: {eq: run}
+      positional_seq_prefix_any:
+        - [services, list]
+        - [services, describe]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only gcloud run services list/describe is permitted in staging and prod"
+
+  # gcloud functions list|describe
+  - id: gcloud-read-functions
+    match:
+      argv0: gcloud
+      verb: {eq: functions}
+      positional_seq_prefix_any:
+        - [list]
+        - [describe]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only gcloud functions list/describe is permitted in staging and prod"
+
+  # gcloud secrets list (metadata only — `versions access` is secret payload, denied in base.yaml)
+  - id: gcloud-read-secrets
+    match:
+      argv0: gcloud
+      verb: {eq: secrets}
+      positional_seq_prefix_any:
+        - [list]
+    effect: allow
+    channel: ro
+    environments: [staging, prod]
+    reason: "read-only gcloud secrets list (metadata only) is permitted in staging and prod"
+
+  # High-value mutation deny for audit clarity (kept as its own id for the corpus pin).
+  # `gcloud <group...> delete X` -> positional "delete"; denies deletes across services.
+  - id: gcloud-no-delete
+    match:
+      argv0: gcloud
+      resource_any: [delete]
+    effect: deny
+    environments: [staging, prod]
+    reason: "gcloud delete is destructive and not permitted in read-only mode"
+
+  # Mutation deny table (property pin): known gcloud mutation verbs at ANY positional depth are
+  # denied so deny > allow catches any mutation that also carries a read token (list/describe) —
+  # closing the P5a fail-open where mutations relied solely on __default_deny__. `delete` is
+  # handled by gcloud-no-delete above (kept separate for its corpus rule-id pin); everything else
+  # destructive lands here. IAM-binding mutations are included (they also gate the
+  # `add-iam-policy-binding ... describe` laundering case). Operator-extensible per deployment.
+  - id: gcloud-no-mutations
+    match:
+      argv0: gcloud
+      resource_any:
+        - create
+        - update
+        - patch
+        - replace
+        - set
+        - add
+        - remove
+        - deploy
+        - apply
+        - import
+        - export
+        - insert
+        - start
+        - stop
+        - restart
+        - reset
+        - resize
+        - scale
+        - attach
+        - detach
+        - enable
+        - disable
+        - promote
+        - failover
+        - rollback
+        - undelete
+        - purge
+        - clear
+        # Fix round 2: reviewer-named + common bare verbs the incomplete table missed. A mutation
+        # NAMED with a read token (`suspend list`, `upgrade list`) fired the read allow; each of
+        # these lands the deny (deny > allow). `delete` stays in gcloud-no-delete above.
+        - suspend
+        - resume
+        - clone
+        - upgrade
+        - downgrade
+        - destroy
+        - diagnose
+        - abandon
+        - drain
+        - recreate
+        - cancel
+        - activate
+        - deactivate
+        - rotate
+        - migrate
+        - move
+        - rename
+        - refresh
+        - regenerate
+        - renew
+        - backup
+        - snapshot
+        - restore
+        - revoke
+        - expire
+        - wait
+        - invoke
+        - run
+        - execute
+        - generalize
+        - ssh
+        - scp
+        - reset-windows-password
+        - simulate-maintenance-event
+        - tunnel-through-iap
+        - add-iam-policy-binding
+        - remove-iam-policy-binding
+        - set-iam-policy
+    effect: deny
+    environments: [staging, prod]
+    reason: "gcloud mutation verbs are not permitted in read-only mode"
+
+  # Compound-verb-prefix guard (Fix round 2). gcloud spells many mutations as COMPOUND `verb-noun`
+  # forms (`set-machine-type`, `add-metadata`, `remove-metadata`, `update-container`,
+  # `add-access-config`, `set-scopes`, `set-disk-auto-delete`, `add-tags`, `delete-access-config`,
+  # `reset-windows-password`, `simulate-maintenance-event`, ...). A bare-verb denylist can never
+  # enumerate every noun, so this rule DENIES when ANY positional's prefix (the part before the
+  # first `-`) is a mutation verb — catching the whole `set-*`/`add-*`/`remove-*`/`delete-*`/...
+  # family at once (and the bare verb too, whose prefix is the whole word). It is intentionally
+  # broad: a false-deny of a read whose NAME starts with a mutation prefix is the safe direction.
+  # Ordered AFTER gcloud-no-delete so `delete <NAME>` keeps its `gcloud-no-delete` audit id.
+  - id: gcloud-no-compound-mutations
+    match:
+      argv0: gcloud
+      positional_verb_prefix_any:
+        - set
+        - add
+        - remove
+        - delete
+        - create
+        - update
+        - patch
+        - replace
+        - put
+        - insert
+        - start
+        - stop
+        - restart
+        - reset
+        - suspend
+        - resume
+        - deploy
+        - apply
+        - import
+        - export
+        - migrate
+        - clone
+        - copy
+        - move
+        - rename
+        - attach
+        - detach
+        - mount
+        - unmount
+        - enable
+        - disable
+        - activate
+        - deactivate
+        - promote
+        - failover
+        - rollback
+        - undelete
+        - purge
+        - clear
+        - expire
+        - revoke
+        - resize
+        - scale
+        - upgrade
+        - downgrade
+        - recreate
+        - rebuild
+        - redeploy
+        - reimage
+        - abandon
+        - drain
+        - cordon
+        - uncordon
+        - evict
+        - cancel
+        - abort
+        - kill
+        - terminate
+        - destroy
+        - rotate
+        - regenerate
+        - renew
+        - refresh
+        - backup
+        - restore
+        - snapshot
+        - invoke
+        - run
+        - exec
+        - execute
+        - call
+        - ssh
+        - scp
+        - tunnel
+        - connect
+        - diagnose
+        - simulate
+        - wait
+        - bind
+        - unbind
+        - grant
+        - generalize
+        - capture
+        - deallocate
+        - override
+        - provision
+        - deprovision
+        - convert
+        - encrypt
+        - decrypt
+        - sync
+        - replicate
+        - approve
+        - reject
+        - wipe
+        - lock
+        - unlock
+    effect: deny
+    environments: [staging, prod]
+    reason: "gcloud compound mutation verbs (verb-noun, e.g. set-machine-type) are not permitted in read-only mode"
