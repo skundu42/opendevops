@@ -19,9 +19,10 @@ jobs:
         run: uv python install 3.11
 
       - name: Sync dependencies
-        # p2 (AsyncSqliteSaver) + server (langgraph-sdk, redis, fastapi) + dev (pytest, fakeredis)
-        # are all exercised by the test suite.
-        run: uv sync --extra p2 --extra server --extra dev
+        # All extras: the suite imports from every one — p2 (AsyncSqliteSaver), server
+        # (langgraph-sdk, redis, fastapi), slack (slack-bolt, apscheduler → scheduler tests),
+        # ssh (asyncssh → ssh_run tests), dev (pytest, fakeredis).
+        run: uv sync --extra p2 --extra server --extra slack --extra ssh --extra dev
 
       - name: Ruff
         run: uv run ruff check .
