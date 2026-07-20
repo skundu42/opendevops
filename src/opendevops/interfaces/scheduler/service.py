@@ -1,6 +1,6 @@
-"""``SchedulerService`` — our own APScheduler service that drives scheduled agent runs (P4, T20).
+"""``SchedulerService`` — our own APScheduler service that drives scheduled agent runs.
 
-Why our own scheduler and not LangGraph Server crons: PLAN §3.7 — it removes the server-license
+Why our own scheduler and not LangGraph Server crons: it removes the server-license
 dependency and unifies cron + event triggers under one mechanism. The service is deliberately THIN;
 all the interesting, order-dependent logic (job-spec parsing + the fixed-default application) lives
 in the PURE :mod:`opendevops.interfaces.scheduler.jobs` module, and the per-job execution below is
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # The budget profile + audit interface tag every scheduled run carries. ``"scheduled"`` is already
-# a T14 ``context.Interface`` literal and a shipped ``budgets.yaml`` profile.
+# a ``context.Interface`` literal and a shipped ``budgets.yaml`` profile.
 SCHEDULED_PROFILE = "scheduled"
 SCHEDULED_INTERFACE = "scheduled"
 # The synthetic principal a scheduled run is attributed to (audit ``principal.user`` + the

@@ -53,7 +53,7 @@ def test_default_profile() -> None:
 
 
 def test_shipped_server_section() -> None:
-    """The shipped config.yaml carries the additive T16 ``server`` block."""
+    """The shipped config.yaml carries the additive ``server`` block."""
     cfg = load_config(REPO_ROOT)
     assert cfg.server.url == "http://localhost:8123"
     assert cfg.server.api_key_env == "LANGGRAPH_API_KEY"
@@ -188,7 +188,7 @@ def test_missing_config_dir_raises(tmp_path) -> None:
 
 
 # --------------------------------------------------------------------------------------
-# targets.github (T11 / P2) — additive gh credential-family config
+# targets.github — additive gh credential-family config
 # --------------------------------------------------------------------------------------
 
 
@@ -229,7 +229,7 @@ def test_github_unknown_key_rejected(write_config, base_config) -> None:
 
 
 # --------------------------------------------------------------------------------------
-# targets.{aws,gcloud,azure} (T21 / P5a) — additive cloud credential-family config
+# targets.{aws,gcloud,azure} — additive cloud credential-family config
 # --------------------------------------------------------------------------------------
 
 

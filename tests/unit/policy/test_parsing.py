@@ -1,4 +1,4 @@
-"""argv parsing tests (T3): short-flag canonicalization, value forms, fail-closed, resources."""
+"""argv parsing tests: short-flag canonicalization, value forms, fail-closed, resources."""
 
 from __future__ import annotations
 
@@ -187,7 +187,7 @@ def test_argv0_lower_only_no_suffix_strip() -> None:
     assert p.argv0 == "bash.exe"
 
 
-# ------------------------------------------------------------------ P2 value-flag/alias tables
+# ------------------------------------------------------------------ value-flag/alias tables
 
 
 def test_kubectl_mutate_value_flags() -> None:

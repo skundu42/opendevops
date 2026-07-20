@@ -1,4 +1,4 @@
-"""``@policy_hook`` registry: named async policy hooks (T4).
+"""``@policy_hook`` registry: named async policy hooks.
 
 A *hook* is a small async escape hatch a ``effect: hook`` rule can name. The engine looks it
 up here, runs it under a hard timeout, and treats it fail-closed: a hook that raises, times
@@ -6,8 +6,8 @@ out, or is not registered becomes ``deny(__fail_closed__)``. A hook returns a
 :class:`~opendevops.policy.schema.Decision` to voice an opinion, or ``None`` to abstain (the
 engine then drops the hook rule and re-applies precedence to the rest of the matched set).
 
-No hooks ship in P1 — the dry-run-before-apply hook lands in P2. This module is only the
-registry; the sole P1 consumer is the engine, and tests register a trivial example hook.
+This module is only the registry (the shipped dry-run-before-apply hook lives in
+``builtin_hooks``); the sole consumer is the engine, and tests register a trivial example hook.
 """
 
 from __future__ import annotations

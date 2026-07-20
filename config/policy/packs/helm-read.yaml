@@ -1,15 +1,15 @@
-# helm-read.yaml — the P2 read-only helm pack (list / status / history / get / version).
+# helm-read.yaml — the read-only helm pack (list / status / history / get / version).
 #
-# tool_family binds this pack's allow rule to the "helm" credential family; at boot (T8) the
+# tool_family binds this pack's allow rule to the "helm" credential family; at boot the
 # loader's check_credential_coverage() refuses to start if no helm credential is configured.
 #
 # RBAC PREREQUISITE / no-secrets caveat. Helm reads release state from Secrets labelled
-# `helm.sh/release.v1`, and the P1 `view` ClusterRole (sa-agent-view) excludes Secrets — so
-# `helm list/status/get` cannot work against the P1 read-only ServiceAccount as shipped.
+# `helm.sh/release.v1`, and the `view` ClusterRole (sa-agent-view) excludes Secrets — so
+# `helm list/status/get` cannot work against the base read-only ServiceAccount as shipped.
 # Enabling this pack requires applying ops/k8s/agent-helm-release-read-rbac.yaml, a
 # NAMESPACED Role granting `secrets get,list` in designated app namespaces to sa-agent-view.
 # RBAC cannot filter by secret TYPE, so this Role weakens the "total bypass is
-# read-only-no-secrets" invariant (PLAN.md §3.3) — accepted only with the compensating
+# read-only-no-secrets" invariant — accepted only with the compensating
 # control that the policy-layer `no-secret-reads` deny (base.yaml) still blocks any
 # `kubectl get/describe secret`, so the model can never read secret contents directly.
 #

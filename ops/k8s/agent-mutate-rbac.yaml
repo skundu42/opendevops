@@ -1,6 +1,6 @@
-# agent-mutate-rbac.yaml — P2 read-write credential for the DevOps agent (staging mutations).
+# agent-mutate-rbac.yaml — read-write credential for the DevOps agent (staging mutations).
 #
-# Grants ONLY the narrow mutation surface the P2 `kubectl-mutate` policy pack allows —
+# Grants ONLY the narrow mutation surface the `kubectl-mutate` policy pack allows —
 # apply/rollout/scale on Deployments/ReplicaSets/StatefulSets (+ the deployments/replicasets
 # `scale` subresource) and ConfigMaps — and nothing else. Server-side defense-in-depth behind
 # the policy layer: NO Secrets, NO RBAC, NO CRDs, and NO `delete` on anything. So even a total

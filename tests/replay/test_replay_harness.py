@@ -1,4 +1,4 @@
-"""Self-tests for the replay harness itself (T15).
+"""Self-tests for the replay harness itself.
 
 The golden scenarios prove the *workflows*; these prove the *harness* honours its contract, so a
 green golden run means what we think it means:

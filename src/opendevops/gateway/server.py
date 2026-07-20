@@ -1,4 +1,4 @@
-"""``ServerGateway`` — drive a graph running inside a self-hosted LangGraph Server (T16, P3).
+"""``ServerGateway`` — drive a graph running inside a self-hosted LangGraph Server.
 
 This is the ONLY module in the codebase allowed to import ``langgraph_sdk`` — our compatibility
 firewall. Every other module speaks the transport-neutral :class:`~opendevops.gateway.base`
@@ -12,8 +12,8 @@ and the ``command={"resume": ...}`` resume — translating the server's ``update
 frames into the SAME :class:`RunEvent` dataclasses the CLI already renders (via the shared
 :mod:`opendevops.gateway.translate` helpers ``LocalGateway`` uses).
 
-Accounting / audit divergence (decided deliberately — see the T16 report)
--------------------------------------------------------------------------
+Accounting / audit divergence (decided deliberately)
+----------------------------------------------------
 In service mode the graph — and therefore ``PolicyMiddleware`` + the budget middlewares + every
 audit write + the daily-counter charge — runs in the Server process. The gateway-side
 ``get_usage_metadata_callback()`` that makes ``LocalGateway``'s authoritative ledger work is
@@ -25,7 +25,7 @@ contextvar-based and **cannot see** those server-side model calls. So this gatew
 * ``cost_usd_authoritative == cost_usd_state``, with ``usage["authoritative_unavailable"] = True``.
   There is no independent gateway ledger here and — critically — the gateway does **not** re-charge
   the daily counter (the server already did), so nothing is double-counted. The weekly LangSmith
-  cross-check (PLAN §6: LangSmith-computed cost vs gateway-accounted cost, >5% divergence alerts)
+  cross-check (LangSmith-computed cost vs gateway-accounted cost, >5% divergence alerts)
   is the compensating control that catches price-table staleness / summarizer undercount.
 
 Audit book-ends land server-side, in the same per-run chain file as the in-graph events, written by
@@ -117,13 +117,13 @@ class ServerGateway:
             fake wire-shaped client); production passes ``None`` and the client is built from
             ``cfg.server`` via :func:`langgraph_sdk.get_client`.
         assistant_id: the graph id to drive (defaults to ``"devops"``, matching ``langgraph.json``).
-        url: an explicit base URL that OVERRIDES ``cfg.server.url`` for this gateway only (T18). The
+        url: an explicit base URL that OVERRIDES ``cfg.server.url`` for this gateway only. The
             external-client path leaves this ``None`` and reaches the server through Caddy on
             ``cfg.server.url`` (the published :8123). The webhook app, which runs INSIDE the server
             container, passes the loopback server port (``http://localhost:8000``) so its runs hit
             the local API directly — bypassing Caddy and its bearer — while every other consumer of
             ``cfg.server.url`` is untouched. ``api_key`` resolution is unchanged: with the loopback
-            path's ``api_key_env`` var unset, no bearer is sent (T16), which is correct here.
+            path's ``api_key_env`` var unset, no bearer is sent, which is correct here.
     """
 
     def __init__(
@@ -173,7 +173,7 @@ class ServerGateway:
         webhook app's deterministic ``uuid5(NS_INCIDENT, fingerprint)`` incident thread — is passed
         with ``if_exists="do_nothing"`` so a repeat alert reuses the existing thread instead of
         erroring (the SDK rejects a non-UUID id with 422, which a uuid5 never is). The returned id
-        equals the one the server echoes. Added additively in T17.
+        equals the one the server echoes.
         """
         if thread_id is not None:
             thread = await self._client.threads.create(
@@ -279,8 +279,9 @@ class ServerGateway:
             values = await self._wait(thread_id, ctx, prof, input_, command)
         except TimeoutError:
             # A suspended (escalated) run returns from ``wait`` immediately, so a wall-clock timeout
-            # only ever fires on a genuinely-running run — never on an interrupt (T13's rule holds
-            # for free here). Cancel the still-running server run and report the wall-clock stop.
+            # only ever fires on a genuinely-running run — never on an interrupt (the local
+            # gateway's rule holds for free here). Cancel the still-running server run and report
+            # the wall-clock stop.
             await self._safe_server_cancel(thread_id)
             return self._budget_result(
                 run_id, "wall_clock", prof.wall_clock_s, "wall clock exceeded"

@@ -1,4 +1,4 @@
-"""Unit tests for the ``dry_run_before_apply`` gatekeeper hook (T12).
+"""Unit tests for the ``dry_run_before_apply`` gatekeeper hook.
 
 Drives the hook directly with hand-built :class:`ToolCallCtx`s (a ``files`` mapping + a
 ``dry_run_ok`` sha map), covering every row of the decision table plus the fail-closed paths.
@@ -67,7 +67,7 @@ async def test_row3_real_apply_without_recorded_sha_denies() -> None:
 
 
 async def test_row4_real_apply_with_recorded_sha_abstains() -> None:
-    # dry_run_ok keys are RUN-SCOPED (``{run_id}:{sha}``); _ctx uses run_id="run-hook" (T13).
+    # dry_run_ok keys are RUN-SCOPED (``{run_id}:{sha}``); _ctx uses run_id="run-hook".
     d = await dry_run_before_apply(
         _ctx(
             ["kubectl", "apply", "-f", PATH, "--dry-run=none"],
@@ -98,7 +98,7 @@ async def test_row5_client_dry_run_denies_wants_server() -> None:
 
 
 async def test_row6_kustomize_no_filename_denies() -> None:
-    # `apply -k <dir>` has no --filename to verify (kustomize unsupported in P2).
+    # `apply -k <dir>` has no --filename to verify (kustomize unsupported).
     d = await dry_run_before_apply(_ctx(["kubectl", "apply", "-k", "/manifests/"]))
     assert d is not None
     assert d.effect == "deny"

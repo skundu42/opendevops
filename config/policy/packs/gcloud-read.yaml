@@ -1,23 +1,23 @@
-# gcloud-read.yaml — the P5a read-only Google Cloud CLI pack (curated read-command ALLOWLIST).
+# gcloud-read.yaml — the read-only Google Cloud CLI pack (curated read-command ALLOWLIST).
 #
-# tool_family binds this pack's allow rules to the "gcloud" credential family: at boot (T8) the
+# tool_family binds this pack's allow rules to the "gcloud" credential family: at boot the
 # loader's check_credential_coverage() refuses to start unless targets.gcloud.credential_env names
 # ≥1 env var (e.g. GOOGLE_APPLICATION_CREDENTIALS pointing at a read-only service-account key). The
 # executor injects ONLY those vars for a gcloud-family exec, plus KUBECONFIG=/dev/null.
 #
-# MATCHING NOTE (P5a fix round 3 — ALLOWLIST INVERSION, fail-CLOSED not fail-open). `gcloud` is a
+# MATCHING NOTE (curated ALLOWLIST — fail-CLOSED, not fail-open). `gcloud` is a
 # SUBCOMMAND_BINARY (parsing.py), so verb=<top-group> (e.g. `compute`) and the group SUBPATH + action
 # are `positionals` (`gcloud compute instances list` -> verb=compute, positionals=[instances, list]).
 #
-# Fix rounds 1-2 keyed the read allow on `last_positional in [list, describe]` /
-# `second_last_positional == describe` — i.e. it fired for ANY command whose LAST/second-to-last
-# positional is a read token, and subtracted mutations via a *denylist* (`*-no-mutations`). That is
-# fail-open BY CONSTRUCTION: an UNKNOWN verb or an unlisted mutation ending in a read token slipped
+# A simpler design — keying the read allow on `last_positional in [list, describe]` /
+# `second_last_positional == describe`, i.e. firing for ANY command whose LAST/second-to-last
+# positional is a read token, and subtracting mutations via a *denylist* (`*-no-mutations`) — is
+# fail-open BY CONSTRUCTION: an UNKNOWN verb or an unlisted mutation ending in a read token slips
 # through because a denylist can never be complete. Proof: `gcloud logging write list list`
 # (log-entry forgery — no required flags) and `gcloud compute instances frobnicate list` (an INVENTED
-# verb) both resolved to `allow / gcloud-read-verbs`.
+# verb) would both resolve to `allow / gcloud-read-verbs` under that design.
 #
-# Fix round 3 REPLACES those two broad rules with a CURATED POSITIVE ALLOWLIST of read command PATHS,
+# This pack is therefore a CURATED POSITIVE ALLOWLIST of read command PATHS,
 # one allow rule per service group. Each rule pins `verb: <top-group>` AND
 # `positional_seq_prefix_any: [[<subgroup...>, <read-verb>], ...]` — the read verb sits at its REAL,
 # DETERMINATE position for that path, so an unknown verb there (or an unknown group) does NOT match
@@ -249,8 +249,8 @@ rules:
     reason: "gcloud delete is destructive and not permitted in read-only mode"
 
   # Mutation deny table (property pin): known gcloud mutation verbs at ANY positional depth are
-  # denied so deny > allow catches any mutation that also carries a read token (list/describe) —
-  # closing the P5a fail-open where mutations relied solely on __default_deny__. `delete` is
+  # denied so deny > allow catches any mutation that also carries a read token (list/describe)
+  # instead of relying solely on __default_deny__. `delete` is
   # handled by gcloud-no-delete above (kept separate for its corpus rule-id pin); everything else
   # destructive lands here. IAM-binding mutations are included (they also gate the
   # `add-iam-policy-binding ... describe` laundering case). Operator-extensible per deployment.

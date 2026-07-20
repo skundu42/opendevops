@@ -1,4 +1,4 @@
-"""PolicyEngine protocol + :class:`YamlRuleEngine`; OPA slots in behind the protocol (T4).
+"""PolicyEngine protocol + :class:`YamlRuleEngine`; OPA slots in behind the protocol.
 
 The engine turns a :class:`~opendevops.policy.schema.ToolCallCtx` into a
 :class:`~opendevops.policy.schema.Decision`. It is *default-deny* and *fail-closed*: any
@@ -6,10 +6,10 @@ internal error — a parse surprise, a config ref that will not resolve, a hook 
 hangs — becomes ``deny``, never an exception to the caller. Precedence over a matched rule
 set is fixed: ``deny > escalate > hook > rewrite > allow``.
 
-Ground truth for the data model, argv parser, and shipped YAML is T3 (schema/parsing/loader);
-this module consumes those interfaces and adds no policy data of its own.
+Ground truth for the data model, argv parser, and shipped YAML is the schema/parsing/loader
+trio; this module consumes those interfaces and adds no policy data of its own.
 
-Design note — argv0-only decisions happen *before* full flag parsing. T3's parser fail-closes
+Design note — argv0-only decisions happen *before* full flag parsing. The parser fail-closes
 on any structural surprise (an unknown short flag, an attached short cluster like ``-rf`` /
 ``-exec``). But a hard-denied interpreter (``bash -c ...``) or a wholly-unknown binary
 (``rm -rf /``) must be denied by *argv0 alone*, with its real rule id, regardless of whether
@@ -44,7 +44,7 @@ from opendevops.policy.schema import (
 # (never authored in YAML; the dunder form is rejected by the schema's kebab-case constraint).
 RULE_BUILTIN_FS = "__builtin_fs__"
 
-# Synthetic rule id for the one named subagent the main agent may delegate to via ``task`` (P5c).
+# Synthetic rule id for the one named subagent the main agent may delegate to via ``task``.
 # Allowed at the engine level for the SAME reason as the FS built-ins: base.yaml declares no
 # tool_family and carries no allow rules, so this scoped allow cannot live in YAML. Any OTHER
 # ``subagent_type`` is denied by base.yaml's ``no-arbitrary-subagents`` rule (deny > allow), and
@@ -61,7 +61,7 @@ BUILTIN_FS_TOOLS: frozenset[str] = frozenset(
 RUN_COMMAND = "run_command"
 
 # deepagents' subagent-spawner tool (from ``SubAgentMiddleware``). Its ``subagent_type`` arg names
-# the target; only :data:`LOG_SUMMARIZER_SUBAGENT` is permitted (P5c). The agent registers a
+# the target; only :data:`LOG_SUMMARIZER_SUBAGENT` is permitted. The agent registers a
 # subagent under EXACTLY this name (see ``agent.py``), so this constant is the single source of
 # truth shared by the engine allow, the agent's subagent spec, and base.yaml's allowlist.
 TASK_TOOL = "task"
@@ -94,7 +94,7 @@ def _any_verb_prefix(positionals: list[str], prefixes: list[str]) -> bool:
 def _matches_seq_prefix_any(positionals: list[str], sequences: list[list[str]]) -> bool:
     """True iff ``positionals`` STARTS WITH one of the exact ``sequences``.
 
-    Backs the ``positional_seq_prefix_any`` allow predicate (P5a fix-round-3 allowlist inversion
+    Backs the ``positional_seq_prefix_any`` allow predicate (the fail-closed allowlist inversion
     for gcloud/az reads): a rule fires only when the parsed positionals begin with a CURATED read
     command path ``[<subgroup...>, <read-verb>]`` (e.g. ``[instances, list]``). Matching is
     fail-closed: a sequence longer than ``positionals`` never matches (the slice compares unequal),
@@ -206,7 +206,7 @@ class PolicyEngine(Protocol):
 
 
 class YamlRuleEngine:
-    """Decision engine over T3's loaded YAML policy.
+    """Decision engine over the loaded YAML policy.
 
     ``config_resolver`` resolves an interpolation ref (e.g.
     ``"${targets.kubernetes.allowed_contexts}"``) to a ``list[str]`` at decision time. Every
@@ -255,8 +255,8 @@ class YamlRuleEngine:
         """Every distinct config-interpolation ref used by a predicate (fail-loud at construction).
 
         Three sources: a ``flag_value_not_in`` value (run_command argv flags, e.g. the kubectl
-        ``--context`` allowlist), ``ssh_host_in`` (the ssh_run host allowlist, P5b), and the
-        gh-write ``gh_api.repo_prefix_from`` write-repo allowlist ref (P5f).
+        ``--context`` allowlist), ``ssh_host_in`` (the ssh_run host allowlist), and the
+        gh-write ``gh_api.repo_prefix_from`` write-repo allowlist ref.
         """
         refs: set[str] = set()
         for rule in self._rules:
@@ -306,7 +306,7 @@ class YamlRuleEngine:
                 reason="deepagents built-in filesystem/planning tool",
                 channel=None,
             )
-        # P5c: the single named subagent the main agent may delegate to via ``task``. Reached only
+        # The single named subagent the main agent may delegate to via ``task``. Reached only
         # when no deny matched — base.yaml's ``no-arbitrary-subagents`` rule denies every other (and
         # a missing/malformed) ``subagent_type`` before this. Still gated on the EXACT name here so
         # the allow stays fail-closed even if that YAML deny were removed: any other target then
@@ -577,7 +577,7 @@ class YamlRuleEngine:
             )
             if not fired:
                 return False
-        # ssh_run structured-tool predicates (P5b): read ctx.args directly (parsed is None here).
+        # ssh_run structured-tool predicates: read ctx.args directly (parsed is None here).
         if m.ssh_host_in is not None:
             host = ctx.args.get("host")
             if not isinstance(host, str) or not host:
@@ -610,7 +610,7 @@ class YamlRuleEngine:
                 ssh_argv, m.ssh_remote_flag_prefix_any
             ):
                 return False
-        # gh_api (P5f gh-write): the `gh api` METHOD+PATH matcher. Meaningful only for a parsed
+        # gh_api (gh-write): the `gh api` METHOD+PATH matcher. Meaningful only for a parsed
         # `gh api` call; every present sub-field is ANDed (an absent one is a wildcard). Reads
         # `parsed` directly and re-checks verb=="api" defensively (the rule also pins verb).
         if m.gh_api is not None:
@@ -645,7 +645,7 @@ class YamlRuleEngine:
                 norm is None or not any(s in norm for s in ga.path_contains_any)
             ):
                 return False
-        # P5c task-target predicate (deny rules only): fires unless ``subagent_type`` is a known
+        # task-target predicate (deny rules only): fires unless ``subagent_type`` is a known
         # string in the allowlist. A missing/non-string target is "not in" -> the deny matches
         # (fail-closed), so an un-named/arbitrary subagent stays denied.
         if m.subagent_type_not_in is not None:

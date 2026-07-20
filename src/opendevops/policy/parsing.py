@@ -1,7 +1,7 @@
-"""argv parsing + short-flag canonicalization (T3).
+"""argv parsing + short-flag canonicalization.
 
 The policy layer is argv-only: there is no shell string and no shell parser anywhere in
-the system (see PLAN.md §1). This module turns a raw ``list[str]`` argv into a structured
+the system. This module turns a raw ``list[str]`` argv into a structured
 ``ParsedArgv`` whose flags are *canonicalized to their long form* so a single rule can
 match ``-n`` and ``--namespace`` alike.
 
@@ -46,7 +46,7 @@ ALIAS_TABLES: dict[str, dict[str, tuple[str, bool]]] = {
     "gh": {
         "-R": ("--repo", True),
         "-L": ("--limit", True),
-        # gh api write flags (P5f). -X sets the HTTP METHOD; -F/-f pass body fields. Registered
+        # gh api write flags. -X sets the HTTP METHOD; -F/-f pass body fields. Registered
         # value-taking so the operand is CONSUMED (never leaked into positionals where it could be
         # misread as the api PATH). The method+path allowlist is enforced by the engine's gh_api
         # predicate off the canonicalized --method flag + the first positional.
@@ -85,7 +85,7 @@ VALUE_FLAGS: dict[str, set[str]] = {
         "--since",
         "--field-selector",
         "--sort-by",
-        # flags_allowed (kubectl-mutate pack, P2) that take values
+        # flags_allowed (kubectl-mutate pack) that take values
         "--dry-run",
         "--replicas",
         "--to-revision",
@@ -101,7 +101,7 @@ VALUE_FLAGS: dict[str, set[str]] = {
         "--namespace",
         "--values",
         "--output",
-        # flags_allowed (helm-read pack, P2) that take values
+        # flags_allowed (helm-read pack) that take values
         "--max",
         "--filter",
         "--revision",
@@ -113,14 +113,14 @@ VALUE_FLAGS: dict[str, set[str]] = {
     "gh": {
         "--repo",
         "--limit",
-        # flags_allowed (gh-read pack, P2) that take values. --branch is long-only:
+        # flags_allowed (gh-read pack) that take values. --branch is long-only:
         # gh's short -b/-B/-H are pr-create flags we never allow, so no alias for it.
         "--json",
         "--jq",
         "--branch",
         "--workflow",
         "--hostname",
-        # gh-write pack (P5f). gh api write flags (method + body) and the gh pr create form's
+        # gh-write pack: gh api write flags (method + body) and the gh pr create form's
         # value flags — every one MUST consume its operand so a value can never leak into
         # `positionals` and be misread as the gh api PATH (the gh_api predicate keys the METHOD on
         # --method and the PATH on positionals[0]). --draft is boolean (no value) so it is NOT here.
@@ -133,7 +133,7 @@ VALUE_FLAGS: dict[str, set[str]] = {
         "--base",
         "--head",
     },
-    # Cloud CLIs (P5a). These CLIs use MANY value-taking flags in `--flag value` (space) form;
+    # Cloud CLIs. These CLIs use MANY value-taking flags in `--flag value` (space) form;
     # every one MUST be listed here so its operand is consumed as the flag's value and never
     # leaks into `positionals`. A leaked operand is a security hole: with the action pinned by
     # position (aws: first_positional; gcloud/az: last_positional), a value like
@@ -272,7 +272,7 @@ VALUE_FLAGS: dict[str, set[str]] = {
 # The cloud CLIs (aws/gcloud/az) are included so their first non-flag token becomes ``verb``
 # (aws: the SERVICE, e.g. ``ec2``; gcloud/az: the top GROUP, e.g. ``compute``/``vm``). This is
 # what lets the packs pin the ACTION at its real position instead of matching a read token at
-# ANY positional depth (the P5a fail-open). For aws the action is then ``positionals[0]``
+# ANY positional depth (a fail-open shape). For aws the action is then ``positionals[0]``
 # (``first_positional``); for gcloud/az the action is the LAST positional (``last_positional``),
 # because their groups nest to a variable depth. See the pack headers for the full rationale.
 SUBCOMMAND_BINARIES: frozenset[str] = frozenset(
@@ -320,12 +320,12 @@ def parse_argv(argv: list[str]) -> ParsedArgv:
     # basename()+lower() here is a policy-matching normalization ONLY (so a rule keyed on
     # "kubectl" matches "/usr/local/bin/kubectl" and "KUBECTL" alike) — it is not, and must
     # never be treated as, a sanitization step. The executor must never execute a
-    # caller-supplied path: T5's tool boundary independently rejects any argv0 containing "/"
-    # before this module ever sees it. This module's basename() and T5's path rejection are
-    # meant to agree (both resolve to "the same bare binary name is what's allowed to run");
-    # if that symmetry ever drifts, this line could start matching policy against a binary
-    # name that the executor would refuse to run (or vice versa), so treat any change here as
-    # load-bearing for T5 too.
+    # caller-supplied path: run_command's tool boundary independently rejects any argv0
+    # containing "/" before this module ever sees it. This module's basename() and that path
+    # rejection are meant to agree (both resolve to "the same bare binary name is what's
+    # allowed to run"); if that symmetry ever drifts, this line could start matching policy
+    # against a binary name that the executor would refuse to run (or vice versa), so treat
+    # any change here as load-bearing for the tool boundary too.
     #
     # Case-fold (.lower()): argv0 is lowercased so "BASH"/"KUBECTL"/"Kubectl" resolve to the
     # same alias/value tables and canonical name the packs are keyed on (all lowercase). We

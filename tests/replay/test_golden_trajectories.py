@@ -1,4 +1,4 @@
-"""Four golden replay trajectories through the REAL policy/audit/budget stack (T15).
+"""Four golden replay trajectories through the REAL policy/audit/budget stack.
 
 Each scenario drives ``build_agent`` (shipped policy, tmp audit, injected fake model) with the one
 subprocess surface replaced by :class:`ReplayToolMiddleware` canned output, then asserts two
@@ -9,7 +9,7 @@ independent things:
    exact args), so this pins that the agent made at least the reference calls the model was
    scripted to make. The scripted fake model IS built from the golden, so this is a real
    round-trip: golden -> fake model -> graph -> messages -> matched back against the golden.
-2. **mechanical audit gates** (``audit_gates`` — reused by P3 CI): the hash chain verifies, no
+2. **mechanical audit gates** (``audit_gates`` — reused by CI): the hash chain verifies, no
    denied call executed, plus a per-scenario invariant (ro-only channel / dry-run-before-real-apply
    + staged manifest / escalation+resolution with approver).
 
@@ -190,7 +190,7 @@ async def test_ci_failure_diagnosis(replay_agent: Any, make_cfg: Any) -> None:
 
 
 # --------------------------------------------------------------------------------------
-# scenario 4 — escalated-delete (T13 interrupt/resume; approve -> executes once)
+# scenario 4 — escalated-delete (interrupt/resume; approve -> executes once)
 # --------------------------------------------------------------------------------------
 
 

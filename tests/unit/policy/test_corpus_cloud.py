@@ -1,24 +1,23 @@
-"""P5a corpus: read-only cloud CLI packs (aws / gcloud / az) — allow + deny, both environments.
+"""Cloud corpus: read-only cloud CLI packs (aws / gcloud / az) — allow + deny, both environments.
 
-Same contract as ``test_corpus.py`` / ``test_corpus_p2.py``: the *real* ``config/policy/`` dir is
-driven through :class:`YamlRuleEngine`, and every case asserts BOTH the effect AND (where a named
-rule is expected) the exact ``rule_id`` — a rule id drifting is as much a regression as an effect
-flipping.
+Same contract as ``test_corpus.py`` / ``test_corpus_mutate.py``: the *real* ``config/policy/`` dir
+is driven through :class:`YamlRuleEngine`, and every case asserts BOTH the effect AND (where a
+named rule is expected) the exact ``rule_id`` — a rule id drifting is as much a regression as an
+effect flipping.
 
-The cloud CLIs are argv-only (aws/gcloud/az are just argv0s — no new tool). Fix round 1 closed the
-P5a fail-open: aws/gcloud/az are now SUBCOMMAND_BINARIES, so the ACTION is pinned at its position
-(aws: ``first_positional``; gcloud/az: ``last_positional`` / token-presence for gcloud describe),
-and every value-taking flag is in ``VALUE_FLAGS`` so a space-form operand is CONSUMED, never leaked
-into positionals. A leaked/embedded read token in an argument can no longer launder a mutation as a
-read. Known mutation verbs are denied by a per-family property table (``*-no-mutations``), and
-secret-material reads by base.yaml (``deny > allow``).
+The cloud CLIs are argv-only (aws/gcloud/az are just argv0s — no new tool). Their parsing is
+deliberately fail-closed: aws/gcloud/az are SUBCOMMAND_BINARIES, so the ACTION is pinned at its
+position (aws: ``first_positional``; gcloud/az: ``last_positional`` / token-presence for gcloud
+describe), and every value-taking flag is in ``VALUE_FLAGS`` so a space-form operand is CONSUMED,
+never leaked into positionals — a leaked/embedded read token in an argument cannot launder a
+mutation as a read. Known mutation verbs are denied by a per-family property table
+(``*-no-mutations``), and secret-material reads by base.yaml (``deny > allow``).
 
-Fix round 3 (this file's last section) FLIPS the gcloud/az reads from a fail-open denylist to a
-fail-CLOSED positive ALLOWLIST: the read allow now fires only for curated command PATHS
-(``verb: <group>`` + ``positional_seq_prefix_any``), so an UNKNOWN verb (``frobnicate``) or an
-unlisted mutation (``write``, ``get-credentials``, ``modify-push-config``) DEFAULT-DENYs instead of
-laundering as a read. See each pack header and ``.superpowers/sdd/task-21-report.md`` (Fix rounds
-1-3) for the full rationale.
+The gcloud/az reads (this file's last section) are a fail-CLOSED positive ALLOWLIST, not a
+denylist: the read allow fires only for curated command PATHS (``verb: <group>`` +
+``positional_seq_prefix_any``), so an UNKNOWN verb (``frobnicate``) or an unlisted mutation
+(``write``, ``get-credentials``, ``modify-push-config``) DEFAULT-DENYs instead of laundering as a
+read. See each pack header for the full rationale.
 
 Every rule is pinned in BOTH staging and prod (the cloud read packs are ``[staging, prod]``).
 """
@@ -42,9 +41,9 @@ ALLOWED_CONTEXTS = ["kind-opendevops"]
 def _resolver(ref: str) -> list[str]:
     if ref == "${targets.kubernetes.allowed_contexts}":
         return ALLOWED_CONTEXTS
-    if ref == "${targets.ssh.hosts}":  # P5b ssh_run host allowlist ref
+    if ref == "${targets.ssh.hosts}":  # ssh_run host allowlist ref
         return ["allowed.host.internal"]
-    if ref == "${targets.github.write_repos}":  # P5f gh-write repo allowlist ref
+    if ref == "${targets.github.write_repos}":  # gh-write repo allowlist ref
         return ["octo-org/staging-app"]
     raise AssertionError(f"unexpected config ref {ref!r}")
 

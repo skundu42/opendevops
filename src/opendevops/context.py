@@ -5,7 +5,7 @@ A dataclass, chosen to match langgraph's ``Runtime`` example and what
 plain ``dict`` passed as ``invoke(..., context={...})`` and an ``AgentContext`` instance into
 this schema, and then exposes each field by attribute on ``runtime.context`` (verified against
 the installed langgraph 1.2.9). Attribute access is exactly what ``PolicyMiddleware`` and the
-T6 budget middleware use to read ``principal`` / ``environment`` / ``run_id``.
+budget middleware use to read ``principal`` / ``environment`` / ``run_id``.
 
 The ``interface`` / ``environment`` literals document the accepted values; they are not
 runtime-enforced by a plain dataclass (langgraph's coercion just calls

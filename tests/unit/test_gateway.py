@@ -1,4 +1,4 @@
-"""LocalGateway (T9): run/stream accounting, audit book-ends, budget/timeout/cancel paths.
+"""LocalGateway: run/stream accounting, audit book-ends, budget/timeout/cancel paths.
 
 Reuses the graph suite's pure builders (``graph.helpers``: the ``BindableFake`` model, scripted
 ``usage`` blocks, the shipped-equivalent ``MODELS`` / ``budgets`` documents) and points the built
@@ -104,19 +104,19 @@ def _make_cfg(
                     "kubeconfig_rw": str(tmp_path / "kubeconfig-rw.yaml") if rw else None,
                     "allowed_contexts": ["kind-opendevops"],
                 },
-                # P2: gh-read pack allows require the gh credential family at boot. P5f: the
+                # gh-read pack allows require the gh credential family at boot; the
                 # gh-write rw allows require the write PAT (token_env_rw => "gh-rw") + write_repos.
                 "github": {
                     "token_env": "OPENDEVOPS_TEST_GH_TOKEN",
                     "token_env_rw": "OPENDEVOPS_TEST_GH_TOKEN_RW",
                     "write_repos": ["octo-org/staging-app"],
                 },
-                # P5a: aws/gcloud/az-read packs require their cloud credential families at boot
+                # aws/gcloud/az-read packs require their cloud credential families at boot
                 # (coverage gate). Names only; values are never read in these fake-model tests.
                 "aws": {"credential_env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]},
                 "gcloud": {"credential_env": ["GOOGLE_APPLICATION_CREDENTIALS"]},
                 "azure": {"credential_env": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID"]},
-                # P5b: ssh-read pack coverage gate (names/paths only; never dialed here).
+                # ssh-read pack coverage gate (names/paths only; never dialed here).
                 "ssh": {
                     "hosts": ["allowed.host.internal"],
                     "user": "deploy",
@@ -211,7 +211,7 @@ async def test_create_thread_returns_unique_ids(build_gateway: BuildGateway) -> 
 
 
 async def test_create_thread_returns_caller_chosen_id(build_gateway: BuildGateway) -> None:
-    """A caller-chosen thread id (T17 webhook incident thread) is returned verbatim."""
+    """A caller-chosen thread id (webhook incident thread) is returned verbatim."""
     gw, *_ = build_gateway([_txt("hi")])
     chosen = "4a9cf785-7879-5d45-b426-5d886da331e3"
     assert await gw.create_thread(thread_id=chosen) == chosen
@@ -712,7 +712,7 @@ async def test_checkpointer_file_created_in_secure_state_dir(
 async def test_run_scoped_dry_run_not_reused_across_runs_on_a_thread(
     build_gateway: BuildGateway, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """T12-review: a turn-N server dry-run must NOT validate a turn-N+1 real apply (run-scoping).
+    """A turn-N server dry-run must NOT validate a turn-N+1 real apply (run-scoping).
 
     Two runs share one thread (so the checkpointer carries ``files`` + ``dry_run_ok`` across them).
     Run 1 dry-runs manifest A. Run 2's ``--dry-run=none`` apply of A is DENIED (run 1's recorded
@@ -767,7 +767,7 @@ async def test_run_scoped_dry_run_not_reused_across_runs_on_a_thread(
     assert _decision(e2, "r2-real-ok")["decision"]["rule_id"] == "kubectl-apply"
 
 
-# -- summarizer replacement: REAL trigger -> haiku in authoritative, not state (T14 §1) ----
+# -- summarizer replacement: REAL trigger -> haiku in authoritative, not state ----
 
 
 async def test_summarizer_trigger_adds_haiku_delta_to_authoritative(
@@ -847,7 +847,7 @@ async def test_summarizer_trigger_adds_haiku_delta_to_authoritative(
     assert await counter.total("global") == pytest.approx(0.02625)
 
 
-# -- P5c log-summarizer subagent: REAL task-wrap accounting (haiku spend is authoritative) --
+# -- log-summarizer subagent: REAL task-wrap accounting (haiku spend is authoritative) --
 
 
 async def test_log_summarizer_subagent_spend_lands_in_authoritative(
@@ -933,7 +933,7 @@ async def test_log_summarizer_subagent_spend_lands_in_authoritative(
     assert "OOMs on startup" in result.final_text
 
 
-# -- stream consumer abandonment (T14 §3b) -------------------------------------------------
+# -- stream consumer abandonment -------------------------------------------------
 
 
 def _only_run_events(cfg: AppConfig) -> tuple[str, list[dict[str, Any]]]:
@@ -980,7 +980,7 @@ async def test_stream_abandonment_closes_chain_as_abandoned(build_gateway: Build
 async def test_stream_resume_abandonment_closes_chain_and_kills_pending_interrupt(
     build_gateway: BuildGateway,
 ) -> None:
-    """Abandoning a RESUMED stream must CLOSE the escalation chain, not leak it (T14 fix round 1).
+    """Abandoning a RESUMED stream must CLOSE the escalation chain, not leak it.
 
     Without a symmetric GeneratorExit guard, ``stream_resume`` leaked a permanently unclosable
     chain: ``_pop_suspended`` runs before the first yield, so an ``aclose()`` mid-resume left
@@ -1033,7 +1033,7 @@ async def test_stream_resume_abandonment_closes_chain_and_kills_pending_interrup
         )
 
 
-# -- interrupted-run accounting: guarded pricing + usage detail (T14 §3c, §3e) --------------
+# -- interrupted-run accounting: guarded pricing + usage detail --------------
 
 
 class _RaisingPriceTable:
@@ -1087,7 +1087,7 @@ async def test_interrupted_run_guards_pricing_raise(
 async def test_interrupted_run_includes_partial_usage_detail(
     build_gateway: BuildGateway, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An interrupted run carries the callback aggregate's partial token usage (P1 dropped it)."""
+    """An interrupted run carries the callback aggregate's partial token usage (regression pin)."""
     gw, _audit, _counter, cfg = build_gateway([_txt("never reached")])
 
     async def _slow(*_args: Any, **_kwargs: Any) -> dict[str, Any]:

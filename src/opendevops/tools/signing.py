@@ -1,4 +1,4 @@
-"""ed25519-signed decision tokens for the P5 executor split (P5d).
+"""ed25519-signed decision tokens for the executor split.
 
 On the remote executor path the agent process holds **no** infra credential and **no** secret
 value; the only thing it holds is an ed25519 *private* signing key. Every exec request carries a
@@ -7,7 +7,7 @@ plus the run-correlation fields — so the standalone executor **service** (whic
 key only) can prove the request passed the policy engine without re-running it, and reject anything
 that did not.
 
-Token contract (PLAN §3.5)::
+Token contract::
 
     signature = ed25519_sign(private_key, canonical_payload)
     canonical_payload = canonical_dumps({

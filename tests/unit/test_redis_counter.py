@@ -1,6 +1,6 @@
-"""RedisDailyCounter (T18) + the build_daily_counter factory.
+"""RedisDailyCounter + the build_daily_counter factory.
 
-The Redis counter is the shared, restart-surviving daily envelope for the P3 service tier. These
+The Redis counter is the shared, restart-surviving daily envelope for the service tier. These
 tests drive it against ``fakeredis.aioredis`` (no live Redis) and assert it matches
 :class:`SqliteDailyCounter`'s semantics exactly — UTC-day keying, add/total round-trip, per-scope +
 per-date isolation, ``add`` returns the new total — plus the Redis-specific facts: a 48h TTL is set
@@ -104,7 +104,7 @@ async def test_uses_utc_date_key(
 async def test_key_shape_is_daily_scope_utcday(
     fake_redis: fakeredis.aioredis.FakeRedis, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The stored key is exactly ``daily:{scope}:{YYYY-MM-DD}`` (matches the PLAN §3.4 contract)."""
+    """The stored key is exactly ``daily:{scope}:{YYYY-MM-DD}`` (the documented key contract)."""
     monkeypatch.setattr(daily_mod, "_utc_day", lambda: "2026-07-18")
     c = RedisDailyCounter(fake_redis)
     await c.add("principal:sandipan", 1.0)

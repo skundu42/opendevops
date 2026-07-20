@@ -1,6 +1,6 @@
 """Scenario 7: a tool-call loop hits the invoke-time recursion_limit -> GraphRecursionError.
 
-The gateway (T9) is responsible for catching this and turning it into a clean run summary; here
+The gateway is responsible for catching this and turning it into a clean run summary; here
 we only pin that the limit is enforced (and that the invoke-time override beats the deepagents
 default of 9_999).
 """

@@ -1,11 +1,11 @@
-"""ops/quota_probe.py — LangGraph Server node-execution quota probe (P3, T18).
+"""ops/quota_probe.py — LangGraph Server node-execution quota probe.
 
-The self-hosted LangGraph Server is licensed against a node-execution quota (PLAN §3.7 / open
-question 5). This probe estimates monthly consumption so an operator can make the **license-up vs
-FastAPI-embed fallback** decision *before* hitting the ceiling: it counts the super-steps of recent
-runs (via the checkpoints/threads API) for the top-5 workflow shapes, extrapolates to a monthly
-node-execution figure, and compares it to the verified-tier quota — warning when the projection
-exceeds ``> 60%`` of quota (the plan's documented fallback trigger).
+The self-hosted LangGraph Server is licensed against a node-execution quota. This probe estimates
+monthly consumption so an operator can make the **license-up vs FastAPI-embed fallback** decision
+*before* hitting the ceiling: it counts the super-steps of recent runs (via the checkpoints/threads
+API) for the top-5 workflow shapes, extrapolates to a monthly node-execution figure, and compares
+it to the verified-tier quota — warning when the projection exceeds ``> 60%`` of quota (the
+documented fallback trigger — see guides/deployment.md).
 
 Everything here is split so CI exercises only the PURE math (super-step counting, workflow-shape
 aggregation, extrapolation) with faked API responses — no live server calls in CI. The typer command
@@ -16,15 +16,15 @@ tool calls to one (``SingleToolCallMiddleware``), so its topology runs ~one node
 probe therefore uses super-steps as the node-execution proxy (a documented, slightly conservative
 1:1 assumption — a graph with genuine fan-out would undercount, so treat the estimate as a floor).
 
-No silent caps (PLAN P3): the projection is summed over the TOP-5 workflow shapes only (the basis),
+No silent caps: the projection is summed over the TOP-5 workflow shapes only (the basis),
 but any workload beyond that is reported LOUDLY, never silently dropped: :func:`summarize_shapes`
 surfaces the dropped-shape count + their super-steps, and :func:`sample_page_truncated` flags a
 thread sample that hit the ``--limit`` page (both are folded into the rendered report). A
 heterogeneous workload therefore reads as "the estimate is a floor" rather than biasing the >60%
 license-up trigger low without warning.
 
-SDK-firewall exception (deliberate, documented — PLAN §3.1 / task brief)
------------------------------------------------------------------------
+SDK-firewall exception (deliberate, documented)
+-----------------------------------------------
 :class:`~opendevops.gateway.server.ServerGateway` is normally the *only* module allowed to import
 ``langgraph_sdk`` (the compatibility firewall). This probe's live seam (:func:`_build_client`) needs
 ``threads.search`` / ``threads.get_history``, which are not on the transport-neutral
@@ -50,7 +50,7 @@ app = typer.Typer(
 )
 
 _DAYS_PER_MONTH = 30.0
-# PLAN P3: > 60% of verified quota -> license-up vs the FastAPI-embed fallback decision.
+# > 60% of verified quota -> license-up vs the FastAPI-embed fallback decision.
 _DEFAULT_WARN_RATIO = 0.60
 
 
@@ -112,7 +112,7 @@ def _aggregate_all(runs: list[dict[str, Any]]) -> list[WorkflowShape]:
 class ShapeSample:
     """The top-``k`` workflow shapes plus the LOUD accounting of what fell OUTSIDE the top-k.
 
-    ``dropped_*`` make the projection's basis explicit (PLAN P3, "no silent caps"): the monthly
+    ``dropped_*`` make the projection's basis explicit ("no silent caps"): the monthly
     projection sums only the top-``k`` shapes, so a run whose shape ranks below the top-k is
     EXCLUDED from the basis — reported here rather than silently discarded, so a heterogeneous
     workload (>k shapes) reads as "the estimate is a floor" instead of quietly biasing it low.
@@ -203,7 +203,7 @@ def render_quota_report(
 ) -> str:
     """Render the top-shapes table + the projection/verdict as plain text. Pure.
 
-    ``dropped_*`` and ``sample_truncated`` surface the projection's basis LOUDLY (PLAN P3, "no
+    ``dropped_*`` and ``sample_truncated`` surface the projection's basis LOUDLY ("no
     silent caps"): shapes ranked below the top-k and a thread sample that hit its page ``--limit``
     are called out so a reader knows the estimate can UNDERSTATE actual consumption. Defaults keep
     the two-arg call a no-op (no extra lines) for callers that don't compute them.
@@ -241,7 +241,7 @@ def render_quota_report(
     if estimate.over_threshold:
         lines.append(
             f"WARNING: projection exceeds {estimate.warn_ratio * 100:.0f}% of quota — "
-            "decide license-up vs the FastAPI-embed fallback (PLAN P3)."
+            "decide license-up vs the FastAPI-embed fallback."
         )
     else:
         lines.append(

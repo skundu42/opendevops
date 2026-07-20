@@ -1,4 +1,4 @@
-"""Executor service (P5d + fix1): verifies-then-executes on a good token; rejects a tampered token
+"""Executor service: verifies-then-executes on a good token; rejects a tampered token
 WITHOUT running (a spy proves no exec) — including the C1 attacks (substituted content, rewritten
 staging metadata, swapped tool_family) and the I1 replay; materializes staged files; resolves
 secrets into env not argv; full-scrubs known secret values from the output.

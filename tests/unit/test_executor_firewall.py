@@ -1,4 +1,4 @@
-"""Executor-service import firewall (P5d M3): the service must not drag in the langgraph stack.
+"""Executor-service import firewall: the service must not drag in the langgraph stack.
 
 `staging.py`'s deepagents import is lazy (inside `resolve_file_refs`), so importing the
 credential-holding executor service — which reuses only `FileRef`/`stage`/`staging_tmpdir` — must

@@ -1,6 +1,6 @@
 """Scenario 6 (unpriced model refuses to boot) + the other fail-closed boot assertions.
 
-Also pins the T6-reviewer BOOT CHECK: the compiled graph's ``run_cost_usd`` channel must be a
+Also pins the BOOT CHECK: the compiled graph's ``run_cost_usd`` channel must be a
 ``BinaryOperatorAggregate`` (the accumulating reducer), else the per-run cap silently degrades to
 last-write-only.
 """
@@ -50,7 +50,7 @@ def test_credential_coverage_gap_refuses_boot(built_agent: Any, monkeypatch: Any
 
 
 def test_boot_refuses_when_cloud_family_unconfigured(built_agent: Any, cfg: Any) -> None:
-    """A shipped cloud pack whose target has no credential_env refuses boot (P5a coverage gate).
+    """A shipped cloud pack whose target has no credential_env refuses boot (coverage gate).
 
     The default ``cfg`` fixture configures aws/gcloud/az; blanking aws's ``credential_env`` (leaving
     gcloud/az set) must surface as a coverage gap naming ``aws``, while every other graph test — all
@@ -65,7 +65,7 @@ def test_boot_refuses_when_cloud_family_unconfigured(built_agent: Any, cfg: Any)
 
 
 def test_boot_refuses_when_ssh_family_unconfigured(built_agent: Any, cfg: Any) -> None:
-    """The shipped ssh pack refuses boot when targets.ssh.key_env is unset (P5b coverage gate).
+    """The shipped ssh pack refuses boot when targets.ssh.key_env is unset (coverage gate).
 
     The default ``cfg`` fixture configures ssh; clearing ``key_env`` (the ssh credential) must
     surface as a coverage gap naming ``ssh``. Every other graph test boots with ssh configured,
@@ -80,7 +80,7 @@ def test_boot_refuses_when_ssh_family_unconfigured(built_agent: Any, cfg: Any) -
 
 
 def test_boot_refuses_when_gh_rw_token_unconfigured(built_agent: Any, cfg: Any) -> None:
-    """The shipped gh-write pack refuses boot when targets.github.token_env_rw is unset (P5f gate).
+    """The shipped gh-write pack refuses boot when github.token_env_rw is unset (coverage gate).
 
     The default ``cfg`` fixture configures both the ro gh token AND the rw write PAT, so the normal
     path boots. Clearing ``token_env_rw`` (leaving the ro ``token_env`` set, so gh-read still boots)
@@ -98,7 +98,7 @@ def test_boot_refuses_when_gh_rw_token_unconfigured(built_agent: Any, cfg: Any) 
 def test_summarizer_is_haiku_backed_marker_subclass(cfg: Any) -> None:
     """The summarizer replacement is a distinct marker subclass built on the ``summarizer`` alias.
 
-    Proves the in-place replacement mechanism (T14 §1): ``_build_summarizer`` returns an instance
+    Proves the in-place replacement mechanism: ``_build_summarizer`` returns an instance
     whose ``.name`` is the subclass name (NOT the ``"SummarizationMiddleware"`` alias the harness
     profile excludes), built on the haiku model — so the default (main-model) summarizer is
     dropped and this one takes its place without a duplicate-name collision.

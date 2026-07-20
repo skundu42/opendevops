@@ -1788,6 +1788,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+checkpoint = [
+    { name = "aiosqlite" },
+    { name = "langgraph-checkpoint-sqlite" },
+]
 dev = [
     { name = "agentevals" },
     { name = "fakeredis" },
@@ -1796,10 +1800,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
-]
-p2 = [
-    { name = "aiosqlite" },
-    { name = "langgraph-checkpoint-sqlite" },
 ]
 server = [
     { name = "fastapi" },
@@ -1821,7 +1821,7 @@ ssh = [
 requires-dist = [
     { name = "agentevals", marker = "extra == 'dev'", specifier = "==0.0.9" },
     { name = "aiohttp", marker = "extra == 'slack'" },
-    { name = "aiosqlite", marker = "extra == 'p2'" },
+    { name = "aiosqlite", marker = "extra == 'checkpoint'" },
     { name = "apscheduler", marker = "extra == 'slack'", specifier = ">=3.10,<4" },
     { name = "asyncssh", marker = "extra == 'ssh'", specifier = "==2.24.0" },
     { name = "deepagents", specifier = "==0.6.12" },
@@ -1830,7 +1830,7 @@ requires-dist = [
     { name = "langchain", specifier = "==1.3.14" },
     { name = "langchain-anthropic", specifier = ">=1.4.7,<2" },
     { name = "langgraph", specifier = "==1.2.9" },
-    { name = "langgraph-checkpoint-sqlite", marker = "extra == 'p2'" },
+    { name = "langgraph-checkpoint-sqlite", marker = "extra == 'checkpoint'" },
     { name = "langgraph-cli", extras = ["inmem"], marker = "extra == 'dev'", specifier = "==0.4.31" },
     { name = "langgraph-sdk", marker = "extra == 'server'", specifier = ">=0.4,<0.5" },
     { name = "mypy", marker = "extra == 'dev'" },
@@ -1846,7 +1846,7 @@ requires-dist = [
     { name = "sse-starlette", marker = "extra == 'server'" },
     { name = "typer", specifier = ">=0.15" },
 ]
-provides-extras = ["p2", "server", "slack", "ssh", "dev"]
+provides-extras = ["checkpoint", "server", "slack", "ssh", "dev"]
 
 [[package]]
 name = "openevals"

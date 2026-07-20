@@ -13,7 +13,7 @@
 #     - `auth can-i patch deployments -n $MUTATE_NAMESPACE` == yes (the mutate binding took)
 #
 # This enforces the "even a total policy bypass is read-only-no-secrets (ro) / no-secrets,
-# no-delete (rw)" invariant (PLAN.md §1) at the credential layer. Run it against every target
+# no-delete (rw)" invariant (guides/security-model.md) at the credential layer. Run it against every target
 # cluster after gen-kubeconfig.sh, and in CI/bootstrap before the first live run. Any deviation
 # exits 1 with a loud message.
 #
@@ -67,7 +67,7 @@ while IFS= read -r ctx; do
   fi
 done <<<"$contexts"
 
-# --- read-write kubeconfig (P2): checked only when present ---------------------------------
+# --- read-write kubeconfig: checked only when present --------------------------------------
 if [[ -f "$MUTATE_KCFG" ]]; then
   mutate_contexts="$(kubectl --kubeconfig "$MUTATE_KCFG" config get-contexts -o name)"
   if [[ -z "$mutate_contexts" ]]; then

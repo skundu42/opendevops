@@ -1,4 +1,4 @@
-"""Fixtures for the P2 replay/eval tier (T15).
+"""Fixtures for the replay/eval tier.
 
 Reuses the graph suite's pure builders (``graph.helpers``: ``BindableFake``, scripted-message
 builders, the shipped-equivalent ``MODELS`` / ``budgets`` documents, the audit-chain helpers) and
@@ -68,16 +68,16 @@ def make_cfg(tmp_path: Path, audit_dir: Path) -> Callable[..., AppConfig]:
                     },
                     "github": {
                         "token_env": "OPENDEVOPS_TEST_GH_TOKEN",
-                        # P5f gh-write rw coverage gate (write PAT name + repo allowlist; never
+                        # gh-write rw coverage gate (write PAT name + repo allowlist; never
                         # exec'd in replay — the golden trajectories are gh reads).
                         "token_env_rw": "OPENDEVOPS_TEST_GH_TOKEN_RW",
                         "write_repos": ["octo-org/staging-app"],
                     },
-                    # P5a: cloud read packs' coverage gate (names only; never exec'd in replay).
+                    # cloud read packs' coverage gate (names only; never exec'd in replay).
                     "aws": {"credential_env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]},
                     "gcloud": {"credential_env": ["GOOGLE_APPLICATION_CREDENTIALS"]},
                     "azure": {"credential_env": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID"]},
-                    # P5b: ssh-read pack coverage gate (names/paths only; never dialed in replay).
+                    # ssh-read pack coverage gate (names/paths only; never dialed in replay).
                     "ssh": {
                         "hosts": ["allowed.host.internal"],
                         "user": "deploy",

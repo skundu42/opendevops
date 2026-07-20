@@ -1,4 +1,4 @@
-"""ops/maintenance.py — operator hygiene jobs + the escalation-timeout sweeper (P3 T18 / P4 T20).
+"""ops/maintenance.py — operator hygiene jobs + the escalation-timeout sweeper.
 
 A typer app whose commands are each a thin fetch/side-effect wrapped around a PURE, unit-tested
 computation (the computation is what CI exercises; the live I/O is never called in CI):
@@ -10,7 +10,7 @@ computation (the computation is what CI exercises; the live I/O is never called 
 * ``pg-dump`` — back up the server's Postgres. The argv is built by :func:`pg_dump_argv` (pure) and
   run with ``subprocess.run(argv, shell=False)`` — argv-only, **never** ``shell=True`` (no shell
   metacharacter surface), honoring the ambient environment (``PGPASSWORD`` / ``PGHOST`` / ...).
-* ``sweep-escalations`` (T20) — the ESCALATION-TIMEOUT SWEEPER: the enforcement mechanism behind a
+* ``sweep-escalations`` — the ESCALATION-TIMEOUT SWEEPER: the enforcement mechanism behind a
   rule's ``on_timeout: deny``. ``interrupt()`` parks an escalated run *indefinitely* and a
   caller-side cancel would leave NO resolution record, so this sweeper lists interrupted runs whose
   escalation age exceeds the rule's ``timeout_s`` (pure :func:`select_timed_out` over records the
@@ -19,8 +19,8 @@ computation (the computation is what CI exercises; the live I/O is never called 
   "approver": "__timeout__"}]}``. That flows through the normal policy pipeline: the model receives
   the deny ToolMessage and a ``resolution`` audit event is written with ``approver="__timeout__"``.
 
-Split — pure selection vs live resume (T20)
--------------------------------------------
+Split — pure selection vs live resume
+-------------------------------------
 The sweeper's SELECTION is pure and directly unit-tested (:func:`select_timed_out`,
 :func:`interrupted_runs_from_threads`, :func:`timeout_reject_decisions`), and the resume itself is
 driven through a small ``resume`` callable shaped exactly like
@@ -30,8 +30,8 @@ escalates, the sweeper resume-rejects it, and the ``resolution(approver=__timeou
 ToolMessage + verifying chain are asserted end-to-end). Only :func:`sweep_timed_out_escalations`
 (the ``threads.search`` + ``runs.wait`` I/O over the sdk) is a live seam.
 
-SDK-firewall exception (deliberate, documented — PLAN §3.1 / task brief)
------------------------------------------------------------------------
+SDK-firewall exception (deliberate, documented)
+-----------------------------------------------
 :class:`~opendevops.gateway.server.ServerGateway` is normally the *only* module allowed to import
 ``langgraph_sdk`` (the compatibility firewall). ``prune-threads`` needs ``threads.search`` /
 ``threads.delete`` and the sweeper needs ``threads.search`` / ``runs.wait``, none of which are on
@@ -57,7 +57,7 @@ import typer
 
 app = typer.Typer(
     name="maintenance",
-    help="opendevops service-stack hygiene jobs (P3).",
+    help="opendevops service-stack hygiene jobs.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -182,7 +182,7 @@ def pg_dump_argv(database_uri: str, out_path: str, *, fmt: str = "custom") -> li
 
 
 # --------------------------------------------------------------------------------------
-# escalation-timeout sweeper — pure selection (unit-tested; no I/O), T20
+# escalation-timeout sweeper — pure selection (unit-tested; no I/O)
 # --------------------------------------------------------------------------------------
 
 # The synthetic approver stamped on a timed-out resolution, so the audit chain records that the

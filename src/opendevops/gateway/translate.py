@@ -1,4 +1,4 @@
-"""Shared stream-translation helpers: graph messages -> :class:`RunEvent` dataclasses (T16).
+"""Shared stream-translation helpers: graph messages -> :class:`RunEvent` dataclasses.
 
 Extracted from :mod:`opendevops.gateway.local` so :class:`LocalGateway` and
 :class:`~opendevops.gateway.server.ServerGateway` render byte-identical events from the same

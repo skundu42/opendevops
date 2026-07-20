@@ -1,4 +1,4 @@
-"""ServerGateway (T16): drive a graph over a faked ``langgraph_sdk`` client at the wire boundary.
+"""ServerGateway: drive a graph over a faked ``langgraph_sdk`` client at the wire boundary.
 
 No live server in CI — every test uses ``_FakeLangGraphClient``, whose scripted threads / runs /
 stream payloads are modeled on the REAL wire shapes probed against langgraph-sdk 0.4.2 + a live

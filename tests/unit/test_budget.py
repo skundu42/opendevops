@@ -1,4 +1,4 @@
-"""Tests for opendevops.budget: CostCap/DailyBudget middleware + DailyCounter (T6).
+"""Tests for opendevops.budget: CostCap/DailyBudget middleware + DailyCounter.
 
 Covers (per task brief):
   * exact per-call accumulation math against the real shipped PriceTable;
@@ -67,7 +67,7 @@ class FakeContext:
 
 @dataclass
 class FakeProfileContext:
-    """A runtime context carrying a per-run budget profile (T14 per-profile cap resolution)."""
+    """A runtime context carrying a per-run budget profile (per-profile cap resolution)."""
 
     budget_profile: str
     principal: str = "alice"
@@ -302,7 +302,7 @@ async def test_before_model_empty_state_returns_none(
 
 
 # --------------------------------------------------------------------------------------
-# CostCapMiddleware — per-run profile resolution from runtime.context (T14)
+# CostCapMiddleware — per-run profile resolution from runtime.context
 # --------------------------------------------------------------------------------------
 
 
@@ -337,7 +337,7 @@ async def test_before_model_unknown_or_missing_profile_falls_back_to_default(
     """An absent/unknown ``budget_profile`` resolves to ``default`` (fail-safe, never crashes).
 
     The silent fallback is now observable: it log-warns the unknown/absent profile name and the
-    profile it fell back to (T14 fix round 1, Minor 3), so a misconfigured context is diagnosable.
+    profile it fell back to, so a misconfigured context is diagnosable.
     """
     profiles = {"default": budgets.profile("default")}  # usd 2.00 -> threshold 1.80
     mw = CostCapMiddleware(price_table, OPUS, profiles, budgets.trip_ratio)

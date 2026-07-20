@@ -1,4 +1,4 @@
-"""Slack chat-ops adapter over the :class:`AgentGateway` (P4, T19).
+"""Slack chat-ops adapter over the :class:`AgentGateway`.
 
 An engineer talks to the agent in a Slack thread; a reply in the same Slack thread resumes the
 SAME agent thread; a policy escalation renders as approve / edit / reject Block Kit buttons and the
@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 NS_SLACK = uuid.UUID("49732ea7-79ed-5495-a176-77c5f28a7f7e")
 
 # The originating-interface tag stamped onto every Slack run (audit ``principal.interface``); the
-# T14 ``context.Interface`` literal already includes "slack".
+# The ``context.Interface`` literal already includes "slack".
 INTERFACE_SLACK = "slack"
 
 # Block Kit ``action_id``s for the escalation buttons. The action listener matches this family; the
@@ -172,7 +172,7 @@ def _escalation_review(escalation: Escalation) -> tuple[str, str]:
 def _escalation_tool_call_id(escalation: Escalation) -> str:
     """A stable per-escalation correlation id for the buttons.
 
-    The P2 interrupt payload (``policy.middleware``) does not carry the ``tool_call_id`` in its
+    The interrupt payload (``policy.middleware``) does not carry the ``tool_call_id`` in its
     ``action_requests`` entry, so we honour one if a future payload adds it and otherwise fall back
     to the escalation's ``run_id`` — a stable id unique to this run/escalation, which is all the
     button needs (resume is routed by ``thread_id``; the correlation id is belt-and-suspenders).

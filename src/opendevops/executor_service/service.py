@@ -1,8 +1,8 @@
-"""The executor service HTTP app: verify the decision token, then run the exec (P5d).
+"""The executor service HTTP app: verify the decision token, then run the exec.
 
 ``create_app(cfg, public_key=..., secret_source=..., executor=...)`` returns a FastAPI app with a
 single ``POST /execute`` endpoint. The request pipeline is strictly ordered so a rejected request
-NEVER reaches a subprocess (the P5(d) DoD — the executor spy proves no run happened):
+NEVER reaches a subprocess (pinned by test — the executor spy proves no run happened):
 
     1. VERIFY the ed25519 decision token (bad sig / expired / argv-hash mismatch / wrong bound
        field -> 403, before the executor is ever touched);
@@ -11,7 +11,7 @@ NEVER reaches a subprocess (the P5(d) DoD — the executor spy proves no run hap
        credential -> 422);
     4. materialize staged files into a per-call tmpdir and rewrite argv to the on-disk paths;
     5. run the argv ``shell=False`` with a per-call timeout;
-    6. full-scrub the output (literal resolved secret VALUES, then the P1 pattern scrubber) so no
+    6. full-scrub the output (literal resolved secret VALUES, then the pattern scrubber) so no
        secret value ever leaves the service — then return the ``ExecResult``.
 
 The service holds the ed25519 PUBLIC key only. There is no signature-stripping / alg-confusion

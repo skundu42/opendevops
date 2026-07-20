@@ -3,7 +3,7 @@
 ## Setup
 
 ```sh
-uv sync --extra p2 --extra server --extra slack --extra ssh --extra dev
+uv sync --extra checkpoint --extra server --extra slack --extra ssh --extra dev
 ```
 
 Everyday commands:
@@ -61,7 +61,7 @@ middleware hook order, interrupt replay) that a minor bump can silently change. 
 load-bearing; the upgrade procedure is: branch, bump the trio, run all four tiers, read
 UPGRADE.md's landmine list against the diff.
 
-`docs/api-notes.md` records the P0 introspection of the installed libraries (regenerate with
+`docs/api-notes.md` records the introspection of the installed libraries (regenerate with
 `uv run python scripts/api_spike.py`) — check it when an upstream API question comes up before
 reaching for the source.
 
@@ -85,7 +85,6 @@ and escalation for free — use `interfaces/slack_app.py` as the template.
 
 | Document | Contents |
 |---|---|
-| [`PLAN.md`](../PLAN.md) | the master design: every decision with its rationale, phases, verification strategy |
 | `guides/` | this documentation set |
 | [`docs/DEPLOY.md`](../docs/DEPLOY.md) | service-mode runbook (superset of the [deployment guide](deployment.md)'s bring-up) |
 | [`docs/UPGRADE.md`](../docs/UPGRADE.md) | the pinned-trio upgrade gate + landmine list |

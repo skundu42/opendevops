@@ -1,4 +1,4 @@
-"""AuditLogger: per-run append-only JSONL with sha256 hash chain (T2).
+"""AuditLogger: per-run append-only JSONL with sha256 hash chain.
 
 Per-run chain files (``audit/<run_id>.jsonl``) make every chain single-writer: concurrent
 runs on LangGraph Server would otherwise race a shared-file ``prev_hash`` read-modify-write.
@@ -10,8 +10,8 @@ Run-level context (principal, environment, git sha, ...) captured at :meth:`star
 stamped onto every subsequent event, so callers only pass the event-specific fields; a
 per-call field always overrides the captured default.
 
-Durable chain rehydration (T16)
--------------------------------
+Durable chain rehydration
+-------------------------
 The per-run in-process state (chain tip + dedupe keys) is **rebuildable from the chain file on
 disk**, so a *fresh* ``AuditLogger`` — a server RESTART between an escalation suspend and its
 resume, or a resume request handled by a *different* worker than the one that suspended — can
@@ -108,7 +108,7 @@ def _content_sha(event: AuditEvent) -> str:
     path reuses it rather than reimplementing the derivation.
     """
     payload = event.model_dump(mode="json", exclude=_DEDUPE_EXCLUDE)
-    canonical = canonical_dumps(payload)  # the single shared serializer (audit + P5 token)
+    canonical = canonical_dumps(payload)  # the single shared serializer (audit + decision token)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -157,8 +157,8 @@ class AuditLogger:
         and if it is not in-process but its chain file already EXISTS on disk (a prior process /
         another worker seeded it), it is rehydrated and the call is STILL a no-op — so a resume
         handled by a fresh logger never writes a second genesis-linked seed over an open chain.
-        A ``run_id`` with no chain file seeds fresh, exactly as before. P5 upgrades the seed from
-        the genesis constant to an ed25519-signed run header.
+        A ``run_id`` with no chain file seeds fresh, exactly as before. A future upgrade can move
+        the seed from the genesis constant to an ed25519-signed run header.
         """
         with self._lock:
             if run_id in self._runs:

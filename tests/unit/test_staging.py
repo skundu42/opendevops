@@ -1,4 +1,4 @@
-"""Tests for the virtual-FS -> executor staging bridge (T11 / P2).
+"""Tests for the virtual-FS -> executor staging bridge.
 
 Covers ref resolution (both flag spellings + short form), sha256 correctness, the
 missing-path and kustomize refusals, on-disk staging (mode 0o600 + argv rewrite + basename
@@ -138,7 +138,7 @@ def test_resolve_no_file_flags_returns_empty() -> None:
 
 
 # --------------------------------------------------------------------------------------
-# gh api --input body staging (P5f) — same discipline as the kubectl -f bridge
+# gh api --input body staging — same discipline as the kubectl -f bridge
 # --------------------------------------------------------------------------------------
 
 PR_BODY = '{"title":"fix crashloop","head":"remediation","base":"main"}\n'

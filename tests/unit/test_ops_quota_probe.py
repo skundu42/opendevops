@@ -1,4 +1,4 @@
-"""ops/quota_probe.py pure computations (T18): super-steps, shape aggregation, extrapolation.
+"""ops/quota_probe.py pure computations: super-steps, shape aggregation, extrapolation.
 
 The brief's named case is the extrapolation math; the live server sampling is never called in CI
 (faked checkpoint/run dicts feed the pure functions).

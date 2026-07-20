@@ -32,8 +32,7 @@ spent $0.0841 (run) / $0.34 (today)
 - **Tamper-evident audit.** Every decision and execution lands in a per-run sha256 hash chain the
   agent has no write path to; `opendevops audit verify` proves integrity end-to-end.
 
-The full reasoning lives in the [security model](guides/security-model.md) and
-[`PLAN.md`](PLAN.md).
+The full reasoning lives in the [security model](guides/security-model.md).
 
 ## What it can do
 
@@ -52,7 +51,7 @@ The full reasoning lives in the [security model](guides/security-model.md) and
 
 ```sh
 git clone https://github.com/skundu42/opendevops.git && cd opendevops
-uv sync --extra p2 --extra server --extra dev
+uv sync --extra checkpoint --extra server --extra dev
 cp .env.example .env                        # set ANTHROPIC_API_KEY
 
 # give the agent its own read-only, secrets-denied credential:
@@ -94,8 +93,6 @@ Details: **[guides/architecture.md](guides/architecture.md)**.
 | [Deployment](guides/deployment.md) | service mode, monitoring, executor service, go-live gates |
 | [Development](guides/development.md) | tests, conventions, extending the agent |
 
-[`PLAN.md`](PLAN.md) is the master design document — every decision with its rationale.
-
 ## CLI
 
 | Command | Does |
@@ -107,21 +104,27 @@ Details: **[guides/architecture.md](guides/architecture.md)**.
 
 ## Status
 
-All planned phases (P0–P5) are implemented and tested: read-only K8s diagnostics, staged
-mutations with escalation, service mode, Slack + scheduler, cloud/ssh/gh-write packs, and the
-executor split. Before pointing it at real infrastructure, work through the standing
+Feature-complete and extensively tested: read-only K8s diagnostics, staged mutations with
+escalation, service mode, Slack + scheduler, cloud/ssh/gh-write packs, and the executor split.
+Before pointing it at real infrastructure, work through the standing
 [pre-go-live gates](guides/deployment.md#standing-pre-go-live-gates-all-tiers) — most notably:
 `executor.mode=remote` is **experimental** (keep the default `local`), and the service stack must
 never run on a cluster the agent manages.
 
-## Development
+## Contributing and development
 
 ```sh
-uv sync --extra p2 --extra server --extra slack --extra ssh --extra dev
+uv sync --extra checkpoint --extra server --extra slack --extra ssh --extra dev
 uv run pytest -q          # deterministic full suite, $0 LLM cost
 uv run ruff check .
 uv run mypy src ops
 ```
 
-Test tiers, enforced conventions (fail-closed, SDK firewall, argv-only), and the pinned-trio
-upgrade gate: **[guides/development.md](guides/development.md)**.
+Contributions are welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**, and
+**[guides/development.md](guides/development.md)** for test tiers, enforced conventions
+(fail-closed, SDK firewall, argv-only), and the pinned-dependency upgrade gate. Security reports:
+**[SECURITY.md](SECURITY.md)**.
+
+## License
+
+[Apache-2.0](LICENSE)

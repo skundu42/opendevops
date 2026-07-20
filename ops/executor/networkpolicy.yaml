@@ -1,4 +1,4 @@
-# opendevops executor ingress restriction + egress allowlist + IMDS block (P5d). Applies to every
+# opendevops executor ingress restriction + egress allowlist + IMDS block. Applies to every
 # executor pod in the namespace.
 #
 # INGRESS (defense-in-depth): default-deny ingress except from the agent workload — only the agent

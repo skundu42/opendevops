@@ -1,4 +1,4 @@
-"""AuditEvent pydantic model, schema_version=1 (T2).
+"""AuditEvent pydantic model, schema_version=1.
 
 One model with optional sections (rather than a class per event type); per-type required
 fields are enforced by a model validator. The hash chain binds every field except the two
@@ -24,8 +24,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-# The chain seed. Every run's first event links back to this constant. P5 upgrades the seed
-# to an ed25519-signed run header; the constant string is the P1 placeholder.
+# The chain seed. Every run's first event links back to this constant. A future upgrade can move
+# the seed to an ed25519-signed run header; the constant string is the current placeholder.
 GENESIS_PREV_HASH = "sha256:genesis"
 
 SCHEMA_VERSION = 1
@@ -132,7 +132,7 @@ class Execution(BaseModel):
 
 
 class AuditEvent(BaseModel):
-    """A single hash-chained audit record. ``schema_version`` is 1 (final for P1)."""
+    """A single hash-chained audit record. ``schema_version`` is 1 (frozen)."""
 
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
@@ -197,7 +197,7 @@ def canonical_dumps(obj: Any) -> str:
 
     * the audit hash chain (:func:`canonical_json` below, and the logger's cross-process
       resume-dedupe ``_content_sha``); and
-    * the P5 signed decision token's argv hash (``sha256(canonical_dumps(argv))``), computed on
+    * the signed decision token's argv hash (``sha256(canonical_dumps(argv))``), computed on
       the signer (agent) and re-derived on the verifier (executor service) — single-sourcing it
       here is what guarantees the two sides never disagree on the bytes being signed.
 
@@ -213,7 +213,7 @@ def canonical_json(event: AuditEvent) -> str:
 
     Sorted keys + compact separators make the byte string reproducible, so the writer and
     the verifier derive identical input for the hash regardless of on-disk key order. Delegates
-    to :func:`canonical_dumps` — the one serializer shared with the logger dedupe sha and the P5
+    to :func:`canonical_dumps` — the one serializer shared with the logger dedupe sha and the
     decision-token argv hash.
     """
     payload = event.model_dump(mode="json", exclude={"hash", "prev_hash"})

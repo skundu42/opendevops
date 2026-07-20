@@ -1,11 +1,11 @@
-# Executor service deployment (P5d)
+# Executor service deployment
 
 Hardened k8s manifests for the standalone executor **service** — the holder of the
 `run_command` infra credentials + `{{secret:NAME}}` values on the remote executor path. One
 Deployment per **(environment, channel)** so each pod carries exactly one credential set.
 
 > **Status: EXPERIMENTAL — not production-deployable as shipped.** `executor.mode=remote` is
-> opt-in and non-default (`local`, the in-process executor reviewed for P0–P3, is the default and
+> opt-in and non-default (`local`, the fully reviewed in-process executor, is the default and
 > the production path). The remote path executes correctly against a **single** service pod, but
 > the per-(env,channel) isolation topology these manifests describe is **not yet fully wired** — see
 > **Pre-deployment gates** below. Do not run `mode=remote` in production until every gate is closed.

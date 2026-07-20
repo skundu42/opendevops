@@ -1,4 +1,4 @@
-"""The structured remote-exec tool ``ssh_run(host, argv)`` (P5b).
+"""The structured remote-exec tool ``ssh_run(host, argv)``.
 
 ``ssh_run`` is a SEPARATE tool from the argv-only local ``run_command``: ``ssh`` as a run_command
 argv0 is hard-denied (base.yaml ``interpreters-hard-deny``). It connects to an ALLOWLISTED ``host``
@@ -24,8 +24,7 @@ the middleware refuses:
      site cannot become an RCE; and
   3. the tool's own **re-validation** of ``host`` against the config allowlist plus the
      config-pinned credential (it can never connect to a host outside the config allowlist).
-``ssh`` has a single ``ro`` credential, so no middleware-injected channel is needed. The rationale
-is documented in ``.superpowers/sdd/task-22-report.md``.
+``ssh`` has a single ``ro`` credential, so no middleware-injected channel is needed.
 
 Note: like run_command, this module deliberately does **not** use ``from __future__ import
 annotations`` — the tool declares an injected ``runtime: ToolRuntime`` parameter and langchain's

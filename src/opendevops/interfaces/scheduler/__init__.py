@@ -1,4 +1,4 @@
-"""The scheduler interface: our own APScheduler service driving scheduled agent runs (P4, T20).
+"""The scheduler interface: our own APScheduler service driving scheduled agent runs.
 
 Split into a PURE core and a thin live seam:
 

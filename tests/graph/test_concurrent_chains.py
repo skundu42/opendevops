@@ -1,4 +1,4 @@
-"""P3 DoD — the audit-chain concurrency test (T18; PLAN §3.6 / §6).
+"""The audit-chain concurrency test.
 
 The whole reason audit chains are PER-RUN (``audit/<run_id>.jsonl``) is that LangGraph Server runs
 concurrently across workers and a shared-file ``prev_hash`` read-modify-write would race and
@@ -8,7 +8,7 @@ permanently break verification. This test models that topology in-process:
     its OWN scripted fake model, all sharing ONE audit dir (one ``AuditLogger``) and ONE daily
     counter.
 
-and asserts the three P3 guarantees:
+and asserts three guarantees:
 
   1. every per-run chain file verifies (linkage + hash recomputation) — concurrency never corrupts
      a chain;
@@ -96,14 +96,14 @@ def _make_cfg(base: Path) -> AppConfig:
                 },
                 "github": {
                     "token_env": "OPENDEVOPS_TEST_GH_TOKEN",
-                    "token_env_rw": "OPENDEVOPS_TEST_GH_TOKEN_RW",  # P5f gh-write rw gate
+                    "token_env_rw": "OPENDEVOPS_TEST_GH_TOKEN_RW",  # gh-write rw gate
                     "write_repos": ["octo-org/staging-app"],
                 },
-                # P5a: cloud read packs' coverage gate (names only; not exec'd here).
+                # cloud read packs' coverage gate (names only; not exec'd here).
                 "aws": {"credential_env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]},
                 "gcloud": {"credential_env": ["GOOGLE_APPLICATION_CREDENTIALS"]},
                 "azure": {"credential_env": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID"]},
-                # P5b: ssh-read pack coverage gate (names/paths only; never dialed here).
+                # ssh-read pack coverage gate (names/paths only; never dialed here).
                 "ssh": {
                     "hosts": ["allowed.host.internal"],
                     "user": "deploy",

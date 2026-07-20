@@ -1,4 +1,4 @@
-"""Tests for the structured remote-exec tool ssh_run(host, argv) + the SshExecutor (P5b).
+"""Tests for the structured remote-exec tool ssh_run(host, argv) + the SshExecutor.
 
 asyncssh is MOCKED throughout — no test opens a real socket. Two layers are exercised:
 

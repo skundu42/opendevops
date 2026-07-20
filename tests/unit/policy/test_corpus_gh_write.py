@@ -1,6 +1,6 @@
-"""P5f corpus: the gh-write pack — PR-based remediation writes (allow) + the airtight `gh api` deny.
+"""gh-write corpus: PR-based remediation writes (allow) + the airtight `gh api` deny.
 
-Same contract as ``test_corpus.py`` / ``test_corpus_p2.py``: the *real* ``config/policy/`` dir is
+Same contract as ``test_corpus.py`` / ``test_corpus_mutate.py``: the real ``config/policy/`` dir is
 driven through :class:`YamlRuleEngine`, and every case asserts BOTH the effect AND the exact
 ``rule_id`` — a rule id drifting is as much a regression as an effect flipping.
 
@@ -33,7 +33,7 @@ def _resolver(ref: str) -> list[str]:
         return ["kind-opendevops"]
     if ref == "${targets.ssh.hosts}":
         return ["allowed.host.internal"]
-    if ref == "${targets.github.write_repos}":  # P5f gh-write repo allowlist ref
+    if ref == "${targets.github.write_repos}":  # gh-write repo allowlist ref
         return [ALLOWED_REPO]
     raise AssertionError(f"unexpected config ref {ref!r}")
 

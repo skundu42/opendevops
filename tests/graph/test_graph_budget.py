@@ -109,7 +109,7 @@ async def test_shell_call_limit_blocks_second_call(built_agent: Any, make_cfg: A
 
 
 # Budgets with per-run profiles that differ ONLY in their USD cap, to prove the per-run profile is
-# read from runtime.context (T14): scheduled trips at $1.80, incident only at $9.00.
+# read from runtime.context: scheduled trips at $1.80, incident only at $9.00.
 _PROFILE_BUDGETS: dict[str, Any] = {
     "trip_ratio": 0.9,
     "fail_mode_on_counter_outage": "closed",

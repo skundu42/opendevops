@@ -1,4 +1,4 @@
-# Grafana dashboard provider (P3, T18): loads the JSON dashboards mounted at the path below.
+# Grafana dashboard provider: loads the JSON dashboards mounted at the path below.
 apiVersion: 1
 
 providers:

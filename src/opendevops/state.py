@@ -1,15 +1,15 @@
-"""``DevOpsState`` — the agent's graph state schema (T7).
+"""``DevOpsState`` — the agent's graph state schema.
 
 Composition (verified against the installed deepagents 0.6.12 / langgraph 1.2.9):
 
 * ``DeepAgentState`` contributes ``messages`` (delta-channel reducer) and the planning/FS
   channels used by the deepagents stack.
-* ``BudgetStateMixin`` (T6) contributes ``run_cost_usd`` / ``run_usage`` / ``budget_stop`` and
+* ``BudgetStateMixin`` contributes ``run_cost_usd`` / ``run_usage`` / ``budget_stop`` and
   is composed **by inheritance** — this is critical. Those fields carry commutative reducer
   annotations (``_add_cost`` sums per-call USD, ``_merge_usage`` merges token counters). If
   they were re-declared here as plain fields, langgraph would wire a ``LastValue`` channel that
   *replaces* rather than accumulates, so the per-run USD cap would only ever see the last
-  model call and would silently never fire. T6 flagged this as CRITICAL; a probe confirmed the
+  model call and would silently never fire. This is CRITICAL; a probe confirmed the
   ``DeepAgentState`` + ``BudgetStateMixin`` MRO merge preserves every reducer:
   ``get_type_hints(DevOpsState, include_extras=True)`` keeps ``run_cost_usd`` -> ``_add_cost``,
   ``run_usage`` -> ``_merge_usage``, and ``messages`` -> its delta reducer, and langgraph then
@@ -70,7 +70,7 @@ def _merge_dry_run_ok(
 # (reducer) channel for ``run_cost_usd`` / ``run_usage`` / ``tool_results_cache`` / ``messages``
 # (see tests/unit/policy/test_middleware.py::test_devops_state_channels_are_accumulating_reducers).
 class DevOpsState(DeepAgentState, BudgetStateMixin):  # type: ignore[misc]
-    """The graph state schema: deepagents channels + T6 budget keys + the tool-result cache."""
+    """The graph state schema: deepagents channels + budget keys + the tool-result cache."""
 
     tool_results_cache: NotRequired[Annotated[dict[str, str], _merge_tool_cache]]
     dry_run_ok: NotRequired[Annotated[dict[str, bool], _merge_dry_run_ok]]

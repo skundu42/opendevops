@@ -1,4 +1,4 @@
-"""Operator tooling for the opendevops service stack (P3, T18).
+"""Operator tooling for the opendevops service stack.
 
 Not part of the shipped wheel (``[tool.hatch.build] packages = ["src/opendevops"]``) — these are
 ops-side CLIs run against a deployed stack:

@@ -1,16 +1,16 @@
-"""P5b corpus: the structured ssh_run(host, argv) tool over the shipped policy.
+"""SSH corpus: the structured ssh_run(host, argv) tool over the shipped policy.
 
-Same contract as ``test_corpus.py`` / ``test_corpus_p5.py``: the REAL ``config/policy/`` dir is
+Same contract as ``test_corpus.py`` / ``test_corpus_cloud.py``: the REAL ``config/policy/`` dir is
 driven through :class:`YamlRuleEngine`, asserting BOTH the effect AND the exact ``rule_id`` in
 BOTH ``staging`` and ``prod``. ssh_run is matched by ``tool_name`` + the structured predicates
 (host allowlist + the remote-command-PATH allowlist), distinct from the run_command argv0 pipeline
 — which must stay unchanged.
 
-These tests are the proof the T22 Critical is closed: a read-only ssh pack authorized remote
-MUTATIONS (``systemctl restart/poweroff``, ``journalctl --vacuum-*``, ``hostname <name>``, ``ss
--K``) because it pinned only ``argv[0]``. The fix is a fail-CLOSED positive allowlist on the remote
-command PATH (argv0 + read subcommand) for multi-mode binaries, an argv0 pin for the vetted
-single-mode binaries, and a compensating DENY for journalctl's mutation flags. Every Critical
+These tests pin the pack's central hazard: a read-only ssh pack that pinned only ``argv[0]``
+would authorize remote MUTATIONS (``systemctl restart/poweroff``, ``journalctl --vacuum-*``,
+``hostname <name>``, ``ss -K``). The shipped design is a fail-CLOSED positive allowlist on the
+remote command PATH (argv0 + read subcommand) for multi-mode binaries, an argv0 pin for the
+vetted single-mode binaries, and a compensating DENY for journalctl's mutation flags. Every
 exploit argv below MUST deny.
 """
 
@@ -37,7 +37,7 @@ def _resolver(ref: str) -> list[str]:
         return ALLOWED_CONTEXTS
     if ref == "${targets.ssh.hosts}":
         return [ALLOWED_HOST]
-    if ref == "${targets.github.write_repos}":  # P5f gh-write repo allowlist ref
+    if ref == "${targets.github.write_repos}":  # gh-write repo allowlist ref
         return ["octo-org/staging-app"]
     raise AssertionError(f"unexpected config ref {ref!r}")
 

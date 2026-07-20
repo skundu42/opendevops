@@ -1,4 +1,4 @@
-"""The ``AgentGateway`` protocol and its typed run/stream value objects (T9).
+"""The ``AgentGateway`` protocol and its typed run/stream value objects.
 
 The gateway is the single seam between an *interface* (the CLI REPL now; a LangGraph Server /
 Slack adapter later) and the compiled agent graph. It owns run identity, the audit-chain
@@ -39,8 +39,8 @@ class RunResult:
     * ``budget_stop`` — set iff a cap tripped (per-run USD, daily USD, wall-clock, recursion,
       or a counter outage); ``None`` on a clean finish.
     * ``error`` — a short human string iff the turn did not complete normally; ``None`` on success.
-    * ``interrupted`` — set iff the turn SUSPENDED on a policy ``escalate`` awaiting human review
-      (P2). The run's audit chain is still OPEN: resume it with
+    * ``interrupted`` — set iff the turn SUSPENDED on a policy ``escalate`` awaiting human
+      review. The run's audit chain is still OPEN: resume it with
       :meth:`AgentGateway.resume_interrupt` (same ``thread_id``) to continue to a final
       :class:`RunResult`. ``None`` on a run that ran to completion.
     """
@@ -57,7 +57,7 @@ class RunResult:
 
 @dataclass
 class Escalation:
-    """A suspended run awaiting human approval of a policy-escalated tool call (P2).
+    """A suspended run awaiting human approval of a policy-escalated tool call.
 
     * ``payload`` — the review envelope the middleware's ``interrupt()`` raised:
       ``{"action_requests": [{"action", "args"}], "review_configs": [{"rule_id", "reason",
@@ -101,7 +101,7 @@ class ToolResult:
 
 @dataclass
 class EscalationEvent:
-    """A streamed signal that the run SUSPENDED on a policy escalation (P2 HITL).
+    """A streamed signal that the run SUSPENDED on a policy escalation (HITL).
 
     Emitted immediately before the terminal :class:`RunEnd` of a stream when the turn interrupts:
     the interface renders ``escalation.payload`` (approve/edit/reject), then calls
@@ -152,12 +152,12 @@ class AgentGateway(Protocol):
     async def create_thread(self, thread_id: str | None = None) -> str:
         """Allocate a conversation/thread id, or reuse a caller-chosen one idempotently.
 
-        With ``thread_id=None`` (the default) a fresh opaque id is minted (a uuid in P1; a
-        server-minted thread later). With an explicit ``thread_id`` the caller pins the id — used
-        by the webhook app to derive a *deterministic* incident thread
+        With ``thread_id=None`` (the default) a fresh opaque id is minted (a uuid locally; a
+        server-minted thread in service mode). With an explicit ``thread_id`` the caller pins the
+        id — used by the webhook app to derive a *deterministic* incident thread
         (``uuid5(NS_INCIDENT, fingerprint)``) so the same alert reuses the same thread: the
         allocation is idempotent (``ServerGateway`` passes ``if_exists="do_nothing"``), and the
-        returned id equals the one requested. Added additively in T17.
+        returned id equals the one requested.
         """
         ...
 

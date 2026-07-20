@@ -1,19 +1,19 @@
-"""The one execution tool (argv-only): decision gate + LocalExecutor + scrubber + FS spill (T5).
+"""The one execution tool (argv-only): decision gate + LocalExecutor + scrubber + FS spill.
 
 ``run_command(argv, timeout_s=60)`` is the agent's *only* execution surface. This module wires
 together:
 
-* the **decision gate** — a module-level :data:`current_decision` ``ContextVar`` that T7's
+* the **decision gate** — a module-level :data:`current_decision` ``ContextVar`` that
   PolicyMiddleware sets (token = set/reset) around the tool handler. No code path reaches a
   subprocess without a matching decision (argv equality + tool_call_id when the runtime
-  provides one), the in-process P1 stand-in for the P5 signed decision token.
+  provides one), the in-process analogue of the remote executor's signed decision token.
 * the **argv boundary** — empty argv, non-string elements and ``/`` in ``argv[0]`` are
   rejected at the boundary (error string, never an exception), so PATH lookup stays the
   executor's job and ``../`` / absolute-path dodges are blocked.
 * the **output pipeline** — ANSI-strip -> scrub -> sha256(scrubbed) -> head/tail truncate.
 * the **exec-meta return channel** — the per-exec audit facts (sha / duration / exit_code /
   truncated / scrub_count) ride on the returned ``ToolMessage``'s
-  ``additional_kwargs[EXEC_META_KEY]``. T7's PolicyMiddleware reads (and strips) them there.
+  ``additional_kwargs[EXEC_META_KEY]``. PolicyMiddleware reads (and strips) them there.
   A ``ContextVar`` is deliberately *not* used: langchain runs the tool coroutine in a copied
   context (``tool.ainvoke``), so a value the tool sets does not propagate back to the middleware
   frame — the child->parent leg of the boundary is lost. The return value does cross it.
@@ -27,13 +27,13 @@ references that path. **This is implemented** (not skipped): a spike against a r
 ``Command(update={"files": {path: FileData}, "messages": [ToolMessage]})`` persists into the
 ``files`` state channel and is read back verbatim by the built-in ``read_file`` tool — the
 same shape deepagents' own ``write_file`` produces (``create_file_data``). No graph internals
-are touched. Two integration dependencies (for T8) are worth flagging:
+are touched. Two integration dependencies are worth flagging:
   1. the spill requires the ``files`` state channel, contributed by ``FilesystemMiddleware``
      (present in the default ``create_deep_agent`` stack); and
-  2. T7's ``PolicyMiddleware.wrap_tool_call`` must pass a ``Command`` return through
+  2. ``PolicyMiddleware.wrap_tool_call`` must pass a ``Command`` return through
      unchanged (its signature already returns ``ToolMessage | Command``).
 If a future backend/permissions config routes ``/output/`` away from state or denies writes
-there, ``read_file`` visibility would need re-checking — noted for T8.
+there, ``read_file`` visibility would need re-checking.
 
 Note: this module deliberately does **not** use ``from __future__ import annotations``. The
 ``run_command`` tool declares an injected ``runtime: ToolRuntime`` parameter, and langchain's
@@ -79,13 +79,13 @@ from opendevops.tools.staging import (
 )
 
 # --------------------------------------------------------------------------------------
-# decision gate (in-process P1 stand-in for the P5 signed decision token)
+# decision gate (the in-process analogue of the remote executor's signed decision token)
 # --------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class ExecDecision:
-    """A policy authorization for exactly one execution, set by T7's middleware."""
+    """A policy authorization for exactly one execution, set by PolicyMiddleware."""
 
     tool_call_id: str
     channel: Literal["ro", "rw"]
@@ -102,7 +102,7 @@ RUN_COMMAND_NAME = "run_command"
 """The tool name; also stamped on the ToolMessage run_command builds itself."""
 
 EXEC_META_KEY = "exec_meta"
-"""additional_kwargs key carrying the per-exec audit facts to T7's PolicyMiddleware.
+"""additional_kwargs key carrying the per-exec audit facts to PolicyMiddleware.
 
 The middleware reads this off the returned ToolMessage (directly, or inside a Command's
 ``update["messages"]``), emits the execution audit event, and strips the key before the message
@@ -169,7 +169,7 @@ def _format_result(
     ``[{path, sha256}]`` of any virtual manifest materialized for this exec — is recorded on the
     meta so the audit ``execution.staged_files`` captures exactly the applied manifest.
 
-    ``secret_values`` — the exact secret VALUES resolved for this call (P5d) — are literal-scrubbed
+    ``secret_values`` — the exact secret VALUES resolved for this call — are literal-scrubbed
     from the output as a backstop over the pattern scrubber. Empty (the default, and always so on
     the remote path where the service already scrubbed and the agent holds no values) makes
     ``scrub_full`` byte-for-byte identical to the original pattern ``scrub``.
@@ -205,7 +205,7 @@ def _format_result(
         "truncated": truncated,
         "scrub_count": scrub_count,
         # The applied manifest(s): [{path: virtual_path, sha256: content-hash}]. Empty for calls
-        # with no file flags. T7's PolicyMiddleware forwards this into the audit execution event.
+        # with no file flags. PolicyMiddleware forwards this into the audit execution event.
         "staged_files": staged_files or [],
     }
 
@@ -255,7 +255,7 @@ async def run_command_core(
 
     active_executor = executor if executor is not None else _DEFAULT_EXECUTOR
 
-    # 3b. executor mode (P5d). On the REMOTE path the agent holds NO credential and NO secret value:
+    # 3b. executor mode. On the REMOTE path the agent holds NO credential and NO secret value:
     #     do NOT call build_env or resolve secrets in-process — sign the AUTHORIZED argv and hand
     #     off to the executor service (which holds the credentials + secrets). The decision gate
     #     above already ran on this path too. LOCAL (default) is byte-for-byte unchanged.

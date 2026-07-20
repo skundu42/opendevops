@@ -1,7 +1,7 @@
 """Policy engine: declarative YAML rules + Python hooks, default-deny, fail-closed.
 
-Public surface re-exported here is the T3 data model + loader + argv parser plus the T4
-decision engine and hook registry, and the T7 :class:`PolicyMiddleware` integration point.
+Public surface re-exported here is the data model + loader + argv parser plus the
+decision engine and hook registry, and the :class:`PolicyMiddleware` integration point.
 """
 
 from __future__ import annotations

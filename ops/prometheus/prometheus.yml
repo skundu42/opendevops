@@ -1,8 +1,8 @@
-# Prometheus scrape + rule config for opendevops (P3, T18).
+# Prometheus scrape + rule config for opendevops.
 #
 # Scrapes run INSIDE the compose network (bypassing Caddy — no bearer token needed): the LangGraph
-# Server exposes the webhook app's /metrics (prometheus_client, per PLAN §3.7), and Vector exposes
-# its own health/lag metrics. The alert rules live in alerts.yml (PLAN §6 cross-checks).
+# Server exposes the webhook app's /metrics (prometheus_client), and Vector exposes
+# its own health/lag metrics. The alert rules live in alerts.yml.
 
 global:
   scrape_interval: 15s

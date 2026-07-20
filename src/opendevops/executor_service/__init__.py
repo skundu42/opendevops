@@ -1,4 +1,4 @@
-"""The standalone executor **service** (P5d executor split).
+"""The standalone executor **service** (the executor split).
 
 A small FastAPI app that is the ONLY holder of infra credentials + secret values. It verifies an
 ed25519 decision token (proving the request passed the policy engine), materializes staged files

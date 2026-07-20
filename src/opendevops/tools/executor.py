@@ -20,7 +20,7 @@ key                          value
                              ("no configuration provided") instead of using operator creds
 ``GH_TOKEN``                 the ``gh`` family PAT only — the READ PAT
                              (``targets.github.token_env``) on the ``ro`` channel, the WRITE PAT
-                             (``targets.github.token_env_rw``) on ``rw`` (P5f); exactly one,
+                             (``targets.github.token_env_rw``) on ``rw``; exactly one,
                              absent for every other family
 ``AWS_*`` / ``GOOGLE_*`` /   the read-only cloud credential, injected ONLY for its own family:
 ``CLOUDSDK_*`` / ``AZURE_*`` the variables named by ``targets.{aws,gcloud,azure}.credential_env``
@@ -96,7 +96,7 @@ _BASE_ENV_LITERALS: dict[str, str] = {
 # Families that talk to the cluster with kube credentials (same KUBECONFIG selection).
 _KUBE_FAMILIES = frozenset({"kubectl", "helm"})
 
-# Read-only cloud CLI families (P5a). Maps the credential family / argv0 to the config
+# Read-only cloud CLI families. Maps the credential family / argv0 to the config
 # ``targets.<attr>`` that names its credential env vars. Note ``az`` -> ``azure`` (the Azure CLI
 # binary and credential family are ``az``; the config target is spelled ``azure``).
 _CLOUD_FAMILY_TARGET: dict[str, str] = {"aws": "aws", "gcloud": "gcloud", "az": "azure"}
@@ -122,7 +122,7 @@ def build_env(
 
     ``GH_TOKEN`` is injected **only** for the ``gh`` family, from the value of the agent-process
     env var named by ``cfg.targets.github.token_env`` on the ``ro`` channel or
-    ``cfg.targets.github.token_env_rw`` on ``rw`` (P5f) — exactly one PAT, never both, so a rw
+    ``cfg.targets.github.token_env_rw`` on ``rw`` — exactly one PAT, never both, so a rw
     write call never sees the read PAT and vice versa; a missing/unset/empty selected variable
     raises :class:`CredentialUnavailable` (refusal, no exec). The token value never appears in any
     log or error message. A ``gh`` call still gets ``KUBECONFIG=/dev/null`` (the sentinel), and a
@@ -131,7 +131,7 @@ def build_env(
 
     The read-only cloud families (``aws`` / ``gcloud`` / ``az``) inject **only** their own
     credential — the VALUES of the agent-process variables named by
-    ``targets.{aws,gcloud,azure}.credential_env`` (P5a). A missing/empty named variable, or an
+    ``targets.{aws,gcloud,azure}.credential_env``. A missing/empty named variable, or an
     unconfigured (empty) list, raises :class:`CredentialUnavailable` (refusal, no exec); the values
     never appear in any log or error. Each still gets ``KUBECONFIG=/dev/null`` and never sees
     ``GH_TOKEN`` or another cloud family's variables — one credential family per exec.
@@ -190,7 +190,7 @@ def _gh_token(cfg: AppConfig, channel: str) -> str:
 
     The ``rw`` channel (the gh-write pack: ``gh run rerun`` / ``gh pr create`` / the ``gh api``
     write allowlist) reads the WRITE PAT from ``targets.github.token_env_rw``; every other channel
-    (``ro`` / ``None``) reads the READ PAT from ``targets.github.token_env`` (P5f). Exactly one is
+    (``ro`` / ``None``) reads the READ PAT from ``targets.github.token_env``. Exactly one is
     injected per exec — the rw PAT is never used on ro and the ro PAT never on rw — so a mistagged
     channel can never smuggle the write credential. Raises :class:`CredentialUnavailable` (never
     echoing the token value) when the selected variable is unconfigured, unset, or empty; a rw gh
@@ -347,7 +347,7 @@ def _close_streams(proc: subprocess.Popen[str]) -> None:
 
 
 # --------------------------------------------------------------------------------------
-# ssh remote-exec (P5b): the SshExecutor for the structured ssh_run tool
+# ssh remote-exec: the SshExecutor for the structured ssh_run tool
 # --------------------------------------------------------------------------------------
 
 # Host connection timeout (separate from the per-command timeout the model requests): bounds how
@@ -427,7 +427,7 @@ def _ssh_output(value: object) -> str:
 
 
 class SshExecutor:
-    """Runs one remote ``argv`` over asyncssh with host-key verification pinned (P5b).
+    """Runs one remote ``argv`` over asyncssh with host-key verification pinned.
 
     Probe finding (asyncssh 2.24.0): the SSH protocol's ``exec`` channel carries a SINGLE command
     string — there is no argv-vector remote exec — which the remote sshd runs under the login user's
@@ -496,7 +496,7 @@ class SshExecutor:
 
 
 # --------------------------------------------------------------------------------------
-# RemoteExecutor client + Local/Remote selection (P5d executor split)
+# RemoteExecutor client + Local/Remote selection (the executor split)
 # --------------------------------------------------------------------------------------
 
 # How long the client waits for the service beyond the per-command timeout (connect + service

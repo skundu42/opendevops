@@ -1,4 +1,4 @@
-"""Unit tests for ``SingleToolCallMiddleware`` — the parallel-tool-call guard (T13).
+"""Unit tests for ``SingleToolCallMiddleware`` — the parallel-tool-call guard.
 
 Drives ``awrap_model_call`` directly with a fake handler returning a ``ModelResponse``; asserts
 that a multi-tool-call AIMessage is collapsed to its first call (with a self-correct note and

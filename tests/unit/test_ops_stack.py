@@ -1,4 +1,4 @@
-"""docker-compose stack + ops config validation (T18).
+"""docker-compose stack + ops config validation.
 
 Two tiers, per the task brief:
 
@@ -159,7 +159,7 @@ def test_prometheus_rule_file_exists() -> None:
 def test_alerts_cover_the_plan_cross_checks() -> None:
     groups = _alerts()["groups"]
     all_alerts = {rule["alert"] for grp in groups for rule in grp.get("rules", [])}
-    # PLAN §6: denial spike, daily spend >80%, scheduler silence, audit-shipper lag.
+    # Alert coverage: denial spike, daily spend >80%, scheduler silence, audit-shipper lag.
     assert "PolicyDenialSpike" in all_alerts
     assert "DailySpendOver80Percent" in all_alerts
     assert "SchedulerSilence" in all_alerts

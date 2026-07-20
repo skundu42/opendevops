@@ -1,4 +1,4 @@
-"""Audit chain walker for `opendevops audit verify` (per-run files) (T2).
+"""Audit chain walker for `opendevops audit verify` (per-run files).
 
 Pure functions: walk a per-run JSONL chain and recompute every hash. Two independent checks
 make the log tamper-evident:
@@ -21,20 +21,20 @@ recomputation, since the hash covers the full canonical payload.
 What this does **not** detect: silent truncation of the **tail** — deleting the last N lines of
 a file leaves a shorter, fully self-consistent chain that verifies ``ok=True`` (see
 ``test_tamper_delete_last_line_is_undetected`` in ``test_audit.py``, which pins this as
-accepted P1 behavior). Nothing in the file itself records how many events *should* exist or
+accepted behavior). Nothing in the file itself records how many events *should* exist or
 what the true last hash *should* be, so a truncated prefix is indistinguishable from a run that
 legitimately ended early (e.g. a crash before ``run_completed`` — see
 ``test_crashed_run_without_completed_still_verifies``). Detecting tail truncation requires an
-external anchor for the chain's tip/count: an ed25519-signed run header or trailer (P5), or a
+external anchor for the chain's tip/count: an ed25519-signed run header or trailer, or a
 second sink (e.g. a remote log shipper) that independently observes the tip. Until then, this
 verifier's guarantee is "every surviving line is exactly as written and in order," not
 "nothing was ever removed from the end."
 
 ``ts`` monotonicity is checked warn-only (clock skew is not tampering). The ``main`` helper is
-the entry point the T9 ``audit verify`` CLI subcommand calls.
+the entry point the ``audit verify`` CLI subcommand calls.
 
-Merged spool files (T18)
-------------------------
+Merged spool files
+------------------
 Vector ships every per-run chain into a durable spool, merging many runs into one append-only
 day-file (``audit-merged-<date>.jsonl``) where lines from different runs are INTERLEAVED. Such a
 file is not a single linear chain, so ``verify_run_file`` (which walks a file as one chain) would

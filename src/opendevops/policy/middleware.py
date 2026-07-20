@@ -1,4 +1,4 @@
-"""``PolicyMiddleware`` — authorize, audit, gate, and cache every tool call (T7).
+"""``PolicyMiddleware`` — authorize, audit, gate, and cache every tool call.
 
 This is the integration heart of the safety core: the ``awrap_tool_call`` hook every tool call
 passes through. The pipeline is::
@@ -12,17 +12,17 @@ middleware never raises into the graph — a bug in authorization must stop a to
 the run.
 
 Interfaces consumed (their real APIs are ground truth):
-* T4 engine — ``await engine.decide(ToolCallCtx) -> Decision``; an escalate ``Decision`` carries
+* engine — ``await engine.decide(ToolCallCtx) -> Decision``; an escalate ``Decision`` carries
   only effect+rule_id+reason (the ``Escalation`` payload is resolved via
   ``loaded.rules_by_id[rule_id]``), a rewrite carries ``rewritten_argv`` + the winning allow's
   ``channel``.
-* T5 tool — the ``current_decision`` ``ExecDecision`` gate (set/reset around the run_command
-  handler) and the exec-meta return channel: run_command tags its returned ToolMessage's
-  ``additional_kwargs[EXEC_META_KEY]`` with the per-exec audit facts (set only when the tool
-  actually ran), which :func:`_pop_exec_meta` reads and strips here.
-* T2 audit — ``AuditLogger.append(run_id, EventType, ...)``; the run chain is seeded by the
+* run_command tool — the ``current_decision`` ``ExecDecision`` gate (set/reset around the
+  run_command handler) and the exec-meta return channel: run_command tags its returned
+  ToolMessage's ``additional_kwargs[EXEC_META_KEY]`` with the per-exec audit facts (set only
+  when the tool actually ran), which :func:`_pop_exec_meta` reads and strips here.
+* audit — ``AuditLogger.append(run_id, EventType, ...)``; the run chain is seeded by the
   gateway's ``start_run`` (unit tests seed it themselves).
-* T3 loader — ``LoadedPolicy.tool_family_by_rule`` (winning rule -> credential family) and
+* loader — ``LoadedPolicy.tool_family_by_rule`` (winning rule -> credential family) and
   ``rules_by_id`` (escalation payload), plus ``policy_version``.
 """
 
@@ -70,11 +70,11 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
     integration actually needs — the LoadedPolicy for tool_family/escalation/policy_version and
     the model id for audit provenance):
 
-    * ``engine`` — the T4 ``PolicyEngine`` (``YamlRuleEngine`` in P1; OPA later).
-    * ``audit`` — the T2 ``AuditLogger``. The run chain must already be started (the gateway
+    * ``engine`` — the ``PolicyEngine`` (``YamlRuleEngine`` today; OPA later).
+    * ``audit`` — the ``AuditLogger``. The run chain must already be started (the gateway
       calls ``start_run``); if it is not, an ``append`` raises and the fail-closed wrapper turns
       it into a deny with no crash.
-    * ``loaded`` — the T3 ``LoadedPolicy`` (``tool_family_by_rule``, ``rules_by_id``,
+    * ``loaded`` — the ``LoadedPolicy`` (``tool_family_by_rule``, ``rules_by_id``,
       ``policy_version``).
     * ``model`` — the ``provider:model`` string recorded on every audit event.
     * ``policy_version`` — overrides ``loaded.policy_version`` if given (else derived from it).
@@ -115,7 +115,7 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
             # LangGraph control flow (GraphInterrupt from interrupt()/HITL, ParentCommand)
             # subclasses Exception but is NOT an error: it must propagate for suspend/resume
             # to work. Converting it into a fail-closed deny would break every interrupt
-            # flow — including the P2 escalate path that calls interrupt() inside this very
+            # flow — including the escalate path that calls interrupt() inside this very
             # pipeline. (asyncio.CancelledError is a BaseException and propagates anyway.)
             raise
         except Exception as exc:  # noqa: BLE001 - fail-closed: nothing escapes into the graph
@@ -134,7 +134,7 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
     ) -> ToolMessage | Command[Any]:
         # 2. Execution-cache check: a tool_call_id already recorded in state is replayed from
         #    the cache without re-deciding or re-executing. This absorbs LangGraph node
-        #    re-execution after an interrupt-resume; the T2 audit dedupe absorbs any duplicate
+        #    re-execution after an interrupt-resume; the audit-logger dedupe absorbs any duplicate
         #    events the graph would otherwise emit. Done first so a cache hit is the cheapest path.
         cache = _read_cache(request.state)
         if tool_call_id and tool_call_id in cache:
@@ -248,7 +248,7 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
         #     later real apply of the same manifest *in the same run*. Run-scoping is required
         #     because the checkpointer persists this channel across turns on a thread: a bare-sha
         #     key would let a turn-N server dry-run silently approve a turn-N+1 real apply with no
-        #     fresh (current-cluster) validation. See T12-review note + builtin_hooks lookup.
+        #     fresh (current-cluster) validation. See the builtin_hooks lookup.
         dry_run_ok = _dry_run_ok_update(exec_argv, meta, run_id) if meta is not None else None
 
         # 7. Cache the result into state (via a Command) so a resume re-execution is absorbed;
@@ -301,7 +301,7 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
         interface: str,
         env: str,
     ) -> ToolMessage | Command[Any]:
-        """Suspend the run for human review, then act on the approver's decision (P2 HITL).
+        """Suspend the run for human review, then act on the approver's decision (HITL).
 
         The flow (verified against langgraph 1.2.9):
 
@@ -490,7 +490,7 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
             model=self._model,
             policy_version=self._policy_version,
             tool=tool_name,
-            # The frozen T2 Execution section has no scrub_count / argv / channel field; surface
+            # The frozen audit Execution section has no scrub_count / argv / channel field; surface
             # the secret-scrub count AND the EXECUTED argv + credential channel on the generic
             # event ``args`` so the metric is kept and the executed command is attributable (I1).
             args={
@@ -717,10 +717,10 @@ def _staged_files(
     """Record the files this execution touched, by virtual path + content sha256.
 
     Two sources, concatenated:
-    * ``meta["staged_files"]`` — the T11 staging bridge's record of virtual-FS manifests it
+    * ``meta["staged_files"]`` — the staging bridge's record of virtual-FS manifests it
       materialized for file-consuming flags (``kubectl apply -f`` etc.). The applied manifest
       is exactly what audit must capture, and the dry-run hook keys on these shas.
-    * the truncation-spill Command's ``files`` update (T5) — the spilled full-output file,
+    * the truncation-spill Command's ``files`` update — the spilled full-output file,
       hashed by ``stdout_sha256`` (the spill content IS the scrubbed output).
     """
     staged: list[dict[str, str]] = [

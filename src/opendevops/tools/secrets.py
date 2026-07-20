@@ -1,4 +1,4 @@
-"""``{{secret:NAME}}`` resolver — secrets into the subprocess ENV, never argv/logs (P5d).
+"""``{{secret:NAME}}`` resolver — secrets into the subprocess ENV, never argv/logs.
 
 The model may reference a named secret in a command with a ``{{secret:NAME}}`` token (e.g.
 ``["curl", "-H", "Authorization: Bearer {{secret:API_TOKEN}}", url]``). Resolving it does **two**

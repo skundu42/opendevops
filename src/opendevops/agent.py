@@ -1,10 +1,10 @@
-"""Final agent assembly: ``build_agent`` composes the deepagents graph + safety middleware (T8).
+"""Final agent assembly: ``build_agent`` composes the deepagents graph + safety middleware.
 
 ``build_agent(cfg, *, audit, counter, checkpointer=None)`` returns a compiled langgraph agent
 whose every tool call passes, in order, through the budget stop-loss middleware (per-run USD,
 daily USD, model-call / tool-call / shell-call limits) and finally ``PolicyMiddleware`` — the
 innermost wrap, so the authorization decision sits closest to execution. ``audit`` and
-``counter`` are *injected* (not built here) so the T9 gateway shares the same instances it uses
+``counter`` are *injected* (not built here) so the gateway shares the same instances it uses
 for ``start_run`` / ``run_completed`` / daily-cap checks.
 
 Boot is fail-closed. Before returning, ``build_agent`` runs two hard assertions and raises
@@ -16,12 +16,12 @@ Boot is fail-closed. Before returning, ``build_agent`` runs two hard assertions 
   layer has never vetted → refuse to boot.
 * :func:`_assert_reducer_channels` — the compiled graph's ``run_cost_usd`` (and ``run_usage`` /
   ``tool_results_cache`` / ``messages``) channels must be ``BinaryOperatorAggregate`` reducers.
-  If T7's state composition ever flattened the budget-mixin annotations into plain ``LastValue``
+  If the state composition ever flattened the budget-mixin annotations into plain ``LastValue``
   fields, the per-run USD cap would silently see only the *last* model call and never fire; we
   turn that latent failure into a loud boot failure.
 
-The log-summarizer subagent + scoped ``task`` (P5c)
----------------------------------------------------
+The log-summarizer subagent + scoped ``task``
+---------------------------------------------
 The main agent has ONE named subagent — a haiku-backed **log-summarizer**
 (:func:`_build_log_summarizer_subagent`) it delegates log / large-output digesting to via
 deepagents' ``task`` tool. It is registered as a :class:`~deepagents.CompiledSubAgent` built from
@@ -53,8 +53,8 @@ deepagents 0.6.12 binds a shell-string tool that is unwanted:
   defense-in-depth win — the model never sees it) but leaves it in the ToolNode. It is inert on
   ``StateBackend`` and hard-denied by the shipped ``no-builtin-shell-execute`` rule.
 
-Summarizer replacement (T14) — replace-by-name IS possible, via a harness-profile exclusion
---------------------------------------------------------------------------------------------
+Summarizer replacement — replace-by-name IS possible, via a harness-profile exclusion
+-------------------------------------------------------------------------------------
 deepagents' default stack injects a ``create_summarization_middleware(model, backend)`` built on
 the **main** model. We replace it with a haiku-backed one (the ``summarizer`` agent alias). The
 mechanism (verified empirically against deepagents 0.6.12 / langchain 1.3.14 — probes cited at
@@ -75,8 +75,8 @@ BOTH the config ``model_key`` (real model) AND the model instance's derived key 
 fake test model also gets the default summarizer excluded — otherwise the fake build would run two
 summarizers). See :func:`_register_harness_profiles`.
 
-Per-profile budget caps (T14)
------------------------------
+Per-profile budget caps
+-----------------------
 :class:`CostCapMiddleware` resolves its USD cap **per run** from ``runtime.context.budget_profile``
 against a ``profiles`` map (all of ``cfg.budgets``'s profiles resolved once here at build), so the
 same compiled graph enforces ``scheduled``'s $2.00 cap on one run and ``incident``'s $10.00 on the
@@ -141,9 +141,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # The ten tools the agent is *supposed* to expose: our argv-only run_command, the structured
-# credential-pinned ssh_run remote-exec tool (P5b), the deepagents built-in filesystem/planning
-# tools (allowed by tool_name at the engine level), and `task` — the subagent spawner, now an
-# active tool SCOPED by policy to the single named log-summarizer subagent (P5c; base.yaml
+# credential-pinned ssh_run remote-exec tool, the deepagents built-in filesystem/planning
+# tools (allowed by tool_name at the engine level), and `task` — the subagent spawner, an
+# active tool SCOPED by policy to the single named log-summarizer subagent (base.yaml
 # `no-arbitrary-subagents` + engine `__subagent_allowed__`). `task` is bound in BOTH the production
 # build (exposing only the log-summarizer) and a fake-model build (also exposing the general-purpose
 # subagent, which the policy denies), so it is *required*, not merely tolerated.
@@ -240,7 +240,7 @@ def _build_summarizer(cfg: AppConfig, backend: Any) -> _DeepAgentsSummarizationM
 
 
 def _build_log_summarizer_subagent(cfg: AppConfig) -> CompiledSubAgent:
-    """Build the haiku-backed log-summarizer subagent (P5c) as a tool-less compiled runnable.
+    """Build the haiku-backed log-summarizer subagent as a tool-less compiled runnable.
 
     Registered under the exact name :data:`~opendevops.policy.engine.LOG_SUMMARIZER_SUBAGENT`
     (the ``subagent_type`` the policy permits) and delegated to via deepagents' ``task`` tool.
@@ -297,8 +297,8 @@ def _make_config_resolver(cfg: AppConfig) -> Any:
     """Resolve a policy config-interpolation ref (``"${a.b.c}"``) to its value on ``cfg``.
 
     The engine collects every ref used by a ``flag_value_not_in`` predicate and resolves it once
-    at construction (fail-loud on a typo'd/unbound ref), then again per matching decision. P1's
-    only ref is ``${targets.kubernetes.allowed_contexts}``.
+    at construction (fail-loud on a typo'd/unbound ref), then again per matching decision. The
+    kubectl packs' ref is ``${targets.kubernetes.allowed_contexts}``.
     """
 
     def resolve_ref(ref: str) -> Any:
@@ -322,15 +322,15 @@ def _configured_credential_families(cfg: AppConfig) -> set[str]:
     * gh — iff ``targets.github.token_env`` names the env var holding the read-only PAT
       (the executor refuses gh-family calls with CredentialUnavailable when unset, but the
       pack's allow rules are only bootable when the credential is configured).
-    * gh-rw — the WRITE pseudo-family (P5f): iff ``targets.github.token_env_rw`` names the env var
+    * gh-rw — the WRITE pseudo-family: iff ``targets.github.token_env_rw`` names the env var
       holding the write PAT. The gh-write pack's rw allows require it at boot (the rw coverage
       gate in ``check_credential_coverage`` maps a gh pack's ``channel: rw`` allows to ``"gh-rw"``),
       so a gh-write allow with no write PAT configured refuses to boot — mirroring the ro gh gate.
-    * aws / gcloud / az — iff the matching cloud target names ≥1 credential env var (P5a). The
+    * aws / gcloud / az — iff the matching cloud target names ≥1 credential env var. The
       ``az`` family reads ``targets.azure`` (the Azure CLI binary/family is ``az``, the config
       target is spelled ``azure``). An empty ``credential_env`` list is treated as unconfigured,
       so a shipped cloud pack with allow rules refuses to boot until a credential is named.
-    * ssh — iff ``targets.ssh.key_env`` names the env var holding the private-key path (P5b). The
+    * ssh — iff ``targets.ssh.key_env`` names the env var holding the private-key path. The
       credential is the config-pinned key + known_hosts; the ssh pack's allow rule is only bootable
       once it is named (the executor refuses any ssh_run call with CredentialUnavailable meanwhile).
     """
@@ -413,7 +413,7 @@ def _resolved_profiles(cfg: AppConfig) -> dict[str, ResolvedProfile]:
 
 
 class RunLifecycleMiddleware(AgentMiddleware[BudgetStateMixin, Any, Any]):
-    """Write the audit-chain book-ends *in-graph* — for the SERVER build path only (T16).
+    """Write the audit-chain book-ends *in-graph* — for the SERVER build path only.
 
     Chain-locality problem
     ----------------------
@@ -430,7 +430,7 @@ class RunLifecycleMiddleware(AgentMiddleware[BudgetStateMixin, Any, Any]):
     keeps writing its own book-ends and its 400+ tests stay byte-identical — a server-built graph
     with this middleware and a local-built graph without it differ by exactly these two events.
 
-    * ``abefore_model`` seeds the chain with ``start_run`` — **durably idempotent** (T16), so the
+    * ``abefore_model`` seeds the chain with ``start_run`` — **durably idempotent**, so the
       many model calls of a run (and a node re-execution after an ``interrupt()`` resume) collapse
       to a single ``run_started``. Placed first in the stack so the seed precedes any policy append,
       even when a budget middleware jumps-to-end on the very first call.
@@ -440,7 +440,7 @@ class RunLifecycleMiddleware(AgentMiddleware[BudgetStateMixin, Any, Any]):
       a suspend and is closed only when the resumed run finally ends. This mirrors ``LocalGateway``
       keep-open-on-suspend / close-on-completion.
 
-    Resume across a process boundary (T16 — the fix that made this shape production-safe): on a
+    Resume across a process boundary (the property that makes this shape production-safe): on a
     resume the tools node re-executes BEFORE ``abefore_model``, so if a server RESTART or a
     DIFFERENT worker handles the resume, the fresh :class:`AuditLogger`'s first touch is a policy
     ``append``, not the ``start_run`` seed. :class:`AuditLogger` therefore rehydrates an open chain
@@ -461,7 +461,7 @@ class RunLifecycleMiddleware(AgentMiddleware[BudgetStateMixin, Any, Any]):
     Accounting divergence (see :class:`ServerGateway`): the gateway-side usage-metadata callback
     cannot see the server-side model calls, so ``cost_authoritative`` is set equal to the in-graph
     ``cost_state`` (``run_cost_usd``) and ``usage`` is flagged ``authoritative_unavailable`` — the
-    weekly LangSmith cross-check (PLAN §6) is the compensating control.
+    weekly LangSmith cross-check is the compensating control.
     """
 
     state_schema = BudgetStateMixin
@@ -566,9 +566,9 @@ def build_agent(
         cfg: the validated application config.
         audit: the shared :class:`AuditLogger` (the gateway seeds/closes the run chain).
         counter: the shared :class:`DailyCounter` for the daily USD envelopes.
-        checkpointer: optional langgraph checkpointer (``None`` in P1; sqlite saver in P2). The
+        checkpointer: optional langgraph checkpointer (the CLI passes its sqlite saver). The
             SERVER build path passes ``None`` — the LangGraph platform injects Postgres
-            checkpointing; a saver must never be attached on that path (plan mandate).
+            checkpointing; a saver must never be attached on that path.
         run_lifecycle: enable the in-graph :class:`RunLifecycleMiddleware` audit book-ends. Kept
             ``False`` (the default) for :class:`LocalGateway`, which writes its own book-ends;
             :func:`server_graph` passes ``True`` so the SERVER build writes ``run_started`` /
@@ -593,7 +593,7 @@ def build_agent(
         )
     engine = YamlRuleEngine(loaded, _make_config_resolver(cfg))
 
-    # --- budget middleware caps (T14: per-run profile, resolved from runtime.context) -----
+    # --- budget middleware caps (per-run profile, resolved from runtime.context) ----------
     # Resolve every profile once here; CostCapMiddleware picks the per-run one from
     # runtime.context.budget_profile in its hook (see module docstring). The langchain count-limit
     # middlewares can't read context, so they take the max count across profiles (documented
@@ -652,7 +652,7 @@ def build_agent(
         tools=[_run_command_tool(cfg), _ssh_run_tool(cfg)],
         system_prompt=SYSTEM_PROMPT,
         middleware=middleware,
-        # The main agent's single named subagent (P5c): a tool-less haiku log-summarizer, delegated
+        # The main agent's single named subagent: a tool-less haiku log-summarizer, delegated
         # to via `task`. Passing it exposes `task` (bound as an active tool, scoped by policy to
         # this one subagent_type); the harness profile above keeps the general-purpose subagent
         # disabled for the production model, so production `task` exposes ONLY this subagent.
@@ -671,7 +671,7 @@ def build_agent(
 def _run_command_tool(cfg: AppConfig) -> Any:
     """Build the single argv-only execution tool (imported lazily to keep import cost low).
 
-    Selects the execution backend from ``cfg.executor.mode`` (P5d): ``local`` (default) keeps the
+    Selects the execution backend from ``cfg.executor.mode``: ``local`` (default) keeps the
     in-process ``LocalExecutor`` (``select_executor`` returns ``None`` → unchanged); ``remote``
     wires a ``RemoteExecutor`` that signs each exec and posts it to the executor service.
     """
@@ -755,7 +755,7 @@ def _assert_reducer_channels(graph: CompiledStateGraph[Any, Any, Any, Any]) -> N
     """Fail boot if any accumulating state channel lost its commutative reducer.
 
     Load-bearing for the per-run USD cap: ``run_cost_usd`` must be a ``BinaryOperatorAggregate``
-    (summing ``_add_cost`` reducer). If T7's ``DevOpsState`` composition ever flattened the
+    (summing ``_add_cost`` reducer). If the ``DevOpsState`` composition ever flattened the
     ``BudgetStateMixin`` annotations into plain ``LastValue`` fields, the cap would silently see
     only the last model call. We make that a boot failure, not a silent budget hole.
     """
@@ -784,7 +784,7 @@ def get_agent() -> CompiledStateGraph[Any, Any, Any, Any]:
     """Lazily build (once) the module's default agent from the on-disk config.
 
     Used by ``langgraph.json`` / ``langgraph dev`` where a module-level graph is expected. Builds
-    its own durable audit logger + daily counter; the T9 gateway constructs its own graph with
+    its own durable audit logger + daily counter; the gateway constructs its own graph with
     *shared* instances instead of using this singleton. Kept lazy so importing this module (e.g.
     in unit tests) never requires a valid on-disk config.
     """
@@ -803,7 +803,7 @@ def get_agent() -> CompiledStateGraph[Any, Any, Any, Any]:
 
 
 # --------------------------------------------------------------------------------------
-# server graph export for langgraph.json / self-hosted LangGraph Server (P3, T16)
+# server graph export for langgraph.json / self-hosted LangGraph Server (service mode)
 # --------------------------------------------------------------------------------------
 
 # The env var naming the config.yaml the Server loads (default: the shipped ``config/config.yaml``

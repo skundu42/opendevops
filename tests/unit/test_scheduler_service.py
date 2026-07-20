@@ -1,4 +1,4 @@
-"""SchedulerService per-job execution (T20).
+"""SchedulerService per-job execution.
 
 Directly unit-tested with a stub gateway (no live APScheduler). A ``command`` job must build a
 FRESH thread and run with ``profile=scheduled`` / ``interface=scheduled`` under the caller-side

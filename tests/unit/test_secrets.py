@@ -1,4 +1,4 @@
-"""{{secret:NAME}} resolver (P5d): value into env, $NAME into argv, unknown → fail-closed."""
+"""{{secret:NAME}} resolver: value into env, $NAME into argv, unknown → fail-closed."""
 
 from __future__ import annotations
 

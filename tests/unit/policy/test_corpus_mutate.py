@@ -1,18 +1,15 @@
-"""P2 corpus: staging mutations (kubectl apply/rollout/scale), helm read, gh read (T10).
+"""Mutation corpus: staging mutations (kubectl apply/rollout/scale), helm read, gh read.
 
 Same contract as ``test_corpus.py``: the *real* ``config/policy/`` dir is driven through
 :class:`YamlRuleEngine`, and every case asserts BOTH the effect AND the exact ``rule_id``.
-Environment matters now — the staging-only mutate allows must fall through to
+Environment matters here — the staging-only mutate allows must fall through to
 ``__default_deny__`` in prod.
 
-Four cases below were initially strict-xfails pending engine.py changes that were OUT
-OF SCOPE for T10 (engine.py is owned by T4). They are shipped red-as-spec so the handoff is
-mechanical — see ``.superpowers/sdd/task-10-report.md`` (NEEDS_CONTEXT):
-  * case-fold: engine ``_decide_argv`` must lowercase its pre-parse ``argv0`` (line ~164) so a
-    mixed-case interpreter/binary hits its real rule id instead of ``__default_deny__``.
-  * first_positional: engine ``_rule_matches`` must enforce ``Match.first_positional`` so a
-    mutating gh sub-subcommand (``gh pr merge``) does not match a read rule on ``verb`` alone.
-Those changes have landed (controller integration) and the markers were removed.
+Two engine behaviors these cases additionally pin:
+  * case-fold: the engine lowercases its pre-parse ``argv0``, so a mixed-case
+    interpreter/binary hits its real rule id instead of ``__default_deny__``.
+  * first_positional: ``Match.first_positional`` is enforced, so a mutating gh
+    sub-subcommand (``gh pr merge``) does not match a read rule on ``verb`` alone.
 """
 
 from __future__ import annotations
@@ -34,9 +31,9 @@ ALLOWED_CONTEXTS = ["kind-opendevops"]
 def _resolver(ref: str) -> list[str]:
     if ref == "${targets.kubernetes.allowed_contexts}":
         return ALLOWED_CONTEXTS
-    if ref == "${targets.ssh.hosts}":  # P5b ssh_run host allowlist ref
+    if ref == "${targets.ssh.hosts}":  # ssh_run host allowlist ref
         return ["allowed.host.internal"]
-    if ref == "${targets.github.write_repos}":  # P5f gh-write repo allowlist ref
+    if ref == "${targets.github.write_repos}":  # gh-write repo allowlist ref
         return ["octo-org/staging-app"]
     raise AssertionError(f"unexpected config ref {ref!r}")
 
@@ -64,7 +61,7 @@ async def _decide(engine: YamlRuleEngine, ctx: ToolCallCtx) -> Decision:
 
 # (argv, expected_rule_id, expected_channel)
 STAGING_ALLOWS = [
-    # T12 dry-run enforcement: a BARE apply is now rewritten to --dry-run=server (see
+    # Dry-run enforcement: a BARE apply is rewritten to --dry-run=server (see
     # test_dry_run_enforcement.py), so the plain-allow case carries an explicit server dry-run.
     (
         ["kubectl", "apply", "--dry-run=server", "--filename", "/manifests/x.yaml", "-n", "web"],
@@ -117,7 +114,7 @@ async def test_apply_force_denied(engine: YamlRuleEngine) -> None:
 
 
 async def test_delete_workload_escalates_in_staging(engine: YamlRuleEngine) -> None:
-    # delete has no allow — the ONLY path is human approval (escalate) in staging (T13). The
+    # delete has no allow — the ONLY path is human approval (escalate) in staging. The
     # execution channel (rw) lives on the escalate rule; the middleware resolves it on approve.
     d = await _decide(engine, _cmd(["kubectl", "delete", "pod", "x"], "staging"))
     assert d.effect == "escalate"

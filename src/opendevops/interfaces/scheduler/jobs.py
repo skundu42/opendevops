@@ -1,4 +1,4 @@
-"""Job-spec parsing + the FIXED per-job default application for the scheduler (P4, T20).
+"""Job-spec parsing + the FIXED per-job default application for the scheduler.
 
 This module is the PURE, directly-testable heart of the scheduler service. It owns:
 
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from apscheduler.triggers.base import BaseTrigger
 
 # --------------------------------------------------------------------------------------
-# the FIXED per-job knobs (PLAN §3.7 Scheduler bullet — not per-job configurable)
+# the FIXED per-job knobs (fixed by design — not per-job configurable)
 # --------------------------------------------------------------------------------------
 
 # Run a job that was missed (e.g. across a short restart) if it is less than this many seconds late.

@@ -3,7 +3,7 @@
 # Overlay contract (enforced by the loader): overlays may ONLY ADD rules with effect deny
 # or escalate. They may NOT introduce allow/rewrite/hook rules and carry no tool_family —
 # an overlay tightens policy, it never loosens it. An empty rules list is valid and is the
-# P1 default (prod inherits base + packs unchanged; add prod-only escalations here later).
+# default (prod inherits base + packs unchanged; add prod-only escalations here later).
 version: 1
 metadata:
   name: prod-overlay

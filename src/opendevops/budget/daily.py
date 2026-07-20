@@ -1,4 +1,4 @@
-"""Daily spend counters (T6 sqlite/in-memory; T18 redis).
+"""Daily spend counters (sqlite / in-memory / redis).
 
 A ``DailyCounter`` accumulates USD spend under a ``scope`` string, partitioned by UTC
 calendar day (key = ``(scope, "YYYY-MM-DD")``). ``DailyBudgetMiddleware`` uses two scope
@@ -10,7 +10,7 @@ Implementations here:
 
 * :class:`InMemoryDailyCounter` — process-local, for tests and the in-graph tier.
 * :class:`SqliteDailyCounter` — durable stdlib ``sqlite3`` (WAL), create-on-first-use.
-* :class:`RedisDailyCounter` — shared, restart-surviving, for the P3 service tier where several
+* :class:`RedisDailyCounter` — shared, restart-surviving, for the service tier where several
   LangGraph Server workers accumulate one daily envelope (``INCRBYFLOAT`` + ``EXPIRE 48h``).
 
 :func:`build_daily_counter` is the config-driven factory the gateway/CLI/server construction
@@ -67,8 +67,8 @@ class DailyCounter(Protocol):
 class InMemoryDailyCounter:
     """Process-local :class:`DailyCounter` for tests and the single-process graph tier.
 
-    Not durable and not shared across processes — use :class:`SqliteDailyCounter` (P1) or
-    ``RedisDailyCounter`` (P3) where persistence/sharing is required.
+    Not durable and not shared across processes — use :class:`SqliteDailyCounter` or
+    ``RedisDailyCounter`` where persistence/sharing is required.
     """
 
     def __init__(self) -> None:
@@ -199,7 +199,7 @@ def _to_float(value: Any) -> float:
 
 
 class RedisDailyCounter:
-    """Shared, restart-surviving :class:`DailyCounter` backed by Redis (P3 service tier).
+    """Shared, restart-surviving :class:`DailyCounter` backed by Redis (service tier).
 
     Semantics match :class:`SqliteDailyCounter` exactly — UTC-day keying (``daily:{scope}:{day}``),
     ``add`` returns the new running total, ``total`` returns ``0.0`` for an unseen scope — but the
@@ -271,7 +271,7 @@ class RedisDailyCounter:
 
 
 def build_daily_counter(cfg: AppConfig) -> DailyCounter:
-    """Construct the :class:`DailyCounter` selected by ``cfg.budgets.daily.backend`` (T18 factory).
+    """Construct the :class:`DailyCounter` selected by ``cfg.budgets.daily.backend``.
 
     * ``"sqlite"`` (default) → a :class:`SqliteDailyCounter` on ``cfg.audit.dir`` — the durable
       local ledger for the single-process CLI / ``langgraph dev`` tier.

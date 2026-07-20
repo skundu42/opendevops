@@ -1,10 +1,10 @@
-"""``LocalGateway`` — in-process implementation of the ``AgentGateway`` protocol (T9).
+"""``LocalGateway`` — in-process implementation of the ``AgentGateway`` protocol.
 
 Owns the durable singletons for a process — one :class:`AuditLogger`, one
 :class:`SqliteDailyCounter`, one :class:`PriceTable`, and one compiled agent graph built with
 those *shared* instances (so the in-graph budget middleware and the gateway's book-keeping
-write to the same audit chain and daily ledger). No checkpointer in P1 (resume lands in P2 with
-``AsyncSqliteSaver``).
+write to the same audit chain and daily ledger). Escalation suspend/resume rides the
+``AsyncSqliteSaver`` checkpointer.
 
 Per turn the gateway:
 
@@ -84,7 +84,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# The checkpointer sqlite db filename under ``cfg.state.dir`` (the P2 AsyncSqliteSaver). The
+# The checkpointer sqlite db filename under ``cfg.state.dir`` (the AsyncSqliteSaver). The
 # suspend/resume of an escalation is durable across this file.
 _CHECKPOINT_FILE = "checkpoints.sqlite3"
 
@@ -161,13 +161,13 @@ class LocalGateway:
     # -- public surface -------------------------------------------------------------------
 
     async def create_thread(self, thread_id: str | None = None) -> str:
-        """Allocate an opaque thread id (a uuid4 in P1), or return the caller-chosen one.
+        """Allocate an opaque thread id (a fresh uuid4), or return the caller-chosen one.
 
         In-process threads carry no server-side state to allocate — the id is just the
         checkpointer key — so reuse is trivial: an explicit ``thread_id`` is returned verbatim
         (idempotent by construction), and ``None`` mints a fresh uuid4. Mirrors the additive
         ``thread_id`` kwarg ``ServerGateway.create_thread`` uses for deterministic incident
-        threads (T17).
+        threads.
         """
         return thread_id if thread_id is not None else uuid.uuid4().hex
 
@@ -282,7 +282,7 @@ class LocalGateway:
         friendly ``GatewayError`` ("no suspended run to resume"): **the pending interrupt in the
         checkpoint is dead**, by design.
 
-        Why not (b) re-register the record so a second resume can retry? A probe (T14 fix round 1)
+        Why not (b) re-register the record so a second resume can retry? A probe
         showed it is unsafe: by the time abandonment is observable the resume's graph has already
         run *past* ``interrupt()`` (the interrupt is consumed, and for an ``approve`` the escalated
         tool has ALREADY executed — the destructive ``kubectl delete`` ran before the consumer saw
@@ -799,9 +799,9 @@ class LocalGateway:
         """Close the chain for a wall-clock / recursion / cancel interruption.
 
         Records a ``budget_trip`` + ``run_completed``, a best-effort *authoritative* cost, and the
-        partial token ``usage`` read from the callback aggregate (P1 dropped this on interrupted
-        runs). The daily counter is NOT touched here: the in-graph middleware already charged what
-        it saw, and without a final state there is no safe delta to compute.
+        partial token ``usage`` read from the callback aggregate. The daily counter is NOT
+        touched here: the in-graph middleware already charged what it saw, and without a final
+        state there is no safe delta to compute.
 
         The pricing/usage read is *guarded* (like :meth:`_account_segment`): a raising price table
         must not mask the timeout/interruption or leave the audit chain open — it degrades to zero

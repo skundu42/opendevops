@@ -1,4 +1,4 @@
-# scheduler/jobs.yaml — the jobs our own APScheduler service runs (P4, T20; PLAN §3.7).
+# scheduler/jobs.yaml — the jobs our own APScheduler service runs.
 #
 # We schedule on OUR scheduler, never LangGraph Server crons: it removes the server-license
 # dependency and unifies cron + event triggers under one mechanism. Each job's schema is validated

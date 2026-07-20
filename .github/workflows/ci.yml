@@ -8,10 +8,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
 
@@ -19,16 +19,16 @@ jobs:
         run: uv python install 3.11
 
       - name: Sync dependencies
-        # All extras: the suite imports from every one — p2 (AsyncSqliteSaver), server
+        # All extras: the suite imports from every one — checkpoint (AsyncSqliteSaver), server
         # (langgraph-sdk, redis, fastapi), slack (slack-bolt, apscheduler → scheduler tests),
         # ssh (asyncssh → ssh_run tests), dev (pytest, fakeredis).
-        run: uv sync --extra p2 --extra server --extra slack --extra ssh --extra dev
+        run: uv sync --extra checkpoint --extra server --extra slack --extra ssh --extra dev
 
       - name: Ruff
         run: uv run ruff check .
 
       - name: Mypy
-        # ops/ (the P3 ops-tool CLIs) is included deliberately — it is not in the shipped wheel.
+        # ops/ (the maintenance/probe CLIs) is included deliberately — it is not in the shipped wheel.
         run: uv run mypy src ops
 
       - name: Pytest

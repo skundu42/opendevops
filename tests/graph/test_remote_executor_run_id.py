@@ -1,4 +1,4 @@
-"""Remote executor split through the REAL graph (P5d): proves run_id binds via ``get_runtime()``.
+"""Remote executor split through the REAL graph: proves run_id binds via ``get_runtime()``.
 
 This is the load-bearing integration check for the run_id-binding finding: on the remote path the
 agent must sign a decision token bound to the run's ``run_id``, and that ``run_id`` is resolved

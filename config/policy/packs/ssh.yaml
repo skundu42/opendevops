@@ -1,4 +1,4 @@
-# ssh.yaml — the P5b read-only remote-exec pack for the structured ssh_run(host, argv) tool.
+# ssh.yaml — the read-only remote-exec pack for the structured ssh_run(host, argv) tool.
 #
 # ssh_run is NOT run_command: `ssh` as a run_command argv0 is hard-denied by base.yaml
 # (interpreters-hard-deny). This pack authorizes the SEPARATE, credential-pinned ssh_run tool,
@@ -10,7 +10,7 @@
 #   * systemctl restart/stop/start/reload/enable/disable/mask/isolate/poweroff/reboot/halt/kexec
 #   * journalctl --vacuum-*/--rotate/--flush/--sync/... (its mutations are FLAGS, not subcommands)
 #   * hostname <name> SETS the hostname; ss -K / -tnK (bundled) kills sockets
-# A "read-only" (channel: ro) pack must NEVER authorize any of those. So — exactly as the P5a
+# A "read-only" (channel: ro) pack must NEVER authorize any of those. So — exactly as the
 # cloud packs invert to a positive `positional_seq_prefix_any` read-path allowlist — the multi-mode
 # binaries are pinned to their READ command PATHS (`[systemctl, status]`, ...), the vetted pure-read
 # SINGLE-mode binaries keep the argv0 pin, journalctl's mutating flags are compensated by a DENY
@@ -25,7 +25,7 @@
 #
 # tool_family: ssh binds the allow to the ssh credential family (the config-pinned key +
 # known_hosts); the boot coverage gate refuses to start unless targets.ssh.key_env is configured.
-# channel: ro — remote reads only (no rw channel in P5b). There is NO remote shell: ssh_run sends
+# channel: ro — remote reads only (there is no rw ssh channel). There is NO remote shell: ssh_run sends
 # argv shell-quoted (shlex.join), so ';', '&&', '|', '$(...)', globs and redirects are transmitted
 # as LITERAL argv elements, never interpreted by the remote POSIX login shell (a non-POSIX login
 # shell — csh/fish/cmd — is out of the stated threat model; the Linux-tool allowlist keeps the

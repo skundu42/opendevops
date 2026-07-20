@@ -1,4 +1,4 @@
-"""Schema validation tests (T3): effect/payload invariants, StrMatcher, Decision, constants."""
+"""Schema validation tests: effect/payload invariants, StrMatcher, Decision, constants."""
 
 from __future__ import annotations
 
@@ -139,7 +139,7 @@ def test_escalation_payload_iff_effect() -> None:
         # escalate needs an escalation payload...
         Rule.model_validate({"id": "r", "match": {}, "effect": "escalate", "channel": "rw"})
     with pytest.raises(ValidationError):
-        # ...AND a channel (an approved escalation executes; T13).
+        # ...AND a channel (an approved escalation executes).
         Rule.model_validate(
             {
                 "id": "r",
@@ -175,7 +175,7 @@ def test_extra_key_on_match_rejected() -> None:
         Match.model_validate({"argv0": "kubectl", "nope": True})
 
 
-# --------------------------------------------------------------------------- gh_api predicate (P5f)
+# ---------------------------------------------------------------- gh_api predicate (gh-write)
 
 
 def test_gh_api_valid_forms() -> None:

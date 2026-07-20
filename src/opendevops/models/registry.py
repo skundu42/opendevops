@@ -1,4 +1,4 @@
-"""Alias -> provider:model resolution; parallel-tool-use off; boot check every model priced (T1).
+"""Alias -> provider:model resolution; parallel-tool-use off; boot check every model priced.
 
 `resolve(cfg, agent_name)` walks `agents: -> aliases: -> provider:model` (delegating to
 `AppConfig.models.resolve`, which config.py's boot-time validator already guarantees is safe
@@ -6,8 +6,8 @@ for any `agent_name` present in `agents:`) and raises `UnknownAgentError` with t
 list for anything else.
 
 `build_chat_model(cfg, agent_name)` resolves the model key and constructs the chat model
-**instance** for deepagents' `model=` param. Only the `anthropic:` provider is implemented in
-P1; other providers raise `NotImplementedError` naming the extension point (add a branch here
+**instance** for deepagents' `model=` param. Only the `anthropic:` provider is implemented;
+other providers raise `NotImplementedError` naming the extension point (add a branch here
 + a pricing.yaml row).
 
 ## Parallel tool use
@@ -40,7 +40,7 @@ which exercises the exact `bind_tools` -> `_get_request_payload` path with no ne
 **Caveat:** this is verified-but-undocumented emergent behavior of dict-merge precedence in
 the pinned library versions, not a publicly guaranteed contract — a future
 langchain/langchain-anthropic release could start passing an explicit `tool_choice` through
-`model_settings`/`bind_tools` and silently override it. As of P2 this construction-time default
+`model_settings`/`bind_tools` and silently override it. This construction-time default
 is **belt-and-braces, not load-bearing**: the escalate path now suspends the run via
 `interrupt()` inside `policy/middleware.py`, which opens a node-replay window across the
 suspend, so a dedicated `SingleToolCallMiddleware` (an `awrap_model_call` guard in
@@ -101,7 +101,7 @@ def build_chat_model(cfg: AppConfig, agent_name: str) -> BaseChatModel:
     """Construct the chat model instance for `agent_name`, for deepagents' `model=` param.
 
     Raises `UnknownAgentError` for an unknown `agent_name`, and `NotImplementedError` for any
-    provider other than `anthropic:` (P1 supports only Anthropic; adding a provider means
+    provider other than `anthropic:` (only Anthropic is supported; adding a provider means
     adding a branch here plus matching `pricing:` rows in `models.yaml`).
     """
     model_key = resolve(cfg, agent_name)

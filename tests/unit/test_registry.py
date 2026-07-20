@@ -105,8 +105,8 @@ def test_parallel_tool_use_disabled_survives_deepagents_style_bind_tools() -> No
     call, to prove `build_chat_model`'s parallel-tool-use-disable actually reaches the wire
     format. See registry.py's module docstring for the caveat: this is
     verified-but-undocumented behavior of the pinned library, not a guaranteed public
-    contract — in P1 it is the only parallel-tool-call control (no wrap_model_call guard
-    exists yet; that is an explicit P2 work item tied to the escalate interrupt() landing).
+    contract — this binding is the wire-level parallel-tool-call control, backstopped
+    in-graph by the ``SingleToolCallMiddleware`` guard (see ``test_guard.py``).
     """
 
     @tool

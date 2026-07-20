@@ -1,7 +1,7 @@
-# Vector: audit-chain shipper for opendevops (P3, T18).
+# Vector: audit-chain shipper for opendevops.
 #
 # The agent writes per-run hash-chained audit files: /audit/<run_id>.jsonl (one JSON line per
-# event; PLAN §3.6). Vector tails every per-run file and MERGES them into a durable spool sink,
+# event). Vector tails every per-run file and MERGES them into a durable spool sink,
 # APPEND-ONLY and dedupe-free: each line is copied verbatim (raw JSONL preserved in `.message`) and
 # in append order, so `opendevops audit verify --dir <spool>` re-groups the merged stream by each
 # event's `run_id` field and verifies every per-run subsequence as an independent hash chain (the
@@ -10,10 +10,10 @@
 # line order WITHIN a run_id is preserved across the merge — the hash chain survives shipping
 # byte-for-byte.
 #
-# Durable sink (OQ7 — audit durable sink + retention, compliance owner): the DEFAULT is a local
-# spool directory (a bind/volume the agent role cannot reach — see PLAN §3.6 "the durable sink
-# whose bucket/table policy denies every agent role"). S3 Object Lock / Loki blocks are provided
-# commented for the operator to choose per OQ7.
+# Durable sink (a compliance-owner decision — durable target + retention): the DEFAULT is a local
+# spool directory (a bind/volume the agent role cannot reach — the durable sink's
+# bucket/table policy must deny every agent role). S3 Object Lock / Loki blocks are provided
+# commented for the operator to choose.
 
 # Persist file read-checkpoints so a Vector restart resumes tailing where it left off (never
 # re-ships already-shipped lines, never skips).
@@ -51,7 +51,7 @@ sinks:
       - vector_internal
     address: 0.0.0.0:9598
 
-  # --- OQ7 alternatives — uncomment ONE and point the durable retention at it -------------------
+  # --- Durable-sink alternatives — uncomment ONE and point the durable retention at it -------------------
   #
   # S3 with Object Lock (WORM retention; the bucket policy denies every agent IAM role):
   # durable_s3:

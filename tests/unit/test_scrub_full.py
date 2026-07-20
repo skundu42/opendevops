@@ -1,4 +1,4 @@
-"""Full literal-match scrubbing (P5d): redact exact secret VALUES over the pattern scrub."""
+"""Full literal-match scrubbing: redact exact secret VALUES over the pattern scrub."""
 
 from __future__ import annotations
 

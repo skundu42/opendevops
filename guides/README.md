@@ -15,6 +15,3 @@ demands:
 | [Interfaces](interfaces.md) | CLI REPL, HTTP + webhooks, Slack chat-ops, scheduler, escalation flows |
 | [Deployment](deployment.md) | service-mode stack, monitoring, the experimental executor service, go-live gates |
 | [Development](development.md) | test tiers, enforced conventions, the pinned-trio upgrade gate, how to extend |
-
-The deep design document behind all of this — every decision with its rationale — is
-[`PLAN.md`](../PLAN.md).

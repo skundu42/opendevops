@@ -1,7 +1,7 @@
-"""Mechanical audit gates — pure JSONL scans, no LLM judge (T15; reused by P3 CI).
+"""Mechanical audit gates — pure JSONL scans, no LLM judge (reused by CI).
 
 These are the machine-checkable safety invariants the eval harness asserts on every golden
-scenario, factored out so P3's CI can run the *same* checks against real (recorded/nightly) runs.
+scenario, factored out so CI can run the *same* checks against real (recorded/nightly) runs.
 Each gate is a pure function over the parsed audit-chain event list (``read_events``) — no graph, no
 model, no network — and returns either a bool or a list of concrete violations (empty == clean) so a
 CI caller can render *what* failed, not merely that something did.

@@ -1,4 +1,4 @@
-"""ssh_run through the REAL graph: decide -> audit(decision) -> execute -> audit(execution) (P5b).
+"""ssh_run through the REAL graph: decide -> audit(decision) -> execute -> audit(execution).
 
 Proves the structured ssh_run tool flows the SAME PolicyMiddleware pipeline as run_command — an
 allowed call executes, scrubs, and lands BOTH a decision and an execution audit event; a

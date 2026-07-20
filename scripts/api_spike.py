@@ -200,9 +200,9 @@ def main() -> None:
         shown = list(dataclass_fields) if dataclass_fields else list(fields)
         print(f"  ToolCallRequest fields: {shown}")
         if "tool_call" not in shown:
-            rec_div("ToolCallRequest has no 'tool_call' field (T7 depends on it)")
+            rec_div("ToolCallRequest has no 'tool_call' field (PolicyMiddleware depends on it)")
         else:
-            rec_note("ToolCallRequest.tool_call present (T7 reads .tool_call dict)")
+            rec_note("ToolCallRequest.tool_call present (PolicyMiddleware reads .tool_call dict)")
 
     # ---- 4. usage metadata callbacks -----------------------------------------------
     hr("4. langchain_core.callbacks usage-metadata")
@@ -257,14 +257,14 @@ def main() -> None:
 
     # NOTE: a bare GenericFakeChatModel raises NotImplementedError at graph.invoke, because
     # the agent factory calls model.bind_tools(...) (the graph always binds built-ins) and the
-    # fake does not implement it. The graph-tier tests (T8) must use a fake that overrides
+    # fake does not implement it. The graph-tier tests must use a fake that overrides
     # bind_tools to return self. We do that here so the smoke invoke actually exercises a turn.
     graph = None
     if cda is not None and fake_cls is not None:
         from langchain_core.messages import AIMessage
 
         class _BindableFake(fake_cls):  # type: ignore[valid-type,misc]
-            """A fake chat model that tolerates bind_tools (returns self) — the T8 recipe."""
+            """A fake chat model that tolerates bind_tools (returns self) — the fake recipe."""
 
             def bind_tools(self, tools: Any, **kwargs: Any) -> Any:  # noqa: ANN401
                 return self
@@ -281,7 +281,7 @@ def main() -> None:
             rec_div("could not construct the fake chat model with known kwargs")
         else:
             rec_note("graph-tier fake must override bind_tools()->self; a bare "
-                     "GenericFakeChatModel raises NotImplementedError at invoke (T8 recipe)")
+                     "GenericFakeChatModel raises NotImplementedError at invoke (fake recipe)")
             try:
                 from deepagents.backends import StateBackend
 
@@ -350,13 +350,13 @@ def main() -> None:
                 rec_div(f"expected built-ins missing from bound tools: {missing_builtins}")
             surplus = sorted(set(tool_names) - expected_builtins)
             if surplus:
-                rec_note(f"tools beyond the 7 core built-ins (T8 inventory assertion): {surplus}")
+                rec_note(f"tools beyond the 7 core built-ins (boot inventory assertion): {surplus}")
             # 'task' was anticipated by the plan (SubAgentMiddleware); 'execute' was NOT.
             if "execute" in tool_names:
                 rec_div("deepagents binds a DEFAULT 'execute' shell-string tool "
                         "(command=; supports ';'/'&&') — unanticipated by the plan. It is inert "
                         "with StateBackend (not a SandboxBackendProtocol, returns an error at "
-                        "call time) but is still BOUND and visible to the model. T8 must exclude "
+                        "call time) but is still BOUND and visible to the model. Boot must exclude "
                         "it from the graph and/or deny it in base.yaml alongside task/"
                         "compact_conversation; the inventory assertion will otherwise fail.")
             if "compact_conversation" not in tool_names:

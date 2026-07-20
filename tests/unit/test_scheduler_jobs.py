@@ -1,4 +1,4 @@
-"""Scheduler job-spec parsing + FIXED default application (T20).
+"""Scheduler job-spec parsing + FIXED default application.
 
 Pure: no live scheduler is stood up. The FIXED knobs (``misfire_grace_time=300``, ``coalesce=True``,
 ``max_instances=1``, 60s jitter) must be applied to EVERY job, and a malformed job spec must be

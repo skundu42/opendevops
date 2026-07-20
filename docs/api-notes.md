@@ -1,7 +1,7 @@
-# API-reality notes (P0 spike)
+# API-reality notes
 
-Introspection of the **installed** pinned libraries, verifying the assumptions in the
-research brief / PLAN.md against reality. Regenerate with:
+Introspection of the **installed** pinned libraries, verifying the design's library
+assumptions against reality. Regenerate with:
 
 ```sh
 uv run python scripts/api_spike.py
@@ -23,54 +23,50 @@ Spike result: **17 confirmations, 1 divergence.**
 
 ## ⚠️ DIVERGENCES (read first)
 
-### D1 — deepagents binds a default `execute` shell-string tool (security-relevant, affects T5/T8)
+### D1 — deepagents binds a default `execute` shell-string tool (security-relevant)
 
-The default `create_deep_agent(...)` stack binds **nine** tools, not the seven the plan
+The default `create_deep_agent(...)` stack binds **nine** tools, not the seven the design
 anticipated. The bound set is:
 
 ```
 edit_file, execute, glob, grep, ls, read_file, task, write_file, write_todos
 ```
 
-- `task` was anticipated (from `SubAgentMiddleware`) and the plan already handles it
+- `task` was anticipated (from `SubAgentMiddleware`) and the design already handles it
   (deny rule + inventory assertion).
 - **`execute` was NOT anticipated.** It is a `StructuredTool` whose description is
   *"Executes a shell command in an isolated sandbox environment"* — it takes a **`command`
   string** and explicitly supports `;` and `&&` chaining. This is exactly the shell-string
-  execution surface the entire plan is designed to delete (PLAN.md §1, decision 1:
-  "argv-only — no shell string, no shell parser"). It is provided by the deepagents
+  execution surface the entire design deletes ("argv-only — no shell string, no shell
+  parser"; see `guides/architecture.md`). It is provided by the deepagents
   `FilesystemMiddleware`.
 
-**Mitigating reality:** with `backend=StateBackend()` (the plan's chosen backend) the
+**Mitigating reality:** with `backend=StateBackend()` (our chosen backend) the
 `execute` tool is **inert**. `StateBackend` is not a `SandboxBackendProtocol`
 (`mro = StateBackend → BackendProtocol → ABC → object`), and `execute`'s own docstring says
 it "is only available if the backend supports execution … otherwise the tool will return an
-error message." So it cannot actually run a shell command against the P1 backend. **But it
+error message." So it cannot actually run a shell command against this backend. **But it
 is still bound and advertised to the model**, which is both a prompt-surface liability and a
-direct trigger for the plan's boot-time tool-inventory assertion.
+direct trigger for the boot-time tool-inventory assertion.
 
-**Required follow-ups (later tasks):**
-- **T8** (`agent.py`): the tool-inventory assertion's allowed set must account for `execute`
-  — preferably by *preventing it from being bound at all* rather than allow-listing it. The
-  likely lever is configuring/omitting the `FilesystemMiddleware`, or the new
-  `permissions=[FilesystemPermission…]` kwarg on `create_deep_agent` (see C1). If it cannot
-  be unbound, the assertion set becomes `{run_command, write_todos, ls, read_file,
-  write_file, edit_file, glob, grep}` + explicitly-denied `{task, compact_conversation,
-  execute}`.
-- **T3** (`config/policy/base.yaml`): add an explicit `effect: deny` rule for tool_name
-  `execute`, alongside the existing `task` / `compact_conversation` denies.
-- **T4/T5** bypass corpus: add an `execute` deny case.
+**Mitigations shipped:**
+- `agent.py`: the harness profile excludes `execute` from the model request (preventing it
+  from being advertised, rather than merely allow-listing it), and the tool-inventory
+  assertion accounts for it in the tolerated-but-denied set.
+- `config/policy/base.yaml`: an explicit `effect: deny` rule for tool_name `execute`,
+  alongside the `task` / `compact_conversation` denies.
+- Bypass corpus: an `execute` deny case.
 
-Note: `compact_conversation` is **not** bound by the default stack in this version (the plan
+Note: `compact_conversation` is **not** bound by the default stack in this version (the design
 assumed it "can be" bound by the summarizer). `SummarizationMiddleware` is present in the
-`wrap_model_call` chain but does not expose a manual-compaction tool here. The planned deny
+`wrap_model_call` chain but does not expose a manual-compaction tool here. The deny
 rule for `compact_conversation` is therefore harmless future-proofing, not currently load-bearing.
 
 ---
 
-### D1-followup (P5c) — `task` becomes an active, policy-scoped tool (the log-summarizer subagent)
+### D1-followup — `task` becomes an active, policy-scoped tool (the log-summarizer subagent)
 
-P5c reverses the D1 "remove `task`" posture: `task` is now **bound as an active tool** because
+The log-summarizer subagent reverses the D1 "remove `task`" posture: `task` is now **bound as an active tool** because
 `build_agent` passes ONE named subagent — a haiku log-summarizer — to `create_deep_agent(subagents=[…])`.
 So `EXPECTED_ACTIVE` gains `"task"` and the tolerated-but-denied set shrinks to `{execute}`.
 Three deepagents facts, verified against the installed 0.6.12 / langchain 1.3.14 (probes in the
@@ -140,11 +136,11 @@ create_deep_agent(
 - Everything after `tools` is **keyword-only** (note the `*`). `model` and `tools` are the
   only positional-or-keyword params.
 - `checkpointer` accepts `bool` as well as a `BaseCheckpointSaver` (deepagents can auto-build
-  one). Plan usage (`None` in P1, `AsyncSqliteSaver` in P2) is unaffected.
+  one). Our usage (`None`, or an explicit `AsyncSqliteSaver`) is unaffected.
 
 **C1 — additional undocumented kwargs (informational):** the installed signature also has
-`skills`, `memory`, `permissions`, `debug`, `name`, `cache`. The plan explicitly defers
-`skills`/`memory` in v1 — they exist as no-op-by-default kwargs, so simply not passing them
+`skills`, `memory`, `permissions`, `debug`, `name`, `cache`. The design deliberately does not
+use `skills`/`memory` — they exist as no-op-by-default kwargs, so simply not passing them
 is correct. `permissions: list[FilesystemPermission]` is the most interesting: it is the
 likely knob for constraining the filesystem/`execute` surface (see D1). deepagents public
 exports include `FilesystemPermission`, `FilesystemMiddleware`, `SubAgentMiddleware`,
@@ -156,7 +152,7 @@ exports include `FilesystemPermission`, `FilesystemMiddleware`, `SubAgentMiddlew
 - `from deepagents.backends import StateBackend` ✅ (exactly the location the plan assumes;
   direct instantiation `StateBackend()` works — the deprecated factory form is not needed).
 
-### 3. `langchain.agents.middleware` ✅ (critical for T6/T7)
+### 3. `langchain.agents.middleware` ✅ (critical for the budget + policy middleware)
 
 All importable from `langchain.agents.middleware`: `AgentMiddleware`,
 `ModelCallLimitMiddleware`, `ToolCallLimitMiddleware`, `SummarizationMiddleware`,
@@ -176,12 +172,12 @@ ToolCallLimitMiddleware(*, tool_name: str | None = None,
 ```
 
 - Both expose `thread_limit` / `run_limit` / `exit_behavior` as expected. ✅
-- **Note for T6/T8:** `ModelCallLimitMiddleware.exit_behavior` is `Literal['end', 'error']`
-  — it does **not** accept `'continue'`. The plan uses `exit_behavior="end"` for it, which is
+- **Note:** `ModelCallLimitMiddleware.exit_behavior` is `Literal['end', 'error']`
+  — it does **not** accept `'continue'`. We use `exit_behavior="end"` for it, which is
   valid. `ToolCallLimitMiddleware.exit_behavior` is a broader `ExitBehavior` and defaults to
-  `'continue'` (the plan uses `"continue"`), valid.
+  `'continue'` (we use `"continue"`), valid.
 - `ToolCallLimitMiddleware(tool_name="run_command", run_limit=30, exit_behavior="continue")`
-  constructs cleanly — per-tool instances work (plan §3.1's `run_command` shell-call limit). ✅
+  constructs cleanly — per-tool instances work (the `run_command` shell-call limit). ✅
 
 `AgentMiddleware` hook methods — **all six present in both sync and async (`a`-prefixed)
 forms**: ✅
@@ -192,7 +188,7 @@ before_model / abefore_model      wrap_tool_call  / awrap_tool_call
 after_model  / aafter_model       after_agent     / aafter_agent
 ```
 
-**`wrap_tool_call` / `awrap_tool_call` signatures (T7 depends on this):**
+**`wrap_tool_call` / `awrap_tool_call` signatures (`PolicyMiddleware` depends on this):**
 
 ```python
 def wrap_tool_call(self, request: ToolCallRequest,
@@ -206,13 +202,13 @@ async def awrap_tool_call(self, request: ToolCallRequest,
 
 `ToolCallRequest` (importable directly from `langchain.agents.middleware`) is a dataclass
 with fields: **`tool_call`, `tool`, `state`, `runtime`**. `request.tool_call` is present —
-this is the dict T7's `PolicyMiddleware` parses (`argv` lives in `tool_call["args"]`). ✅
+this is the dict `PolicyMiddleware` parses (`argv` lives in `tool_call["args"]`). ✅
 
 ### 4. Usage-metadata callbacks ✅
 
 `from langchain_core.callbacks import get_usage_metadata_callback,
 UsageMetadataCallbackHandler` — both present. This is the gateway-level authoritative
-accounting mechanism (plan §3.4). ✅
+accounting mechanism (see `guides/budgets.md`). ✅
 
 ### 5. langgraph types / errors ✅
 
@@ -229,14 +225,14 @@ usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12,
 ```
 
 round-trips intact: `input_token_details.cache_read` and `input_token_details.cache_creation`
-are both accepted. This is the exact shape `models/pricing.py` (T1) needs for cache-tier-aware
+are both accepted. This is the exact shape `models/pricing.py` needs for cache-tier-aware
 USD. ✅
 
-### 7. Smoke graph + bound-tool enumeration ✅ (recipe for T8)
+### 7. Smoke graph + bound-tool enumeration ✅ (recipe for the boot assertion)
 
 - Fake chat model: `langchain_core.language_models.fake_chat_models.GenericFakeChatModel`
   constructs with `messages=iter([...])`.
-- **T8 gotcha (important):** a *bare* `GenericFakeChatModel` makes `graph.invoke(...)` raise
+- **Gotcha (important):** a *bare* `GenericFakeChatModel` makes `graph.invoke(...)` raise
   `NotImplementedError` — the agent factory always calls `model.bind_tools(final_tools, ...)`
   (the graph binds built-ins even when you pass `tools=[]`), and the fake does not implement
   `bind_tools`. **The graph-tier tests must use a fake that overrides `bind_tools` to return
@@ -252,7 +248,7 @@ USD. ✅
   model = BindableFake(messages=iter([AIMessage(content="...")]))
   ```
 
-- **Bound-tool enumeration recipe (T8 boot assertion needs this):**
+- **Bound-tool enumeration recipe (the boot assertion needs this):**
 
   ```python
   tool_names = sorted(graph.nodes["tools"].bound.tools_by_name.keys())
@@ -269,7 +265,7 @@ Per-tool instances construct cleanly (covered in §3). ✅
 
 ---
 
-## Cheat-sheet of verified import paths (for later tasks)
+## Cheat-sheet of verified import paths
 
 ```python
 from deepagents import create_deep_agent, DeepAgentState, FilesystemPermission

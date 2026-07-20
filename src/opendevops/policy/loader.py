@@ -1,4 +1,4 @@
-"""YAML policy loader + lint (T3).
+"""YAML policy loader + lint.
 
 Loads the shipped policy directory in a fixed order — ``base.yaml``, then ``packs/*.yaml``
 (sorted), then ``envs/*.yaml`` (sorted) as overlays — validates every file against the
@@ -6,8 +6,8 @@ Loads the shipped policy directory in a fixed order — ``base.yaml``, then ``pa
 problems are collected and raised together as a single :class:`PolicyLintError` so an
 operator sees every issue at once, not one-per-fix-cycle.
 
-``load_policy`` is pure and side-effect free apart from reading files; the engine (T4) and
-boot sequence (T8) consume its :class:`LoadedPolicy` result without needing changes here.
+``load_policy`` is pure and side-effect free apart from reading files; the engine and
+boot sequence consume its :class:`LoadedPolicy` result without needing changes here.
 """
 
 from __future__ import annotations
@@ -198,7 +198,7 @@ def _policy_version(raw_by_path: dict[str, Any]) -> str:
 
 
 # Families whose WRITE (rw) channel is gated at BOOT on a *distinct* rw credential — not merely
-# the family's ro credential. ``gh`` is the only such family (P5f): the gh-write pack's rw allows
+# the family's ro credential. ``gh`` is the only such family: the gh-write pack's rw allows
 # require ``targets.github.token_env_rw`` at boot (surfaced as the ``"gh-rw"`` pseudo-family in
 # ``_configured_credential_families``), mirroring the ro gh gate. kubectl/helm rw (kubectl-mutate)
 # deliberately stay ro-gated at boot and fail closed at EXEC on a missing rw kubeconfig — that
@@ -209,13 +209,13 @@ _RW_BOOT_GATED_FAMILIES: frozenset[str] = frozenset({"gh"})
 def check_credential_coverage(loaded: LoadedPolicy, credential_families: set[str]) -> list[str]:
     """Report any allow-rule pack whose credential (family, or rw sub-credential) is unconfigured.
 
-    Pure function (T8 wires it at boot and decides whether to fail). Returns a list of
+    Pure function (the boot sequence wires it and decides whether to fail). Returns a list of
     human-readable problems; an empty list means every allow pack's credential is covered.
 
     A pack with allow rules needs its ``tool_family`` configured. For a family in
     :data:`_RW_BOOT_GATED_FAMILIES` (``gh``), a pack that carries any ``channel: rw`` allow ALSO
     needs the ``"{family}-rw"`` pseudo-family — the rw credential — configured, so a gh-write pack
-    whose write PAT is unset refuses to boot rather than fail only at first exec (P5f).
+    whose write PAT is unset refuses to boot rather than fail only at first exec.
     """
     needed: set[str] = set()
     for pf in loaded.files.values():

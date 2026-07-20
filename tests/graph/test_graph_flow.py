@@ -7,8 +7,8 @@ Cross-file integration defect — RESOLVED
 -----------------------------------------
 Previously the tool executed and the model saw its ``exit_code:`` output, and the *decision*
 audit event was written — but the *execution* audit event was NOT emitted in the real graph.
-``PolicyMiddleware`` (T7) read the per-exec facts from a ``last_exec_meta`` ContextVar that
-``run_command`` (T5) set; langchain runs the tool coroutine (``tool.ainvoke``) in a *copied*
+``PolicyMiddleware`` read the per-exec facts from a ``last_exec_meta`` ContextVar that
+``run_command`` set; langchain runs the tool coroutine (``tool.ainvoke``) in a *copied*
 context, so a ContextVar written inside the tool did not propagate back to the middleware frame
 (parent->child works, so the ``current_decision`` gate is fine; child->parent does not). Fixed by
 carrying the exec meta on the returned ToolMessage's ``additional_kwargs["exec_meta"]`` (the

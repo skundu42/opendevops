@@ -1,7 +1,7 @@
-# kubectl-mutate.yaml — the P2 staging-only mutation pack (apply / rollout / scale).
+# kubectl-mutate.yaml — the staging-only mutation pack (apply / rollout / scale).
 #
 # tool_family binds this pack's allow rules to the "kubectl" credential family (the rw
-# kubeconfig — cfg.targets.kubernetes.kubeconfig_rw). At boot (T8) the loader's
+# kubeconfig — cfg.targets.kubernetes.kubeconfig_rw). At boot the loader's
 # check_credential_coverage() refuses to start if no kubectl credential is configured.
 #
 # SCOPE: every allow here is `environments: [staging]` and `channel: rw`. Production gets NO
@@ -12,7 +12,7 @@
 # extended by kubectl-read.yaml. Any flag on the argv not listed here is denied
 # (__flag_not_allowed__).
 #
-# DRY-RUN ENFORCEMENT (T12): a deploy must be dry-run-first and ENFORCED. Two rules cooperate
+# DRY-RUN ENFORCEMENT: a deploy must be dry-run-first and ENFORCED. Two rules cooperate
 # with the plain `kubectl-apply` allow below (engine precedence: deny > escalate > hook >
 # rewrite > allow; a hook that returns None ABSTAINS and precedence re-applies to the rest):
 #   * force-server-dry-run-first (rewrite) — a bare `apply` (no --dry-run) is rewritten to add
@@ -103,7 +103,7 @@ rules:
     environments: [staging]
     reason: "kubectl scale is permitted in staging (read-write)"
 
-  # Destructive delete of a workload → HUMAN APPROVAL (P2 escalate via interrupt()). delete has
+  # Destructive delete of a workload → HUMAN APPROVAL (escalate via interrupt()). delete has
   # NO allow rule anywhere, so escalation IS the only path to a delete: on approve the tool runs
   # once using channel rw; on reject/timeout it is denied. A --force/--cascade/--grace-period
   # delete is caught by kubectl-mutate-no-force below (deny > escalate), so those never escalate.

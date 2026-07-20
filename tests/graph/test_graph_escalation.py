@@ -1,10 +1,10 @@
-"""Graph-level escalation flow (T13): interrupt() suspend + Command(resume=...) through the graph.
+"""Graph-level escalation flow: interrupt() suspend + Command(resume=...) through the graph.
 
 Exercises the REAL agent graph + REAL shipped policy + a real ``AsyncSqliteSaver`` checkpointer:
 a staging ``kubectl delete pod`` matches ``kubectl-delete-workload-escalate`` (effect escalate),
 so the run SUSPENDS on ``interrupt()``. The tests resume it approve / reject / edit and assert:
 
-* THE P2 REPLAY DoD — resume-approve executes the tool EXACTLY ONCE (spy executor + exactly one
+* THE REPLAY GUARANTEE — resume-approve executes the tool EXACTLY ONCE (spy executor + exactly one
   ``execution`` audit event for the tool_call_id) despite the tools node re-executing on resume;
 * the audit chain records escalation -> resolution(approver) and verifies;
 * reject returns a deny ToolMessage and the model continues;
@@ -83,14 +83,14 @@ def _cfg_with_rw(tmp_path: Path) -> AppConfig:
                 },
                 "github": {
                     "token_env": "OPENDEVOPS_TEST_GH_TOKEN",
-                    "token_env_rw": "OPENDEVOPS_TEST_GH_TOKEN_RW",  # P5f gh-write rw gate
+                    "token_env_rw": "OPENDEVOPS_TEST_GH_TOKEN_RW",  # gh-write rw gate
                     "write_repos": ["octo-org/staging-app"],
                 },
-                # P5a: cloud read packs' coverage gate (names only; not exec'd here).
+                # cloud read packs' coverage gate (names only; not exec'd here).
                 "aws": {"credential_env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]},
                 "gcloud": {"credential_env": ["GOOGLE_APPLICATION_CREDENTIALS"]},
                 "azure": {"credential_env": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID"]},
-                # P5b: ssh-read pack coverage gate (names/paths only; never dialed here).
+                # ssh-read pack coverage gate (names/paths only; never dialed here).
                 "ssh": {
                     "hosts": ["allowed.host.internal"],
                     "user": "deploy",
@@ -131,7 +131,7 @@ def _executions_for(events: list[dict[str, Any]], tool_call_id: str) -> list[dic
 
 
 # --------------------------------------------------------------------------------------
-# THE P2 REPLAY DoD — resume approve executes exactly once
+# THE REPLAY GUARANTEE — resume approve executes exactly once
 # --------------------------------------------------------------------------------------
 
 

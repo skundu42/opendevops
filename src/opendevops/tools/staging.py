@@ -1,4 +1,4 @@
-"""Virtual-FS -> executor staging bridge for file-consuming flags (T11 / P2).
+"""Virtual-FS -> executor staging bridge for file-consuming flags.
 
 The agent authors manifests in the deepagents virtual filesystem (graph state ``files``); a
 subprocess started by :class:`~opendevops.tools.executor.LocalExecutor` cannot see them. For
@@ -6,7 +6,7 @@ file-consuming flags (``kubectl -f/--filename``, ``kubectl -k/--kustomize``, ``h
 the tool must **materialize** the referenced virtual files into a per-call private tmpdir,
 **rewrite** argv so the flag values point at the staged on-disk paths, and **record** each staged
 file's ``{path, sha256}`` so the audit ``execution.staged_files`` captures exactly the applied
-manifest (T12's dry-run-before-apply hook keys on those sha256s).
+manifest (the dry-run-before-apply hook keys on those sha256s).
 
 Design notes
 ------------
@@ -23,9 +23,9 @@ Design notes
   like a real path (``/manifests/deploy.yaml``) is still resolved as a key into the virtual
   ``files`` mapping. A referenced path absent from the virtual FS raises :class:`StagingError` and
   the tool refuses to execute — the model must ``write_file`` it first.
-* **kustomize (P2 limitation).** ``-k``/``--kustomize`` references a *directory* tree, not a single
-  file. P2 stages single files only; any ``-k``/``--kustomize`` file-ref raises
-  :class:`StagingError`. Policy allows the flag, but this bridge refuses it until P3+.
+* **kustomize limitation.** ``-k``/``--kustomize`` references a *directory* tree, not a single
+  file. This bridge stages single files only; any ``-k``/``--kustomize`` file-ref raises
+  :class:`StagingError`. Policy allows the flag, but the bridge refuses it.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from typing import Any
 # transitively load ``deepagents`` -> ``langgraph`` -> ``langgraph_sdk`` into ANY importer of this
 # module — including the credential-holding executor service, which reuses only ``FileRef`` /
 # ``stage`` / ``staging_tmpdir`` and never calls ``resolve_file_refs``. Deferring the import keeps
-# the executor image free of the langgraph stack (P5d M3). The import is cached after first use, so
+# the executor image free of the langgraph stack (SDK firewall). The import is cached after use, so
 # the agent path (which does call ``resolve_file_refs``) pays it once.
 
 # --------------------------------------------------------------------------------------
@@ -54,13 +54,13 @@ from typing import Any
 
 # Per-binary set of *long* file-consuming flags this bridge stages.
 #
-# gh (P5f): ``gh api --input <file>`` reads a request BODY from a file (the PR-authoring commit
+# gh: ``gh api --input <file>`` reads a request BODY from a file (the PR-authoring commit
 # body / pulls payload). Staging materializes that virtual-FS file + records its sha into the
 # audit ``staged_files`` exactly like a kubectl ``-f`` manifest, so the committed content is
 # captured. A non-file operand — ``--input -`` (stdin), a ``http(s)://`` URL, or any path absent
 # from the virtual FS — is NOT a key in ``files`` and so raises :class:`StagingError` (refused,
 # fail-closed), the same discipline as the kubectl bridge. (gh ``-F``/``--field`` ``key=@file``
-# body-field files are NOT staged in P5f; the model authors with ``--input`` or inline fields.)
+# body-field files are NOT staged; the model authors with ``--input`` or inline fields.)
 FILE_FLAGS: dict[str, set[str]] = {
     "kubectl": {"--filename", "--kustomize"},
     "helm": {"--values"},
@@ -75,7 +75,7 @@ _FILE_FLAG_ALIASES: dict[str, dict[str, str]] = {
     "helm": {"-f": "--values"},
 }
 
-# The kustomize flag references a directory tree; single-file staging only in P2 (see module doc).
+# The kustomize flag references a directory tree; this bridge stages single files only (module doc).
 _KUSTOMIZE_LONG = "--kustomize"
 
 
@@ -157,7 +157,7 @@ def resolve_file_refs(argv: list[str], files: Mapping[str, Any]) -> list[FileRef
     those content bytes.
 
     Raises :class:`StagingError` if a referenced path is absent from *files*, if a ``-k`` /
-    ``--kustomize`` file-ref is present (unsupported in P2), or if a file flag has no operand.
+    ``--kustomize`` file-ref is present (unsupported), or if a file flag has no operand.
     Returns ``[]`` when *argv[0]* has no file flags (nothing to stage).
     """
     if not argv:
@@ -183,9 +183,9 @@ def resolve_file_refs(argv: list[str], files: Mapping[str, Any]) -> list[FileRef
         long_flag, inline_value, inline_prefix = matched
         inline = inline_prefix is not None
 
-        # kustomize references a directory tree — refuse before any lookup (P2 limitation).
+        # kustomize references a directory tree — refuse before any lookup (single-file bridge).
         if long_flag == _KUSTOMIZE_LONG:
-            raise StagingError("kustomize staging not supported in P2")
+            raise StagingError("kustomize staging is not supported (single-file staging only)")
 
         if inline:
             value = inline_value

@@ -1,4 +1,4 @@
-"""T19 Slack adapter: thread mapping, principal resolve (fail-closed), Block Kit, resume, seam.
+"""Slack adapter: thread mapping, principal resolve (fail-closed), Block Kit, resume, seam.
 
 slack-bolt Socket Mode needs a live websocket, so nothing here starts a real handler. Every test
 drives the pure functions / :class:`SlackAdapter` methods directly with an ``AsyncMock`` gateway and

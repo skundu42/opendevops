@@ -1,4 +1,4 @@
-"""langgraph.json manifest + server_graph factory (T16).
+"""langgraph.json manifest + server_graph factory.
 
 Validates the deployment manifest against the installed langgraph-cli schema, proves its graph
 spec points at an importable callable, and proves ``server_graph()`` builds with NO checkpointer
@@ -30,7 +30,7 @@ def test_manifest_parses_and_has_expected_shape() -> None:
     manifest = _load_manifest()
     assert manifest["graphs"] == {"devops": "./src/opendevops/agent.py:server_graph"}
     assert manifest["dependencies"] == ["."]
-    # T17 mounts the webhook app via http.app.
+    # The webhook app is mounted via http.app.
     assert manifest["http"] == {"app": "./src/opendevops/interfaces/webapp.py:app"}
 
 

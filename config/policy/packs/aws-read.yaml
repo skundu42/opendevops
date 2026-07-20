@@ -1,20 +1,20 @@
-# aws-read.yaml — the P5a read-only AWS CLI pack (describe-* / list-* / get-* reads).
+# aws-read.yaml — the read-only AWS CLI pack (describe-* / list-* / get-* reads).
 #
-# tool_family binds this pack's allow rule to the "aws" credential family: at boot (T8) the
+# tool_family binds this pack's allow rule to the "aws" credential family: at boot the
 # loader's check_credential_coverage() refuses to start unless targets.aws.credential_env names
 # ≥1 env var (the read-only role's AWS_* creds — see config.py CloudTarget). The executor injects
 # ONLY those vars for an aws-family exec (executor.build_env), plus KUBECONFIG=/dev/null.
 #
-# MATCHING NOTE (P5a fix round 1 — closed the fail-open). `aws` is now a SUBCOMMAND_BINARY
-# (parsing.py), so `aws <service> <action>` parses with verb=<service> and the ACTION is
-# ALWAYS positionals[0] (aws v2 is strictly `aws SERVICE OPERATION [args]` — one service level).
+# MATCHING NOTE. `aws` is a SUBCOMMAND_BINARY (parsing.py), so `aws <service> <action>` parses
+# with verb=<service> and the ACTION is ALWAYS positionals[0] (aws v2 is strictly
+# `aws SERVICE OPERATION [args]` — one service level).
 # The read allow therefore pins the action with `first_positional` (NOT `resource_any`, which
-# matched a read token at ANY positional depth and was the fail-open). Because the action is
+# would match a read token at ANY positional depth — a fail-open). Because the action is
 # pinned at positionals[0], a mutation carrying a leaked/embedded read token in an argument
 # (e.g. `aws cloudformation delete-stack --stack-name describe-stacks`) parses with
 # first_positional=delete-stack and falls to __default_deny__ — the read allow cannot fire. This
 # holds even for an unknown value-flag: a leaked operand becomes positionals[1..], never [0].
-# This is a compensating control ATOP the read-only IAM role (PLAN §3.5); mutations not in the
+# This is a compensating control ATOP the read-only IAM role; mutations not in the
 # allow-set fall to __default_deny__. Secret-material reads and cred/identity overrides are denied
 # in base.yaml (aws-no-secret-reads / aws-no-ssm-decrypt / aws-no-endpoint-override), deny > allow.
 #

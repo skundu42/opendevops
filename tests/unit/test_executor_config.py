@@ -1,4 +1,4 @@
-"""ExecutorConfig (P5d): local is default; remote is fail-closed on missing url / signing key."""
+"""ExecutorConfig: local is default; remote is fail-closed on missing url / signing key."""
 
 from __future__ import annotations
 

@@ -1,8 +1,9 @@
-# Read-only credential for the DevOps agent (P1).
+# Read-only credential for the DevOps agent.
 #
 # Provisions a ServiceAccount bound to the built-in `view` ClusterRole plus a long-lived
 # token Secret. The `view` role is read-only AND excludes Secrets, so even a total policy
-# bypass using this credential is "read-only, no-secrets" (a plan invariant, PLAN.md §1).
+# bypass using this credential is "read-only, no-secrets" (a core design invariant —
+# see guides/security-model.md).
 #
 # Apply once per target cluster:
 #   kubectl apply -f ops/k8s/agent-view-rbac.yaml

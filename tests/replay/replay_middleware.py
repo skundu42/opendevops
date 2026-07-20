@@ -1,6 +1,6 @@
-"""``ReplayToolMiddleware`` — a test-tier ``AgentMiddleware`` that replays canned executions (T15).
+"""``ReplayToolMiddleware`` — a test-tier ``AgentMiddleware`` that replays canned executions.
 
-The P2 eval harness runs the **real** policy/audit/budget stack (via ``build_agent``) but swaps the
+The eval harness runs the **real** policy/audit/budget stack (via ``build_agent``) but swaps the
 one dangerous, non-deterministic surface — the ``run_command`` subprocess — for hand-written canned
 output. That lets a golden trajectory + mechanical audit gates assert end-to-end behaviour with
 ``$0`` LLM/cluster cost, and it is the regression net that makes the pinned trio upgradable.
@@ -52,7 +52,7 @@ record mode
 ``ReplayToolMiddleware(mode="record", record_path=...)`` wraps the real handler and appends
 ``{tool, args, content, exec_meta}`` (one JSON object per line) to ``record_path`` — the tool for
 capturing real kind-cluster sessions into a fixture. It never strips the meta (``PolicyMiddleware``
-still needs it). Not exercised in CI yet; documented so a P3 capture run can use it.
+still needs it). Not exercised in CI yet; documented so a capture run can use it.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ class ReplayStep:
     * ``argv`` — the **executed** argv to match exactly (post-rewrite; see the module docstring).
     * ``output`` — the canned combined stdout+stderr (a realistic kubectl/gh snippet).
     * ``exit_code`` — the process exit code (non-zero for a failing command, e.g. a failed rollout).
-    * ``tool`` — the tool name (always ``run_command`` in P2; carried for record/replay symmetry).
+    * ``tool`` — the tool name (always ``run_command`` today; carried for record/replay symmetry).
     * ``duration_ms`` — a fixed fake duration for the exec meta.
     """
 

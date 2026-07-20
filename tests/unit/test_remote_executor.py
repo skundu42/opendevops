@@ -1,4 +1,4 @@
-"""RemoteExecutor round-trip against an IN-PROCESS executor service (P5d, no real network).
+"""RemoteExecutor round-trip against an IN-PROCESS executor service (no real network).
 
 Drives ``run_command_core`` with ``executor.mode = remote`` and a RemoteExecutor whose httpx client
 is an ``ASGITransport`` over the real service app. Asserts the remote path yields the SAME

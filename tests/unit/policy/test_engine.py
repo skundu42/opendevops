@@ -1,4 +1,4 @@
-"""Engine unit tests (T4): precedence, environments, rewrite, hooks, fail-closed.
+"""Engine unit tests: precedence, environments, rewrite, hooks, fail-closed.
 
 These build small in-memory ``PolicyFile`` fixtures and a synthetic ``LoadedPolicy`` (bypassing
 the loader) to exercise the decision engine in isolation from the shipped YAML.

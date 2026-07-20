@@ -1,14 +1,14 @@
 # Upgrading the pinned trio (deepagents / langchain / langgraph)
 
 `deepagents==0.6.12`, `langchain==1.3.14`, `langgraph==1.2.9` are pinned **exactly** and move
-**only together, through this gate** (PLAN.md §5 comment: *"move only together, through the P2
-gate"*; §6 *"the pinned trio moves only on a branch passing all four tiers"*). These are beta-era
-libraries: the safety core reaches into a handful of **private / emergent** behaviours that a minor
-bump can silently change. This document is the procedure + the exact landmines to re-verify.
+**only together, through this gate**: the trio bumps only on a branch passing all four
+verification tiers. These are beta-era libraries: the safety core reaches into a handful of
+**private / emergent** behaviours that a minor bump can silently change. This document is the
+procedure + the exact landmines to re-verify.
 
 The eval harness (`tests/replay/`) exists precisely so this upgrade is *mechanical and safe*: it
 runs the real policy/audit/budget stack against golden trajectories with `$0` LLM/cluster cost, and
-its mechanical audit gates (`tests/replay/audit_gates.py`) are reused by P3 CI. A bump that keeps
+its mechanical audit gates (`tests/replay/audit_gates.py`) are reused by CI. A bump that keeps
 `uv run pytest -q` green has, by construction, preserved every behaviour listed below.
 
 ---
@@ -34,14 +34,14 @@ its mechanical audit gates (`tests/replay/audit_gates.py`) are reused by P3 CI. 
    ```
    Any change to the "DIVERGENCES" / import-path / signature sections is a landmine hit — cross-ref
    the table below before touching anything else.
-5. **Run all four verification tiers** (PLAN.md §6). The first three are local and free:
+5. **Run all four verification tiers** (see `guides/development.md`). The first three are local and free:
    ```sh
    uv run pytest -q                       # unit + graph-deterministic + replay/golden
    uv run ruff check src tests
    uv run mypy src
    ```
    Then the **integration** tier (nightly / pre-release): kind cluster + live model on the `ci`
-   budget profile (P3+; capped by `CostCapMiddleware`).
+   budget profile (capped by `CostCapMiddleware`).
 6. **Walk the landmine checklist below.** A green suite covers most of it, but a few items
    (`tool_choice` precedence, jump-to-end shape) are *emergent* behaviours a passing test may not
    pin tightly — re-verify them by hand.
@@ -79,7 +79,7 @@ means a test already fails loudly if it breaks; "manual" means re-verify by hand
 
 | # | Landmine | Where | Re-verify |
 |---|---|---|---|
-| G1 | **interrupt / resume shapes (T13)**: `interrupt(payload)` raises `GraphInterrupt` on the first pass and **returns** the resume value on resume; resume is `Command(resume={"decisions":[{"type","args"?,"message"?,"approver"?}]})`; the suspended `ainvoke` result / `astream` final `values` frame carries `__interrupt__=[Interrupt(value=<payload>, …)]`. `GraphInterrupt` subclasses `GraphBubbleUp`, which PolicyMiddleware **re-raises** (must not be swallowed by fail-closed). | `policy/middleware.py` `_escalate` + the `except GraphBubbleUp: raise` carve-out; `gateway/local.py` `_extract_interrupt`, `_resume_command`; `tests/graph/test_graph_escalation.py`; `tests/replay/test_golden_trajectories.py::test_escalated_delete_approve`. | Guard: the escalation graph tier + the escalated-delete replay scenario (suspend → approve → executes exactly once, `resolution` carries the approver). If the resume envelope or `__interrupt__` shape changes, these go red. |
+| G1 | **interrupt / resume shapes**: `interrupt(payload)` raises `GraphInterrupt` on the first pass and **returns** the resume value on resume; resume is `Command(resume={"decisions":[{"type","args"?,"message"?,"approver"?}]})`; the suspended `ainvoke` result / `astream` final `values` frame carries `__interrupt__=[Interrupt(value=<payload>, …)]`. `GraphInterrupt` subclasses `GraphBubbleUp`, which PolicyMiddleware **re-raises** (must not be swallowed by fail-closed). | `policy/middleware.py` `_escalate` + the `except GraphBubbleUp: raise` carve-out; `gateway/local.py` `_extract_interrupt`, `_resume_command`; `tests/graph/test_graph_escalation.py`; `tests/replay/test_golden_trajectories.py::test_escalated_delete_approve`. | Guard: the escalation graph tier + the escalated-delete replay scenario (suspend → approve → executes exactly once, `resolution` carries the approver). If the resume envelope or `__interrupt__` shape changes, these go red. |
 | G2 | **`AsyncSqliteSaver.__init__` calls `get_running_loop`** — it cannot be built in a sync constructor; it is built lazily in-loop and attached with `graph.checkpointer = saver`. | `gateway/local.py` `_ensure_checkpointer`. | Guard: any streaming/resume gateway test. Manual if the saver constructor changes. |
 | G3 | **`_fileobj2output` CPython/asyncio-subprocess internal** — the executor drains buffered output from `proc._fileobj2output` via `getattr(..., None)`, degrading to empty output if the internal is gone. | `tools/executor.py` (`getattr(proc, "_fileobj2output", None)`). | Manual: not exercised by the fake-executor tests. On a Python or langgraph subprocess change, confirm real command output is still captured (integration tier / a live `run_command`). Degrades safely to empty output, never a crash. |
 | G4 | **Content-bearing audit dedupe** absorbs the resume re-execution's identical re-emit while keeping a *distinct* (edited-argv) escalation. Depends on langgraph re-executing the `tools` node from its start on resume. | `audit/logger.py` dedupe key `(tool_call_id, event_type, content_sha)`; `tests/graph/test_graph_escalation.py` (double-interrupt / edit cases). | Guard: escalation graph tier asserts exactly-one `execution` per `tool_call_id` across resume. |
@@ -105,4 +105,4 @@ means a test already fails loudly if it breaks; "manual" means re-verify by hand
   PR and confirm its defense-in-depth backstop still holds (SingleToolCallMiddleware for L2, the
   gateway's authoritative accounting for a budget-shape drift).
 - **Record-mode capture drifted** → `ReplayToolMiddleware(mode="record", record_path=…)` re-captures
-  real kind-cluster `run_command` outputs into a fresh fixture for regenerating goldens (P3).
+  real kind-cluster `run_command` outputs into a fresh fixture for regenerating goldens.

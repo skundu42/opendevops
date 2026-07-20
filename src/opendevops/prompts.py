@@ -1,4 +1,4 @@
-"""System prompt + diagnostic playbooks for the P1 read-only DevOps agent (T8).
+"""System prompt + diagnostic playbooks for the DevOps agent.
 
 ``SYSTEM_PROMPT`` is passed as ``create_deep_agent(system_prompt=...)`` and therefore sits at
 the *front* of the assembled prompt (before the deepagents BASE prompt). It encodes the hard

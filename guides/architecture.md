@@ -154,6 +154,3 @@ pre-deployment conditions — see [deployment](deployment.md#executor-service-re
 | `src/opendevops/models/` | alias→model resolution, price table |
 | `config/` | `config.yaml`, `models.yaml`, `budgets.yaml`, `policy/` ([configuration](configuration.md)) |
 | `ops/` | RBAC, kubeconfig generator, compose-stack configs, executor manifests, maintenance CLIs |
-
-For the full design rationale — including every deferred decision and its pre-decided integration
-pattern — read [`PLAN.md`](../PLAN.md).

@@ -1,6 +1,6 @@
-"""Built-in policy hooks that ship with the agent (T12).
+"""Built-in policy hooks that ship with the agent.
 
-Currently the single ``dry_run_before_apply`` gatekeeper: it enforces the P2 deploy contract
+Currently the single ``dry_run_before_apply`` gatekeeper: it enforces the deploy contract
 that a *real* ``kubectl apply`` (``--dry-run=none``) is permitted only when the identical staged
 manifest has already dry-run against the server successfully in this run. A bare ``apply`` (no
 ``--dry-run``) is left for the ``force-server-dry-run-first`` rewrite rule to rewrite to
@@ -82,12 +82,12 @@ async def dry_run_before_apply(ctx: ToolCallCtx) -> Decision | None:
     except ParseError as exc:
         return Decision.deny(RULE_FAIL_CLOSED, f"dry_run_before_apply: {exc}")
 
-    # A real apply must reference a manifest via -f/--filename. -k/--kustomize (unsupported in P2)
-    # and a bare `apply` have nothing to verify -> deny regardless of the --dry-run value.
+    # A real apply must reference a manifest via -f/--filename. -k/--kustomize (unsupported by
+    # this hook) and a bare `apply` have nothing to verify -> deny regardless of --dry-run.
     if "--filename" not in parsed.flags:
         return Decision.deny(
             _RULE_ID,
-            "apply requires --filename in P2 (a real apply must reference a staged manifest)",
+            "apply requires --filename (a real apply must reference a staged manifest)",
             hint="write the manifest with write_file, then apply it with -f",
         )
 
@@ -134,7 +134,7 @@ def _gate_real_apply(ctx: ToolCallCtx, argv: list[str]) -> Decision | None:
 
     # dry_run_ok keys are RUN-SCOPED (``{run_id}:{sha256}``) so a server dry-run recorded on an
     # earlier turn of a checkpointed thread cannot validate a real apply on a later turn (stale
-    # cluster validation). Look up the identically-scoped key the middleware records (T12-review).
+    # cluster validation). Look up the identically-scoped key the middleware records.
     recorded = ctx.dry_run_ok or {}
     missing = [
         r.virtual_path for r in refs if not recorded.get(f"{ctx.run_id}:{r.sha256}")

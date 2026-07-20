@@ -1,6 +1,6 @@
-# agent-helm-release-read-rbac.yaml — P2 opt-in: let the read-only agent read Helm release state.
+# agent-helm-release-read-rbac.yaml — opt-in: let the read-only agent read Helm release state.
 #
-# Helm stores release state in Secrets labelled `helm.sh/release.v1`. The P1 `view` ClusterRole
+# Helm stores release state in Secrets labelled `helm.sh/release.v1`. The base `view` ClusterRole
 # excludes Secrets, so `helm list/status/get` CANNOT work against sa-agent-view as shipped. This
 # manifest grants sa-agent-view `secrets: get,list` (NO watch) in a designated app namespace so
 # the `helm-read` policy pack can function there.
@@ -8,7 +8,7 @@
 # CAVEAT (weakens the no-secrets invariant). RBAC cannot filter Secrets by type, so this Role
 # technically lets sa-agent-view read the contents of ALL Secrets in the namespace — not just
 # Helm release Secrets. That weakens the "even a total policy bypass is read-only, no-secrets"
-# invariant (PLAN.md §1, §3.3). Apply it ONLY in namespaces where that trade-off is accepted.
+# invariant (see guides/security-model.md). Apply it ONLY in namespaces where that trade-off is accepted.
 #
 # COMPENSATING CONTROL. The policy-layer `no-secret-reads` deny (config/policy/base.yaml) still
 # blocks every `kubectl get/describe secret`, so the model can never read Secret contents

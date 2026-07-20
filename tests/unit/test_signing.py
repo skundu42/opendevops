@@ -1,4 +1,4 @@
-"""ed25519 signed decision tokens (P5d): valid verifies; every tamper/expiry rejects.
+"""ed25519 signed decision tokens: valid verifies; every tamper/expiry rejects.
 
 The clock is injectable so expiry is deterministic; the argv + staging hashes are single-sourced
 with the audit canonical serializer. Post-fix1 the token also binds the staging PLAN (content +

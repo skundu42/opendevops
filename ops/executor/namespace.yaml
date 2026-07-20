@@ -1,5 +1,5 @@
-# opendevops executor service namespace (P5d). Isolated from the workloads the agent manages
-# and from the ops stack (docker-compose.yml) — a blast-radius boundary (PLAN §3.7).
+# opendevops executor service namespace . Isolated from the workloads the agent manages
+# and from the ops stack (docker-compose.yml) — a blast-radius boundary (guides/deployment.md).
 apiVersion: v1
 kind: Namespace
 metadata:

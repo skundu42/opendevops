@@ -10,5 +10,5 @@ per_run:
 daily:
   global_usd: 50.00
   per_principal_usd: 25.00
-  backend: sqlite            # P3: "sqlite" (default, durable local file) | "redis" (shared cross-worker/restart-surviving)
+  backend: sqlite            # "sqlite" (default, durable local file) | "redis" (shared cross-worker/restart-surviving)
   # redis_url: redis://redis:6379/0   # REQUIRED when backend: redis — the compose stack's redis service

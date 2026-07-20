@@ -1,7 +1,7 @@
-"""Tests for PolicyMiddleware — the awrap_tool_call authorize/audit/gate/cache pipeline (T7).
+"""Tests for PolicyMiddleware — the awrap_tool_call authorize/audit/gate/cache pipeline.
 
 Drives ``awrap_tool_call`` directly with a fake engine, fake handler, and fake runtime (no full
-graph needed) and asserts against a *real* T2 ``AuditLogger`` run file. Also pins the CRITICAL
+graph needed) and asserts against a *real* ``AuditLogger`` run file. Also pins the CRITICAL
 state-reducer composition: ``DevOpsState`` must accumulate ``run_cost_usd`` / ``run_usage`` /
 ``tool_results_cache`` rather than replace them.
 """
@@ -312,11 +312,11 @@ async def test_rewrite_executes_rewritten_argv_and_audits_it(tmp_path: Path) -> 
 
 
 # --------------------------------------------------------------------------------------
-# escalate path (P2 => interrupt + resume dispatch)
+# escalate path (interrupt + resume dispatch)
 # --------------------------------------------------------------------------------------
 #
 # The real interrupt()/suspend/resume mechanics are exercised end-to-end at the graph tier
-# (tests/graph/test_graph_escalation.py — the P2 replay DoD). Here we monkeypatch the module-level
+# (tests/graph/test_graph_escalation.py — the replay contract). Here we monkeypatch the module-level
 # ``interrupt`` to return a canned resume value, which is exactly what langgraph delivers to the
 # call on the RESUME node re-execution — letting us unit-test the approve/edit/reject DISPATCH and
 # the escalation/resolution audit events without a checkpointer.
@@ -537,7 +537,7 @@ async def test_missing_run_id_fails_closed(tmp_path: Path) -> None:
 
 async def test_missing_environment_fails_closed(tmp_path: Path) -> None:
     """A context with no environment must NOT default to 'staging' (which would enable the staging
-    allow set): it fails closed like a missing run_id (T14), deny + best-effort policy_error."""
+    allow set): it fails closed like a missing run_id, deny + best-effort policy_error."""
     engine = FakeEngine(Decision.allow("kubectl-get", "ro", channel="ro"))
     handler = SpyHandler(sets_exec_meta=True)
     audit = _started_logger(tmp_path)
@@ -646,7 +646,7 @@ async def test_run_command_spill_records_staged_file_and_passes_command_through(
 
 
 # --------------------------------------------------------------------------------------
-# T11 staging bridge -> audit link: meta["staged_files"] must reach execution.staged_files
+# Staging bridge -> audit link: meta["staged_files"] must reach execution.staged_files
 # --------------------------------------------------------------------------------------
 
 
@@ -654,7 +654,7 @@ async def test_staged_files_from_exec_meta_land_in_execution_audit(tmp_path: Pat
     """A staged apply's manifest ref (``meta['staged_files']``) reaches the execution audit event.
 
     Drives a staged apply end-to-end through PolicyMiddleware: the handler models run_command
-    tagging its returned ToolMessage with ``EXEC_META`` including ``staged_files`` (the T11
+    tagging its returned ToolMessage with ``EXEC_META`` including ``staged_files`` (the
     staging bridge's record of the manifest it materialized), and asserts that entry lands,
     unmodified, in the written execution audit event's ``execution.staged_files``. Regression
     guard: deleting the ``meta["staged_files"]`` concat in
@@ -717,7 +717,7 @@ async def test_staged_files_concat_meta_and_spill_have_distinct_entries(tmp_path
 
 
 # --------------------------------------------------------------------------------------
-# T12 dry-run recording: a successful server dry-run records staged shas into dry_run_ok
+# Dry-run recording: a successful server dry-run records staged shas into dry_run_ok
 # --------------------------------------------------------------------------------------
 
 
@@ -748,7 +748,7 @@ async def test_successful_server_dry_run_records_dry_run_ok(tmp_path: Path) -> N
 
     assert handler.seen_argv == _SERVER_DRY_RUN_ARGV  # executed the rewritten (server dry-run) argv
     assert isinstance(result, Command)
-    # Keys are RUN-SCOPED (``{run_id}:{sha}``); the default context's run_id is "run-1" (T13).
+    # Keys are RUN-SCOPED (``{run_id}:{sha}``); the default context's run_id is "run-1".
     assert result.update["dry_run_ok"] == {"run-1:manifest-sha-abc": True}
     # the cache entry rides on the same Command update
     assert result.update["tool_results_cache"] == {"call_1": handler._content}
@@ -898,7 +898,7 @@ async def test_deny_decision_records_channel_none(tmp_path: Path) -> None:
 def test_devops_state_channels_are_accumulating_reducers() -> None:
     """DevOpsState must wire commutative reducers for the budget keys + the tool cache.
 
-    Guards the T6 CRITICAL invariant: composing BudgetStateMixin by inheritance (not
+    Guards the CRITICAL invariant: composing BudgetStateMixin by inheritance (not
     re-declaration) preserves ``_add_cost`` / ``_merge_usage``; a regression to plain fields
     would silently make langgraph REPLACE instead of accumulate.
     """
@@ -944,7 +944,7 @@ async def test_graph_control_flow_exceptions_propagate(tmp_path: Path) -> None:
     """GraphInterrupt/GraphBubbleUp raised by the handler must NOT become fail-closed denies.
 
     LangGraph control flow subclasses Exception, but converting it into a deny would break
-    every interrupt/HITL suspend-resume flow — including the P2 escalate path, which calls
+    every interrupt/HITL suspend-resume flow — including the escalate path, which calls
     interrupt() inside the pipeline itself. Pin: it propagates, no policy_error is written,
     and the exec-gate contextvar is still reset by the finally.
     """

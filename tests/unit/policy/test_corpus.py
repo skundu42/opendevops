@@ -1,4 +1,4 @@
-"""CI-blocking bypass corpus (T4): the shipped policy must deny every known bypass.
+"""CI-blocking bypass corpus: the shipped policy must deny every known bypass.
 
 This loads the *real* ``config/policy/`` dir and drives it through :class:`YamlRuleEngine`.
 Each deny case asserts BOTH the effect AND the exact ``rule_id`` — a rule id drifting is as
@@ -26,9 +26,9 @@ ALLOWED_CONTEXTS = ["kind-opendevops"]
 def _resolver(ref: str) -> list[str]:
     if ref == "${targets.kubernetes.allowed_contexts}":
         return ALLOWED_CONTEXTS
-    if ref == "${targets.ssh.hosts}":  # P5b ssh_run host allowlist ref
+    if ref == "${targets.ssh.hosts}":  # ssh_run host allowlist ref
         return ["allowed.host.internal"]
-    if ref == "${targets.github.write_repos}":  # P5f gh-write repo allowlist ref
+    if ref == "${targets.github.write_repos}":  # gh-write repo allowlist ref
         return ["octo-org/staging-app"]
     raise AssertionError(f"unexpected config ref {ref!r}")
 
@@ -59,7 +59,7 @@ def _tool(tool_name: str, environment: str = "staging") -> ToolCallCtx:
 
 
 def _task(args: dict[str, object], environment: str = "staging") -> ToolCallCtx:
-    """A deepagents ``task`` (subagent-spawner) call with the given args (P5c)."""
+    """A deepagents ``task`` (subagent-spawner) call with the given args."""
     return ToolCallCtx(
         tool_name="task",
         args=args,
@@ -175,7 +175,7 @@ async def test_flag_not_allowed(engine: YamlRuleEngine) -> None:
 
 
 async def test_log_summarizer_subagent_allowed(engine: YamlRuleEngine) -> None:
-    """P5c: the one named subagent is permitted at the engine level (``__subagent_allowed__``)."""
+    """The one named subagent is permitted at the engine level (``__subagent_allowed__``)."""
     d = await _decide(
         engine, _task({"description": "digest these logs", "subagent_type": "log-summarizer"})
     )
@@ -194,14 +194,14 @@ async def test_log_summarizer_subagent_allowed(engine: YamlRuleEngine) -> None:
     ],
 )
 async def test_arbitrary_subagent_denied(engine: YamlRuleEngine, args: dict[str, object]) -> None:
-    """P5c: any subagent_type other than the log-summarizer — incl. absent/malformed — is denied."""
+    """Any subagent_type other than the log-summarizer — incl. absent/malformed — is denied."""
     d = await _decide(engine, _task(args))
     assert d.effect == "deny"
     assert d.rule_id == "no-arbitrary-subagents"
 
 
 async def test_compact_conversation_denied(engine: YamlRuleEngine) -> None:
-    """P5c: manual conversation compaction stays hard-denied (fail-closed, its own rule)."""
+    """Manual conversation compaction stays hard-denied (fail-closed, its own rule)."""
     d = await _decide(engine, _tool("compact_conversation"))
     assert d.effect == "deny"
     assert d.rule_id == "no-compaction-tool"

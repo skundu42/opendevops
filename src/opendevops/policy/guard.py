@@ -1,8 +1,8 @@
-"""``SingleToolCallMiddleware`` — collapse a parallel tool-call turn to one call (T13).
+"""``SingleToolCallMiddleware`` — collapse a parallel tool-call turn to one call.
 
 Interrupt-replay safety, third layer
 ------------------------------------
-The escalate path (T13) calls ``langgraph.types.interrupt()`` *inside*
+The escalate path calls ``langgraph.types.interrupt()`` *inside*
 ``PolicyMiddleware.awrap_tool_call``. LangGraph re-executes the ``tools`` node from its start
 when a run resumes after an interrupt. If a single model turn issued *parallel* tool calls
 ``[apply (allow), delete-pvc (escalate)]``, the apply would execute, the delete would interrupt,

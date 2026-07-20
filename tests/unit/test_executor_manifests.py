@@ -1,6 +1,6 @@
-"""gVisor / hardening manifests (P5d): parse ops/executor/*.yaml and assert every required field.
+"""gVisor / hardening manifests: parse ops/executor/*.yaml and assert every required field.
 
-No live cluster — pure YAML parsing. Enforces the PLAN §3.5 hardening on EVERY executor Deployment
+No live cluster — pure YAML parsing. Enforces the hardening contract on EVERY executor Deployment
 (gVisor runtimeClass, non-root, read-only rootfs, cap-drop ALL, seccomp RuntimeDefault, tmpfs
 /work) and the egress NetworkPolicy (Egress policyType + IMDS 169.254.169.254/32 blocked).
 """

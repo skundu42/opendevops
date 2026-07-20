@@ -1,4 +1,4 @@
-"""T17 webapp: Alertmanager + GitHub webhooks, run-complete, healthz, metrics.
+"""Webapp: Alertmanager + GitHub webhooks, run-complete, healthz, metrics.
 
 Every test drives :func:`create_app` with an ``AsyncMock`` gateway stub over an in-process ASGI
 transport (``httpx.ASGITransport``), so no real gateway, server, or ``langgraph_sdk`` is involved.

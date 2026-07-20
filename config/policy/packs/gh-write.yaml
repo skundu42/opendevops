@@ -1,4 +1,4 @@
-# gh-write.yaml — the P5f staging-only GitHub WRITE pack: PR-based remediation ONLY.
+# gh-write.yaml — the staging-only GitHub WRITE pack: PR-based remediation ONLY.
 #
 # This is the sharp edge of the whole system's write surface. It grants exactly three narrow,
 # staging-only, channel-rw capabilities backed by a fine-grained WRITE PAT (the gh `rw`

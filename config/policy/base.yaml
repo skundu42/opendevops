@@ -3,7 +3,7 @@
 # This file declares NO tool_family and contains NO allow rules: it only denies. Allows
 # live in packs/. Env overlays (envs/) may only ADD more denies/escalations.
 #
-# NOTE for the engine (T4): the deepagents filesystem built-ins
+# NOTE for the engine: the deepagents filesystem built-ins
 #   write_todos / ls / read_file / write_file / edit_file / glob / grep
 # are allowed by tool_name at the ENGINE level, NOT via YAML. This file stays about
 # executables (argv0) and explicitly-denied tool_names only.
@@ -119,10 +119,10 @@ rules:
     reason: "reading Secret objects is not permitted"
 
   # Cloud secret-material reads are denied even though they are technically "reads" — they
-  # exfiltrate secret bytes. This is the compensating control ATOP the read-only role's IAM Denies
-  # (PLAN §3.5): the role should already Deny these, and the policy layer denies them again.
+  # exfiltrate secret bytes. This is the compensating control ATOP the read-only role's IAM
+  # Denies: the role should already Deny these, and the policy layer denies them again.
   #
-  # MATCHING (P5a fix round 1). aws/gcloud/az are now SUBCOMMAND_BINARIES (parsing.py), so
+  # MATCHING. aws/gcloud/az are SUBCOMMAND_BINARIES (parsing.py), so
   # `aws <service> <action>` parses with verb=<service> and action=positionals[0]; gcloud/az put
   # the action at the LAST positional after their variable-depth groups. Secret-material actions
   # are pinned at their position (aws: first_positional; gcloud/az: the distinctive GROUP token via
@@ -200,7 +200,7 @@ rules:
     reason: "az secret-material reads (keyvault secret / * keys list / acr|sp credential) return secret material and are not permitted"
 
   # kubectl --context must resolve to a configured allowed context. The value below is a
-  # raw config-interpolation reference resolved by the engine at decision time (T4).
+  # raw config-interpolation reference resolved by the engine at decision time.
   - id: kubectl-context-allowlist
     match:
       argv0: kubectl
@@ -208,7 +208,7 @@ rules:
     effect: deny
     reason: "kubectl --context must be one of the configured allowed contexts"
 
-  # Subagent delegation is restricted to the single named log-summarizer (P5c). The deepagents
+  # Subagent delegation is restricted to the single named log-summarizer. The deepagents
   # `task` tool names its target in the `subagent_type` arg; this denies EVERY other target — and a
   # missing/malformed one (fail-closed, see subagent_type_not_in). The log-summarizer itself is
   # allowed at the ENGINE level (rule id `__subagent_allowed__`), like the built-in FS tools, because
@@ -230,7 +230,7 @@ rules:
 
   # deepagents 0.6.12 binds a shell-string `execute` tool even on StateBackend (see
   # docs/api-notes.md D1). It is inert on StateBackend but still advertised to the model, so
-  # it is hard-denied here (T8 additionally unbinds it at the factory level).
+  # it is hard-denied here (the agent factory additionally unbinds it).
   - id: no-builtin-shell-execute
     match:
       tool_name: execute

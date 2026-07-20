@@ -3,7 +3,7 @@
 Covers the compliance-critical properties of `opendevops.audit`:
 - an intact chain verifies and reports the right event count,
 - any modified / deleted / reordered *interior* line is detected at that line,
-- deleting the chain's trailing line(s) is NOT detected — a documented P1 blind spot, pinned by
+- deleting the chain's trailing line(s) is NOT detected — a documented blind spot, pinned by
   test_tamper_delete_last_line_is_undetected (see that test and verify.py's module docstring),
 - LangGraph resume re-execution is absorbed by (tool_call_id, event_type, content_sha) dedupe,
 - per-type required sections are enforced, and interleaved concurrent runs stay independent,
@@ -187,7 +187,7 @@ def test_tamper_corrupt_json(tmp_path: Path) -> None:
 
 
 def test_tamper_delete_last_line_is_undetected(tmp_path: Path) -> None:
-    """Documented P1 blind spot, pinned so it can't regress silently.
+    """Documented blind spot, pinned so it can't regress silently.
 
     Deleting the LAST line(s) of a chain leaves a strictly shorter, but fully self-consistent,
     prefix chain: every surviving event's prev_hash/hash still link up correctly. Linkage and
@@ -197,7 +197,8 @@ def test_tamper_delete_last_line_is_undetected(tmp_path: Path) -> None:
     or was interrupted before writing more events (see
     test_crashed_run_without_completed_still_verifies) — and a crashed run legitimately must
     still verify ok=True. See the module docstring in verify.py for what tail-truncation
-    detection would require (a signed run header/trailer or an external tip anchor, P5).
+    detection would require (a signed run header/trailer or an external tip anchor — a possible
+    future hardening).
 
     If a future change (e.g. a signed trailer) makes tail truncation detectable, this test
     should start failing its `ok is True` assertion — update it consciously rather than
@@ -315,7 +316,7 @@ def test_dedupe_is_content_bearing_diverged_payload_same_key_is_kept(tmp_path: P
 
 
 # --------------------------------------------------------------------------------------
-# durable chain rehydration (T16): a FRESH logger continues an on-disk chain
+# durable chain rehydration: a FRESH logger continues an on-disk chain
 #
 # Models a server RESTART between an escalation suspend and its resume, or a resume request
 # handled by a DIFFERENT worker than the one that suspended: a brand-new AuditLogger (empty
@@ -613,7 +614,7 @@ def test_ts_regression_is_warn_only_not_failure(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------------------
-# merged spool verification (T18): a Vector day-file interleaves many per-run chains
+# merged spool verification: a Vector day-file interleaves many per-run chains
 #
 # Vector tails every per-run chain and MERGES them, verbatim and in append order, into one
 # durable spool day-file. verify_merged_file regroups that interleaved stream by run_id and

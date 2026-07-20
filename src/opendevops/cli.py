@@ -1,9 +1,9 @@
-"""Typer CLI: ``version``, ``config check``, ``audit verify``, and the ``chat`` REPL (T9).
+"""Typer CLI: ``version``, ``config check``, ``audit verify``, and the ``chat`` REPL.
 
-``chat`` is the P1 human entry point: it builds a :class:`LocalGateway` over the on-disk config
+``chat`` is the human entry point: it builds a :class:`LocalGateway` over the on-disk config
 and drives a streaming REPL against it — assistant text as it arrives, tool calls as
 ``→ run_command …`` lines, policy denials in red with the rule id, and a per-turn cost line.
-``audit verify`` wires T2's chain walker as a CI-able integrity check. The gateway build and
+``audit verify`` wires the audit chain walker as a CI-able integrity check. The gateway build and
 config load are indirected through module-level seams (:func:`_build_gateway`, ``load_config``)
 so the REPL can be smoke-tested with a stub gateway.
 """
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 
 app = typer.Typer(
     name="opendevops",
-    help="Autonomous DevOps agent (P1).",
+    help="Autonomous DevOps agent.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -143,13 +143,13 @@ def _default_principal() -> str:
 
 
 def _print_empty_contexts_help() -> None:
-    """Explain the empty ``allowed_contexts`` gate (OPEN QUESTION 1) and how to resolve it."""
+    """Explain the empty ``allowed_contexts`` gate and how to resolve it."""
     err_console.print(
         "[red]no kubernetes contexts are allow-listed[/red] "
         "(targets.kubernetes.allowed_contexts is empty)."
     )
     err_console.print(
-        "This is OPEN QUESTION 1 — it must be filled before the first live run. "
+        "This is a deliberate fail-closed gate — it must be filled before the first live run. "
         "Generate a read-only kubeconfig scoped to the contexts the agent may touch with "
         "[bold]ops/k8s/gen-kubeconfig.sh[/bold], then list those contexts under "
         "targets.kubernetes.allowed_contexts in config/config.yaml."

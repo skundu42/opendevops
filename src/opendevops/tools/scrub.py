@@ -129,7 +129,7 @@ def scrub(text: str) -> tuple[str, int]:
 
 
 # --------------------------------------------------------------------------------------
-# Full literal-match scrubbing (P5d) — redact the exact resolved secret VALUES
+# Full literal-match scrubbing — redact the exact resolved secret VALUES
 # --------------------------------------------------------------------------------------
 
 
@@ -154,7 +154,7 @@ def scrub_literals(text: str, secret_values: Iterable[str]) -> tuple[str, int]:
 
 
 def scrub_full(text: str, secret_values: Iterable[str] = ()) -> tuple[str, int]:
-    """Full scrub: literal-match the resolved secret values, THEN the P1 pattern scrubber.
+    """Full scrub: literal-match the resolved secret values, THEN the pattern scrubber.
 
     The literal pass runs first (so a known value is redacted even when its shape evades the
     patterns), and the pattern pass runs underneath as the standing backstop. With no

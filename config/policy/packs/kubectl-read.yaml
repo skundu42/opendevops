@@ -1,6 +1,6 @@
-# kubectl-read.yaml — the P1 read-only kubectl pack.
+# kubectl-read.yaml — the read-only kubectl pack.
 #
-# tool_family binds this pack's allow rule to the "kubectl" credential family: at boot (T8)
+# tool_family binds this pack's allow rule to the "kubectl" credential family: at boot
 # the loader's check_credential_coverage() refuses to start if no kubectl credential is
 # configured, so an allow can never outrun its credentials.
 #

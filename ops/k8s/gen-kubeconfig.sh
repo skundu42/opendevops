@@ -4,10 +4,10 @@
 # on the command line, each rewired to authenticate as an OpenDevOps ServiceAccount token from
 # that cluster.
 #
-#   default (read-only): ~/.kube/agent-view.yaml   as `sa-agent-view`   (P1)
-#   --rw (read-write):   ~/.kube/agent-mutate.yaml as `sa-agent-mutate` (P2 staging mutations)
+#   default (read-only): ~/.kube/agent-view.yaml   as `sa-agent-view`
+#   --rw (read-write):   ~/.kube/agent-mutate.yaml as `sa-agent-mutate` (staging mutations)
 #
-# Plan invariant (PLAN.md §3.3): the generated kubeconfig must offer nothing beyond the
+# Design invariant (guides/security-model.md): the generated kubeconfig must offer nothing beyond the
 # explicitly-allowed contexts — the `--context` allowlist rule cannot fire when `--context`
 # is omitted, so the kubeconfig itself is the backstop. This script therefore starts from
 # an EMPTY file and only ever adds the contexts named as arguments. This holds for both modes.
@@ -25,9 +25,9 @@ set -euo pipefail
 
 readonly SA_NAMESPACE="opendevops"
 
-# Mode selection: default read-only; `--rw` (first arg) selects the P2 mutate identity. The
-# read-only path is kept byte-for-byte identical to the P1 script (same secret, default output
-# path, and cluster/user entry names), so existing ro workflows are unaffected.
+# Mode selection: default read-only; `--rw` (first arg) selects the mutate identity. The
+# read-only path keeps the same secret, default output path, and cluster/user entry names in
+# both modes, so existing ro workflows are unaffected.
 MODE="ro"
 if [[ "${1:-}" == "--rw" ]]; then
   MODE="rw"

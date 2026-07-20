@@ -1,7 +1,7 @@
-"""Pydantic policy schema (T3): PolicyFile / Rule / Match / Decision / ToolCallCtx.
+"""Pydantic policy schema: PolicyFile / Rule / Match / Decision / ToolCallCtx.
 
 This module is the pure *data model* for the policy layer. It carries no decision
-logic — the engine (T4) consumes these types but needs no change to this file. Every
+logic — the engine consumes these types but needs no change to this file. Every
 model is ``extra="forbid"`` so an unexpected YAML key is a hard error, never a silent
 no-op (fail-closed configuration).
 
@@ -100,12 +100,12 @@ StrMatcherField = Annotated[StrMatcher, BeforeValidator(_coerce_str_matcher)]
 
 
 # --------------------------------------------------------------------------------------
-# GhApiMatch — the gh-write `gh api` METHOD+PATH allowlist predicate (P5f)
+# GhApiMatch — the gh-write `gh api` METHOD+PATH allowlist predicate
 # --------------------------------------------------------------------------------------
 
 
 class GhApiMatch(BaseModel):
-    """A structured predicate over a parsed ``gh api`` call (P5f gh-write pack).
+    """A structured predicate over a parsed ``gh api`` call (gh-write pack).
 
     Meaningful ONLY on a rule that also pins ``argv0: gh`` and ``verb: {eq: api}``; the engine's
     ``_rule_matches`` re-checks ``parsed.verb == "api"`` defensively before reading anything here.
@@ -196,14 +196,14 @@ class Match(BaseModel):
     # this field only carries the matcher. A rule using it will not constrain the sub-subcommand
     # until the engine reads it.
     first_positional: StrMatcherField | None = None
-    # last_positional matches the LAST positional (``positionals[-1]``). Added for the P5a cloud
+    # last_positional matches the LAST positional (``positionals[-1]``). Added for the cloud
     # read packs: gcloud/az nest their command GROUPS to a variable depth, so the action verb
     # (``list``/``show``) cannot be pinned by a fixed FRONT index — but for a bare read it is the
     # final token (``az storage account list`` -> last=list). Pinning the read verb HERE (instead
     # of matching it at ANY positional via ``resource_any``) means an embedded/leaked read token
     # in an argument no longer fires the allow. Enforced in the engine's ``_rule_matches``.
     last_positional: StrMatcherField | None = None
-    # second_last_positional matches positionals[-2]. Added for the P5a gcloud `describe <NAME>`
+    # second_last_positional matches positionals[-2]. Added for the gcloud `describe <NAME>`
     # read: gcloud puts the resource NAME *after* the verb, so a `describe` read is
     # `... describe <NAME>` where `describe` is the SECOND-TO-LAST positional and <NAME> trails it.
     # Pinning describe HERE (instead of `resource_any:[describe]`, which matched describe at ANY
@@ -224,7 +224,7 @@ class Match(BaseModel):
     # without listing each. Matched at the positional level in the engine's ``_rule_matches``;
     # additive (absent = wildcard), so rules that never set it (kubectl/gh/helm) are unaffected.
     positional_verb_prefix_any: list[str] | None = None
-    # positional_seq_prefix_any ALLOWS (the P5a fix-round-3 allowlist inversion for gcloud/az reads)
+    # positional_seq_prefix_any ALLOWS (the fail-closed allowlist inversion for gcloud/az reads)
     # when the parsed positionals START WITH one of the listed EXACT sequences. Each sequence is a
     # curated read command path `[<subgroup...>, <read-verb>]` — e.g. `[instances, list]`,
     # `[instances, describe]`, `[account, list]`. A rule matches iff, for SOME listed sequence,
@@ -238,7 +238,7 @@ class Match(BaseModel):
     # complete). Combined with `verb: <top-group>` in each rule so an unknown GROUP cannot match a
     # subgroup path. Matched in the engine's ``_rule_matches``; additive (absent = wildcard).
     positional_seq_prefix_any: list[list[str]] | None = None
-    # ssh_run structured-tool predicates (P5b). ``ssh_run(host, argv)`` is NOT argv-only (there is
+    # ssh_run structured-tool predicates. ``ssh_run(host, argv)`` is NOT argv-only (there is
     # no ParsedArgv), so these read ``ctx.args`` DIRECTLY in the engine's ``_rule_matches`` — a
     # structured-tool matcher distinct from the argv0 pipeline, which they never touch. Additive
     # (absent = wildcard), so no existing run_command rule is affected. Both are meaningful only on
@@ -255,7 +255,7 @@ class Match(BaseModel):
     # (fail-closed for the allow). It stays in active use for the vetted SINGLE-mode binaries — a
     # bare argv0 pin is safe only when the binary has no state-changing subcommand/flag.
     ssh_remote_argv0: StrMatcherField | None = None
-    # ssh_remote_argv_seq_prefix_any ALLOWS (the multi-mode read-path allowlist, mirroring the P5a
+    # ssh_remote_argv_seq_prefix_any ALLOWS (the multi-mode read-path allowlist, mirroring the
     # cloud-pack ``positional_seq_prefix_any`` inversion) when ``ctx.args["argv"]`` — the ssh_run
     # remote argv — STARTS WITH one of the listed EXACT sequences. Each sequence is a curated remote
     # read command PATH ``[<argv0>, <read-subcommand>]`` (e.g. ``[systemctl, status]``,
@@ -275,7 +275,7 @@ class Match(BaseModel):
     # ``ctx.args["argv"]`` directly in the engine's ``_rule_matches``. Additive (absent = wildcard);
     # meaningful only on an ssh_run rule.
     ssh_remote_flag_prefix_any: list[str] | None = None
-    # gh_api (P5f gh-write) is a STRUCTURED matcher over a parsed ``gh api`` call: the METHOD
+    # gh_api (gh-write) is a STRUCTURED matcher over a parsed ``gh api`` call: the METHOD
     # (``--method``/``-X``, default GET) and the PATH (first positional after ``api``). It reads
     # ``parsed`` in the engine's ``_rule_matches`` and is meaningful only on a rule that also pins
     # ``argv0: gh`` + ``verb: {eq: api}``. Backs BOTH the write ALLOW (methods + repo prefix) and
@@ -283,7 +283,7 @@ class Match(BaseModel):
     # existing kubectl/gh-read/cloud/ssh rule sets it. See :class:`GhApiMatch`.
     gh_api: GhApiMatch | None = None
     # subagent_type_not_in DENIES (used only in deny rules) the deepagents ``task`` tool for any
-    # target subagent NOT in the listed allowlist (P5c). The ``task`` tool_call carries the target
+    # target subagent NOT in the listed allowlist. The ``task`` tool_call carries the target
     # in its ``subagent_type`` arg; this reads ``ctx.args["subagent_type"]`` DIRECTLY in the
     # engine's ``_rule_matches`` (a structured-tool matcher, distinct from the run_command
     # pipeline). Matching is fail-closed: a MISSING or non-string ``subagent_type`` is treated as
@@ -353,10 +353,10 @@ class Escalation(BaseModel):
     on_timeout: Literal["deny"]
 
 
-# NOTE (T13): an *approved* escalation EXECUTES the tool, so an ``effect: escalate`` rule must
+# NOTE: an *approved* escalation EXECUTES the tool, so an ``effect: escalate`` rule must
 # carry a ``channel`` (which credential the post-approval execution uses) exactly like an allow.
-# The requirement is enforced in ``Rule._check_effect_payloads`` below (additive; escalate rules
-# authored before P2 had no channel and now fail validation loudly — the shipped pack sets it).
+# The requirement is enforced in ``Rule._check_effect_payloads`` below — an escalate rule
+# authored without a channel fails validation loudly (the shipped pack sets it).
 
 
 # --------------------------------------------------------------------------------------
@@ -390,7 +390,7 @@ class Rule(BaseModel):
         if self.effect == "allow" and self.channel is None:
             raise ValueError("effect=allow requires 'channel'")
         if self.effect == "escalate" and self.channel is None:
-            # An approved escalation executes the tool, so it needs a credential channel (T13).
+            # An approved escalation executes the tool, so it needs a credential channel.
             raise ValueError("effect=escalate requires 'channel'")
         if (self.rewrite is not None) != (self.effect == "rewrite"):
             raise ValueError("'rewrite' payload must be present iff effect=rewrite")

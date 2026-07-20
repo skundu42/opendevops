@@ -1,4 +1,4 @@
-"""Fixtures for the graph-deterministic test suite (T8), reused by T9's gateway tests.
+"""Fixtures for the graph-deterministic test suite, reused by the gateway tests.
 
 The fixtures materialize a real :class:`AppConfig` pointed at the *shipped* policy directory
 (so the tests exercise the real rules) but with a tmp audit dir, a tmp read kubeconfig path, and
@@ -80,8 +80,8 @@ def make_cfg(tmp_path: Path, audit_dir: Path) -> Callable[..., AppConfig]:
                         "kubeconfig_rw": None,
                         "allowed_contexts": ["kind-opendevops"],
                     },
-                    # P2: the gh-read pack's allow rules require the gh credential family
-                    # to be configured or build_agent refuses to boot (coverage gate). P5f: the
+                    # The gh-read pack's allow rules require the gh credential family
+                    # to be configured or build_agent refuses to boot (coverage gate). The
                     # gh-write pack's rw allows additionally require the rw write PAT (token_env_rw
                     # => the "gh-rw" pseudo-family) and its write_repos allowlist at boot.
                     "github": {
@@ -89,14 +89,14 @@ def make_cfg(tmp_path: Path, audit_dir: Path) -> Callable[..., AppConfig]:
                         "token_env_rw": "OPENDEVOPS_TEST_GH_TOKEN_RW",
                         "write_repos": ["octo-org/staging-app"],
                     },
-                    # P5a: the aws/gcloud/az-read packs' allow rules require their cloud
+                    # The aws/gcloud/az-read packs' allow rules require their cloud
                     # credential families configured (coverage gate). Naming the env vars is
                     # enough for boot; their VALUES are only read at exec time, which these
                     # fake-model graph tests never reach.
                     "aws": {"credential_env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]},
                     "gcloud": {"credential_env": ["GOOGLE_APPLICATION_CREDENTIALS"]},
                     "azure": {"credential_env": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID"]},
-                    # P5b: the ssh-read pack's allow rule requires the ssh credential family at
+                    # The ssh-read pack's allow rule requires the ssh credential family at
                     # boot (coverage gate). Names/paths only; asyncssh is never dialed in these
                     # fake-model tests, which don't reach an ssh_run execution.
                     "ssh": {

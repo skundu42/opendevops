@@ -1,4 +1,4 @@
-"""Reusable graph-test helpers (importable by the T8 graph tests and T9's gateway tests).
+"""Reusable graph-test helpers (importable by the graph tests and the gateway tests).
 
 Pure functions and small builders that pair with the fixtures in ``conftest.py``:
 
@@ -26,7 +26,7 @@ from opendevops.audit.logger import AuditLogger
 from opendevops.context import AgentContext
 
 # Mirrors config/models.yaml — main -> opus (priced), so build_agent's boot check passes.
-# ``log_summarizer`` -> haiku is the P5c named subagent (see agent.py); build_agent resolves its
+# ``log_summarizer`` -> haiku is the named subagent (see agent.py); build_agent resolves its
 # model via ``registry.build_chat_model(cfg, "log_summarizer")`` so the alias must be present here.
 MODELS: dict[str, Any] = {
     "agents": {"main": "opus", "summarizer": "haiku", "log_summarizer": "haiku"},

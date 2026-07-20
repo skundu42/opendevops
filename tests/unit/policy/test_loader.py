@@ -1,4 +1,4 @@
-"""Loader + lint tests (T3): shipped dir loads clean, stable hash, lint failures aggregate."""
+"""Loader + lint tests: shipped dir loads clean, stable hash, lint failures aggregate."""
 
 from __future__ import annotations
 
@@ -341,8 +341,8 @@ def test_check_credential_coverage_missing() -> None:
 
 
 def test_check_credential_coverage_ok() -> None:
-    # P2 adds helm-read + gh-read; P5a adds aws/gcloud/az-read; P5b adds ssh (ssh_run); P5f adds
-    # gh-write, whose rw allows also need the "gh-rw" write pseudo-family. Full coverage needs all.
+    # Beyond kubectl, the shipped packs add helm-read, gh-read, aws/gcloud/az-read, ssh (ssh_run),
+    # and gh-write, whose rw allows also need the "gh-rw" write pseudo-family. Coverage needs all.
     loaded = load_policy(SHIPPED_POLICY_DIR)
     assert (
         check_credential_coverage(
@@ -353,7 +353,7 @@ def test_check_credential_coverage_ok() -> None:
 
 
 def test_check_credential_coverage_gh_rw_write_gate() -> None:
-    # P5f: the gh-write pack's rw allows require the "gh-rw" write pseudo-family. With the ro gh
+    # The gh-write pack's rw allows require the "gh-rw" write pseudo-family. With the ro gh
     # token configured but no rw write PAT, gh-write surfaces as a "gh-rw" coverage gap while
     # gh-read (ro) stays covered.
     loaded = load_policy(SHIPPED_POLICY_DIR)
@@ -440,7 +440,7 @@ def test_shipped_dir_loads_p2_packs() -> None:
 
 
 def test_shipped_dir_loads_gh_write_pack() -> None:
-    # P5f: the gh-write pack ships its three rw allows + the airtight `gh api` denies, and binds
+    # The gh-write pack ships its three rw allows + the airtight `gh api` denies, and binds
     # to the gh credential family. The write flags land in the merged gh allowlist.
     loaded = load_policy(SHIPPED_POLICY_DIR)
     for rid in (

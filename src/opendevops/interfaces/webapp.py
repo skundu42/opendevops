@@ -1,4 +1,4 @@
-"""FastAPI webapp mounted into the LangGraph Server via ``langgraph.json`` ``http.app`` (T17).
+"""FastAPI webapp mounted into the LangGraph Server via ``langgraph.json`` ``http.app``.
 
 Turns infrastructure events into agent runs, and exposes operational endpoints:
 
@@ -100,7 +100,7 @@ class _TTLSet:
     with its OWN ``_TTLSet``. A duplicate alert landing on a *different* worker will not be deduped
     here — the deterministic ``uuid5`` thread id + ``if_exists="do_nothing"`` keeps thread creation
     idempotent, but the RCA run could start twice. Exactly-once cross-worker dedup needs a shared
-    store (Redis); that is a P3+ hardening item, out of scope for this in-memory set.
+    store (Redis); that is a future hardening item, out of scope for this in-memory set.
     """
 
     def __init__(self, ttl_s: float) -> None:
@@ -248,7 +248,7 @@ def create_app(
     ``AsyncMock`` stub; production wires a :class:`ServerGateway`. Per-app state (dedup set, metric
     registry, background-run tasks) lives on ``app.state`` so nothing leaks across app instances.
 
-    ``notifier`` (P4, additive; default ``None`` — every existing caller/test is unchanged) is an
+    ``notifier`` (optional; default ``None`` — every existing caller/test is unchanged) is an
     optional :class:`~opendevops.interfaces.slack_app.SlackNotifier`. When present, the
     ``run-complete`` route posts a completed run's final answer back to Slack IFF the run's thread
     is a registered Slack destination — so a server-mode run that originated in a Slack thread is
@@ -434,7 +434,7 @@ def create_app(
             payload.get("status"),
         )
         metrics.request("run-complete", _ACCEPTED)
-        # P4 seam: post the final answer back to Slack for a completed run whose thread originated
+        # Slack seam: post the final answer to Slack for a completed run whose thread originated
         # in a Slack thread. Additive + fail-safe: only when a notifier is wired AND the thread is a
         # registered Slack destination; a posting failure is logged, never surfaced (already 204).
         await _notify_slack(app.state.notifier, payload)

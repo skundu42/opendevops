@@ -3,7 +3,7 @@
 Covers:
 * the *real* build (real ChatAnthropic model) binds ``task`` as an active tool exposing ONLY the
   named log-summarizer subagent (the harness profile drops the general-purpose one) and passes the
-  boot assertion (``execute`` stays bound but tolerated) — P5c;
+  boot assertion (``execute`` stays bound but tolerated);
 * a fake-model build (where the harness profile does not apply) still binds ``task`` (with the
   general-purpose subagent too); a ``task`` call for an ARBITRARY subagent is hard-denied by policy,
   and ``execute`` is hard-denied when the model calls it;
@@ -33,7 +33,7 @@ from .helpers import ai_text, ai_tool_call, invoke_config, make_context, make_fa
 def test_real_build_binds_scoped_task_tolerates_execute(cfg: Any, monkeypatch: Any) -> None:
     """The real build binds exactly the active tools (incl. ``task``) + the tolerated ``execute``.
 
-    ``task`` is an ACTIVE tool now (P5c): the build passes the named log-summarizer subagent, so
+    ``task`` is an ACTIVE tool: the build passes the named log-summarizer subagent, so
     ``task`` is bound; the harness profile drops the auto-added general-purpose subagent, so
     production ``task`` exposes only that one subagent. The boot assertion passes.
     """
@@ -49,7 +49,7 @@ def test_real_build_binds_scoped_task_tolerates_execute(cfg: Any, monkeypatch: A
 
 
 async def test_fake_build_denies_arbitrary_subagent(built_agent: Any, cfg: Any) -> None:
-    """A ``task`` call for an ARBITRARY subagent_type is denied by policy, not executed (P5c).
+    """A ``task`` call for an ARBITRARY subagent_type is denied by policy, not executed.
 
     The subagent never runs (the fake model would have to script the subagent turn); the denial
     lands as a ``no-arbitrary-subagents`` deny ToolMessage and the model self-corrects.

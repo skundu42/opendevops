@@ -1,4 +1,4 @@
-"""Tests for the argv-only run_command execution tool (T5).
+"""Tests for the argv-only run_command execution tool.
 
 Covers the decision-gate contextvar, argv boundary rejection, the constructed
 (never-inherited) env + credential map, the LocalExecutor (timeout / unknown
@@ -1293,7 +1293,7 @@ async def test_gh_family_child_env_has_token(
 
 
 # --------------------------------------------------------------------------------------
-# gh WRITE channel (P5f): rw -> rw PAT, ro -> ro PAT, never both, missing rw -> refuse
+# gh WRITE channel: rw -> rw PAT, ro -> ro PAT, never both, missing rw -> refuse
 # --------------------------------------------------------------------------------------
 
 
@@ -1408,7 +1408,7 @@ async def test_gh_rw_input_stdin_refused_via_core(
 
 
 # --------------------------------------------------------------------------------------
-# credential families: cloud (aws / gcloud / az) — env-var-name credential map (P5a)
+# credential families: cloud (aws / gcloud / az) — env-var-name credential map
 # --------------------------------------------------------------------------------------
 
 

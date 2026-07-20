@@ -1,8 +1,21 @@
 [project]
 name = "opendevops"
 version = "0.1.0"
-description = "Autonomous DevOps agent on LangChain deepagents"
+description = "Autonomous DevOps agent: policy-gated, budget-capped, audit-chained operations on Kubernetes, GitHub, cloud CLIs, and SSH"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Sandipan Kundu" }]
+keywords = ["devops", "agent", "llm", "kubernetes", "sre", "automation", "langchain", "langgraph"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: System Administrators",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Systems Administration",
+]
 requires-python = ">=3.11,<4.0"
 dependencies = [
   "deepagents==0.6.12", "langchain==1.3.14", "langgraph==1.2.9",
@@ -11,18 +24,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-p2     = ["langgraph-checkpoint-sqlite", "aiosqlite"]
-server = ["langgraph-sdk>=0.4,<0.5", "fastapi", "sse-starlette", "redis>=5", "prometheus-client"]
-slack  = ["slack-bolt==1.30.0", "aiohttp", "apscheduler>=3.10,<4"]
-ssh    = ["asyncssh==2.24.0"]
-# P5d executor split needs cryptography (ed25519), httpx (remote client) and fastapi (service).
-# All three are already RESOLVED + pinned in uv.lock (cryptography/httpx transitively; fastapi via
-# the `server` extra), so NO new dependency is introduced and uv.lock is unchanged — a dedicated
-# `executor` extra is intentionally omitted (it would only add lockfile metadata). The executor
-# service image installs the package plus the already-pinned fastapi (see ops/executor/README.md).
-dev    = ["pytest", "pytest-asyncio", "ruff", "mypy",
-          "agentevals==0.0.9", "langgraph-cli[inmem]==0.4.31",
-          "fakeredis>=2.31,<3"]
+checkpoint = ["langgraph-checkpoint-sqlite", "aiosqlite"]
+server     = ["langgraph-sdk>=0.4,<0.5", "fastapi", "sse-starlette", "redis>=5", "prometheus-client"]
+slack      = ["slack-bolt==1.30.0", "aiohttp", "apscheduler>=3.10,<4"]
+ssh        = ["asyncssh==2.24.0"]
+# The executor service needs cryptography (ed25519), httpx, and fastapi — all already resolved +
+# pinned in uv.lock (cryptography/httpx transitively; fastapi via the `server` extra), so a
+# dedicated `executor` extra is intentionally omitted (it would only add lockfile metadata). The
+# executor service image installs the package plus the already-pinned fastapi (ops/executor/README.md).
+dev        = ["pytest", "pytest-asyncio", "ruff", "mypy",
+              "agentevals==0.0.9", "langgraph-cli[inmem]==0.4.31",
+              "fakeredis>=2.31,<3"]
+
+[project.urls]
+Homepage = "https://github.com/skundu42/opendevops"
+Repository = "https://github.com/skundu42/opendevops"
+Issues = "https://github.com/skundu42/opendevops/issues"
 
 [project.scripts]
 opendevops = "opendevops.cli:app"

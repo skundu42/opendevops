@@ -1,10 +1,10 @@
-# opendevops service-mode stack (P3, T18).
+# opendevops service-mode stack.
 #
 # The self-hosted LangGraph Server (Postgres queue+checkpointer, Redis) fronted by Caddy
 # (bearer-token gate), with the audit trail shipped by Vector to a durable local spool and
 # Prometheus + Grafana for the operability dashboards/alerts.
 #
-# IMPORTANT (PLAN §3.7): this stack MUST NOT run on a Kubernetes cluster the agent itself manages
+# IMPORTANT (blast-radius rule): this stack MUST NOT run on a Kubernetes cluster the agent itself manages
 # — a blast-radius rule. Run it on a dedicated ops VM (or a separate ops cluster). See
 # docs/DEPLOY.md.
 #
@@ -24,7 +24,7 @@ volumes:
   postgres-data:
   redis-data:
   agent-audit:      # the per-run <run_id>.jsonl chain files (writer: server; reader: vector)
-  audit-spool:      # Vector's durable merged sink (OQ7 default: local spool dir)
+  audit-spool:      # Vector's durable merged sink (default: local spool dir)
   prometheus-data:
   grafana-data:
   caddy-data:
@@ -116,7 +116,7 @@ services:
     networks:
       - agent-net
 
-  # -- Vector: ship the per-run audit chains to the durable spool sink (OQ7 default) ------------
+  # -- Vector: ship the per-run audit chains to the durable spool sink (default sink) -----------
   vector:
     image: timberio/vector:0.41.1-debian
     restart: unless-stopped

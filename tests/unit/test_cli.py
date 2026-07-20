@@ -1,9 +1,9 @@
-"""CLI (T9): ``version``, ``audit verify`` (good + tampered), and the ``chat`` REPL smoke test.
+"""CLI: ``version``, ``audit verify`` (good + tampered), and the ``chat`` REPL smoke test.
 
 The REPL is driven with a stub gateway (a canned event stream) injected through the
 ``opendevops.cli._build_gateway`` seam, so no real model/graph is built; we assert the
 rendering does not crash and that a per-turn cost line is printed. ``audit verify`` is exercised
-against a real T2 chain (built with :class:`AuditLogger`) and a tampered copy of it.
+against a real chain (built with :class:`AuditLogger`) and a tampered copy of it.
 """
 
 from __future__ import annotations

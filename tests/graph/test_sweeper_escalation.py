@@ -1,4 +1,4 @@
-"""Strongest pin for the escalation-timeout sweeper (T20): real graph, real resume, real chain.
+"""Strongest pin for the escalation-timeout sweeper: real graph, real resume, real chain.
 
 A ``kubectl delete pod`` matches ``kubectl-delete-workload-escalate`` and SUSPENDS a real
 ``LocalGateway`` run on ``interrupt()``. We build the sweeper's :class:`InterruptedRun` record from
@@ -53,14 +53,14 @@ def _cfg(tmp_path: Path) -> AppConfig:
                 },
                 "github": {
                     "token_env": "OPENDEVOPS_TEST_GH_TOKEN",
-                    "token_env_rw": "OPENDEVOPS_TEST_GH_TOKEN_RW",  # P5f gh-write rw gate
+                    "token_env_rw": "OPENDEVOPS_TEST_GH_TOKEN_RW",  # gh-write rw gate
                     "write_repos": ["octo-org/staging-app"],
                 },
-                # P5a: cloud read packs' coverage gate (names only; not exec'd here).
+                # cloud read packs' coverage gate (names only; not exec'd here).
                 "aws": {"credential_env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]},
                 "gcloud": {"credential_env": ["GOOGLE_APPLICATION_CREDENTIALS"]},
                 "azure": {"credential_env": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID"]},
-                # P5b: ssh-read pack coverage gate (names/paths only; never dialed here).
+                # ssh-read pack coverage gate (names/paths only; never dialed here).
                 "ssh": {
                     "hosts": ["allowed.host.internal"],
                     "user": "deploy",

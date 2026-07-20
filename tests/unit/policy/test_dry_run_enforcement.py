@@ -1,4 +1,4 @@
-"""Engine + real-pack integration for dry-run enforcement (T12).
+"""Engine + real-pack integration for dry-run enforcement.
 
 Drives the *real* shipped ``config/policy/`` through :class:`YamlRuleEngine` (staging env) and
 asserts the final Decision effect / rule_id / rewritten_argv for each row of the composition —
@@ -33,9 +33,9 @@ SHA = resolve_file_refs(["kubectl", "apply", "-f", PATH], FILES)[0].sha256
 def _resolver(ref: str) -> list[str]:
     if ref == "${targets.kubernetes.allowed_contexts}":
         return ["kind-opendevops"]
-    if ref == "${targets.ssh.hosts}":  # P5b ssh_run host allowlist ref
+    if ref == "${targets.ssh.hosts}":  # ssh_run host allowlist ref
         return ["allowed.host.internal"]
-    if ref == "${targets.github.write_repos}":  # P5f gh-write repo allowlist ref
+    if ref == "${targets.github.write_repos}":  # gh-write repo allowlist ref
         return ["octo-org/staging-app"]
     raise AssertionError(f"unexpected config ref {ref!r}")
 
@@ -89,7 +89,7 @@ async def test_row3_real_apply_without_recorded_dry_run_is_denied(
 
 
 async def test_row4_real_apply_with_recorded_dry_run_allows(engine: YamlRuleEngine) -> None:
-    # dry_run_ok keys are RUN-SCOPED (``{run_id}:{sha}``); _ctx uses run_id="run-dry" (T13).
+    # dry_run_ok keys are RUN-SCOPED (``{run_id}:{sha}``); _ctx uses run_id="run-dry".
     d = await engine.decide(
         _ctx(
             ["kubectl", "apply", "-f", PATH, "--dry-run=none"],

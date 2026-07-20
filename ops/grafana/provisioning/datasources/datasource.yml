@@ -1,4 +1,4 @@
-# Grafana datasource provisioning (P3, T18): the Prometheus in this compose stack.
+# Grafana datasource provisioning: the Prometheus in this compose stack.
 apiVersion: 1
 
 datasources:

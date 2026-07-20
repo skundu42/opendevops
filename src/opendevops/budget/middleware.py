@@ -1,6 +1,6 @@
-"""Per-run and daily USD budget enforcement as langchain v1 agent middleware (T6).
+"""Per-run and daily USD budget enforcement as langchain v1 agent middleware.
 
-Two middlewares, both consuming T1's :class:`~opendevops.models.pricing.PriceTable`:
+Two middlewares, both consuming the :class:`~opendevops.models.pricing.PriceTable`:
 
 * :class:`CostCapMiddleware` — the *per-run* USD ceiling. ``aafter_model`` prices each model
   call and accumulates it into ``run_cost_usd``; ``abefore_model`` jumps to end once spend
@@ -25,16 +25,16 @@ Defense-in-depth (the full stop-loss table; only the first two rows live here)
 * **per-run USD**   — :class:`CostCapMiddleware`      (this module)
 * **daily USD**     — :class:`DailyBudgetMiddleware`  (this module)
 * **call counts**   — langchain ``ModelCallLimitMiddleware`` / ``ToolCallLimitMiddleware``
-  (constructed and wired directly by T8 — deliberately *not* wrapped or re-exported here)
+  (constructed and wired directly by ``agent.py`` — deliberately *not* wrapped or re-exported here)
 * **recursion / wall-clock** — enforced at the gateway (langgraph ``recursion_limit`` +
   a wall-clock guard), outside the middleware chain.
 
-State contract for T7/T8
-------------------------
+State contract for the graph assembly
+-------------------------------------
 The budget state keys live in :class:`BudgetStateMixin` (an ``AgentState`` extension) and are
 advertised to the graph via each middleware's ``state_schema`` attribute — the same mechanism
-langchain's own ``ModelCallLimitMiddleware`` uses. **T7 must compose ``BudgetStateMixin`` into
-``DevOpsState`` by inheritance so the reducer-annotated fields are preserved.** If T7 instead
+langchain's own ``ModelCallLimitMiddleware`` uses. **``DevOpsState`` must compose
+``BudgetStateMixin`` by inheritance so the reducer-annotated fields are preserved.** If it
 re-declares ``run_cost_usd`` / ``run_usage`` as plain fields, langgraph will *replace* rather
 than accumulate them and per-run accounting silently collapses to the last call only — so
 either inherit the mixin or reuse :func:`_add_cost` / :func:`_merge_usage` verbatim.
@@ -88,7 +88,7 @@ def _merge_usage(left: dict[str, Any] | None, right: dict[str, Any] | None) -> d
 
 
 class BudgetStateMixin(AgentState[Any]):
-    """Budget accounting keys, mixed into ``DevOpsState`` by T7 (via inheritance).
+    """Budget accounting keys, mixed into ``DevOpsState`` (via inheritance).
 
     * ``run_cost_usd`` — accumulated per-run USD spend (reducer: :func:`_add_cost`).
     * ``run_usage``    — accumulated token counters + blind-spot/failure flags
@@ -170,8 +170,8 @@ class CostCapMiddleware(AgentMiddleware[BudgetStateMixin, Any, Any]):
     the ``incident`` profile's on the next. An absent/unknown profile name falls back to
     ``default_profile`` — fail-safe, never crashing a live hook on a misconfigured context.
 
-    ``model_key`` is the configured main-agent ``provider:model`` (P1 runs a single model;
-    multi-model runs re-key per call in P5). Pricing math is delegated to T1's ``PriceTable``;
+    ``model_key`` is the configured main-agent ``provider:model`` (a single model per run;
+    multi-model runs would re-key per call). Pricing math is delegated to the ``PriceTable``;
     this middleware never re-derives USD.
     """
 
@@ -302,7 +302,7 @@ class DailyBudgetMiddleware(AgentMiddleware[BudgetStateMixin, Any, Any]):
         """Resolve the caller principal from ``runtime.context`` (or an injected getter).
 
         Falls back to ``_UNKNOWN_PRINCIPAL`` so accounting stays fail-safe when the context
-        (owned by T7's ``AgentContext``) is unavailable in the hook rather than crashing.
+        (owned by ``AgentContext``) is unavailable in the hook rather than crashing.
         """
         if self._principal_getter is not None:
             return self._principal_getter(runtime)

@@ -21,7 +21,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class KubernetesTarget(BaseModel):
-    """Kubernetes execution target: the read-only kubeconfig, optional rw (P2), allowlist."""
+    """Kubernetes execution target: the read-only kubeconfig, optional rw kubeconfig, allowlist."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -36,7 +36,7 @@ class KubernetesTarget(BaseModel):
 
 
 class GithubTarget(BaseModel):
-    """GitHub execution target (P2 ``gh`` credential family; P5f adds the rw write channel).
+    """GitHub execution target: the ``gh`` credential family (read plus the rw write channel).
 
     ``token_env`` names the *agent-process* environment variable holding a read-only
     fine-grained PAT; the executor reads that variable's value into the child's ``GH_TOKEN``
@@ -44,7 +44,7 @@ class GithubTarget(BaseModel):
     reports ``CredentialUnavailable`` and refuses — correct until the operator exports the
     variable. The token value itself is never stored in config, logs, or error messages.
 
-    ``token_env_rw`` (P5f) names the env var holding a **fine-grained PAT for writes** — the
+    ``token_env_rw`` names the env var holding a **fine-grained PAT for writes** — the
     credential the executor injects as ``GH_TOKEN`` for a ``gh``-family ``rw`` call (the
     gh-write pack: ``gh run rerun`` / ``gh pr create`` / the ``gh api`` write allowlist). It is
     a *distinct* credential from the read PAT and is never injected on the ``ro`` channel (and
@@ -52,7 +52,7 @@ class GithubTarget(BaseModel):
     ``CredentialUnavailable``. Left ``None`` (the default), any gh-write allow refuses to boot
     (the rw coverage gate) — staging-only writes stay off until the operator exports the PAT.
 
-    ``write_repos`` (P5f) is the allowlist of ``owner/repo`` slugs the gh-write ``gh api``
+    ``write_repos`` is the allowlist of ``owner/repo`` slugs the gh-write ``gh api``
     method+path predicate permits writes under (``POST``/``PATCH``/``PUT`` to
     ``/repos/{owner/repo}/...``). Empty (the default) means no repo is a write target — every
     ``gh api`` write default-denies. The policy pack references THIS list via
@@ -68,7 +68,7 @@ class GithubTarget(BaseModel):
 
 
 class CloudTarget(BaseModel):
-    """A read-only cloud-CLI execution target (P5a: ``aws`` / ``gcloud`` / ``az`` families).
+    """A read-only cloud-CLI execution target (the ``aws`` / ``gcloud`` / ``az`` families).
 
     ``credential_env`` names the *agent-process* environment variables whose VALUES the executor
     copies into the child env for this family's calls — the direct analogue of
@@ -77,8 +77,8 @@ class CloudTarget(BaseModel):
 
       * aws — ``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY`` (/ ``AWS_SESSION_TOKEN``); the
         role behind them is the read-only role whose IAM policy Denies
-        ``secretsmanager:GetSecretValue`` / ``ssm:GetParameter*`` decrypt / ``kms:Decrypt``
-        (PLAN §3.5). ``AWS_REGION`` may also be listed (region is not identity).
+        ``secretsmanager:GetSecretValue`` / ``ssm:GetParameter*`` decrypt / ``kms:Decrypt``.
+        ``AWS_REGION`` may also be listed (region is not identity).
       * gcloud — ``GOOGLE_APPLICATION_CREDENTIALS`` (the service-account key file path) and/or
         ``CLOUDSDK_*`` vars.
       * az — ``AZURE_CLIENT_ID`` / ``AZURE_TENANT_ID`` / ``AZURE_CLIENT_SECRET`` (service-principal
@@ -98,7 +98,7 @@ class CloudTarget(BaseModel):
 
 
 class SshTarget(BaseModel):
-    """Read-only remote-exec target (P5b: the ``ssh`` credential family / ``ssh_run`` tool).
+    """Read-only remote-exec target (the ``ssh`` credential family / ``ssh_run`` tool).
 
     ``ssh_run(host, argv)`` is a STRUCTURED remote-exec tool (``ssh`` as a run_command argv0 is
     hard-denied by base.yaml). The model supplies ONLY an allowlisted ``host`` name and the remote
@@ -142,8 +142,8 @@ class SshTarget(BaseModel):
 class Targets(BaseModel):
     """Infrastructure targets the agent may operate against.
 
-    ``kubernetes`` is required; ``github`` (P2), the three read-only cloud families ``aws`` /
-    ``gcloud`` / ``azure`` (P5a), and ``ssh`` (P5b remote-exec) are optional and default to
+    ``kubernetes`` is required; ``github``, the three read-only cloud families ``aws`` /
+    ``gcloud`` / ``azure``, and ``ssh`` (remote-exec) are optional and default to
     *unconfigured* — their allow packs only become bootable once a credential is named (the boot
     coverage gate). The ``azure`` target backs the ``az`` credential family / ``az`` argv0 (the
     Azure CLI binary is ``az``); ``ssh`` backs the ``ssh`` family / the ``ssh_run`` tool.
@@ -170,7 +170,7 @@ class Execution(BaseModel):
 
 
 class ExecutorConfig(BaseModel):
-    """Executor deployment selection (P5d split; additive, defaults to in-process ``local``).
+    """Executor deployment selection (the executor split; defaults to in-process ``local``).
 
     ``mode`` picks how ``run_command`` reaches a subprocess:
 
@@ -250,9 +250,9 @@ class PolicyConfig(BaseModel):
 
 
 class StateConfig(BaseModel):
-    """Durable local agent state (P2). ``dir`` holds the LocalGateway checkpointer's sqlite db.
+    """Durable local agent state. ``dir`` holds the LocalGateway checkpointer's sqlite db.
 
-    Additive in T13: the ``AsyncSqliteSaver`` writes ``<dir>/checkpoints.sqlite3`` (created
+    The ``AsyncSqliteSaver`` writes ``<dir>/checkpoints.sqlite3`` (created
     ``0o700``) so an escalation can suspend and later resume on the same thread. Defaults to
     ``./state`` so a config without a ``state:`` block still validates.
     """
@@ -268,9 +268,9 @@ class StateConfig(BaseModel):
 
 
 class ServerConfig(BaseModel):
-    """Self-hosted LangGraph Server connection details for :class:`ServerGateway` (P3).
+    """Self-hosted LangGraph Server connection details for :class:`ServerGateway` (service mode).
 
-    Additive in T16. ``ServerGateway`` (the only module importing ``langgraph_sdk``) drives a
+    ``ServerGateway`` (the only module importing ``langgraph_sdk``) drives a
     graph running *inside* a LangGraph Server over HTTP via ``get_client(url=..., api_key=...)``.
 
     * ``url`` — the server base URL (e.g. ``http://localhost:8123``). Left ``None`` (the default,
@@ -281,7 +281,7 @@ class ServerConfig(BaseModel):
       sent AND the SDK's ambient ``LANGGRAPH_API_KEY`` / ``LANGSMITH_API_KEY`` auto-load is
       suppressed — auth is explicit-by-config, never accidental-by-environment.
 
-    Webhook-app fields (additive in T17; consumed by
+    Webhook-app fields (consumed by
     :mod:`opendevops.interfaces.webapp`, the FastAPI app mounted via ``langgraph.json``'s
     ``http.app``). Every secret is named, never valued — the app reads the *value* from
     ``os.environ`` at request time and fails **closed** (503) if a named env var is unset, never
@@ -313,7 +313,7 @@ class ServerConfig(BaseModel):
 
 
 class Principal(BaseModel):
-    """A mapped principal (e.g. Slack user -> agent principal + budget profile). P4."""
+    """A mapped principal (e.g. Slack user -> agent principal + budget profile)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -322,7 +322,7 @@ class Principal(BaseModel):
 
 
 class SlackConfig(BaseModel):
-    """Slack Socket-Mode adapter connection details (P4, additive; opt-in like ``ServerConfig``).
+    """Slack Socket-Mode adapter connection details (opt-in like ``ServerConfig``).
 
     The adapter (:mod:`opendevops.interfaces.slack_app`) drives slack-bolt 1.30.0 in Socket Mode
     (``AsyncSocketModeHandler`` — no public URL). Like every other secret in this config the two
@@ -348,7 +348,7 @@ class SlackConfig(BaseModel):
 
 
 class SchedulerConfig(BaseModel):
-    """Our own APScheduler service (P4, T20; :mod:`opendevops.interfaces.scheduler`). Additive.
+    """Our own APScheduler service (:mod:`opendevops.interfaces.scheduler`).
 
     Opt-in like ``ServerConfig`` / ``SlackConfig`` — a config without a ``scheduler:`` block still
     validates (the default ``jobs_file`` is the shipped ``scheduler/jobs.yaml``). The service reads
@@ -356,7 +356,7 @@ class SchedulerConfig(BaseModel):
     ``principal.user`` + the per-principal daily budget scope — the scheduler acts on its own
     behalf, not a human). The FIXED per-job knobs (``misfire_grace_time=300`` / ``coalesce`` /
     ``max_instances=1`` / 60s jitter) are NOT configurable here — the loader applies them to every
-    job by design (PLAN §3.7).
+    job by design.
 
     * ``jobs_file`` — path to the jobs YAML (relative to the process CWD, or absolute). Defaults to
       ``scheduler/jobs.yaml``.
@@ -462,7 +462,7 @@ class PerRun(BaseModel):
 
 
 class Daily(BaseModel):
-    """Daily USD envelopes (global and per-principal) + the counter backend (P3, additive).
+    """Daily USD envelopes (global and per-principal) + the counter backend.
 
     ``backend`` selects the :class:`~opendevops.budget.daily.DailyCounter` implementation the
     :func:`~opendevops.budget.daily.build_daily_counter` factory constructs:

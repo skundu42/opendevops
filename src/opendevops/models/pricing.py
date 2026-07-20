@@ -1,4 +1,4 @@
-"""Cache-tier-aware conversion of AIMessage.usage_metadata to USD cost (T1).
+"""Cache-tier-aware conversion of AIMessage.usage_metadata to USD cost.
 
 `Price` is the per-model, per-MTok price row already parsed and validated by
 `opendevops.config.ModelsConfig` (an alias for `config.ModelPricing` — pricing.py does not

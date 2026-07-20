@@ -1,4 +1,4 @@
-# Service-mode deployment runbook (P3)
+# Service-mode deployment runbook
 
 The stack in `docker-compose.yml` turns the agent into an HTTP service: a self-hosted **LangGraph
 Server** (Postgres queue + checkpointer, Redis) fronted by **Caddy** (bearer-token gate), with the
@@ -8,8 +8,8 @@ This is a stub — enough to stand the stack up and know the decisions still owe
 platform owners. It is not a hardened production guide.
 
 > **Blast-radius rule (hard):** this stack MUST NOT run on a Kubernetes cluster the agent itself
-> manages (PLAN §3.7, open question 8). Run it on a dedicated ops VM or a separate ops cluster.
-> Otherwise a compromised or buggy run could reach its own control plane.
+> manages (see `guides/security-model.md`). Run it on a dedicated ops VM or a separate ops
+> cluster. Otherwise a compromised or buggy run could reach its own control plane.
 
 ## 1. Build the server image
 
@@ -76,11 +76,11 @@ an Alertmanager/GitHub webhook would return `202` but its background RCA run wou
 (fail-safe — no bypass, no unaudited action — but the "Alertmanager webhook → RCA" flow would not
 complete).
 
-## 5. Audit shipping + durable sink (open question 7)
+## 5. Audit shipping + durable sink
 
 Vector tails the per-run chains (`/audit/*.jsonl`) and MERGES them, byte-for-byte, into a durable
 sink. The **default** is a local spool volume (`/spool/audit-merged-<date>.jsonl`), whose store the
-agent's own IAM/RBAC role cannot reach (PLAN §3.6). Choose the real durable target with the
+agent's own IAM/RBAC role cannot reach (see `guides/audit.md`). Choose the real durable target with the
 compliance owner and uncomment the relevant block in `ops/vector/vector.yaml`:
 
 - **S3 with Object Lock** (WORM retention), bucket policy denying every agent role; or
@@ -95,7 +95,7 @@ the spool preserves every line verbatim and never reorders lines *within* a run 
 file is single-writer and Vector ships in append order). A tampered, reordered, or dropped line in
 any run's subsequence fails the file, naming the offending `run_id` and line.
 
-## 6. Licensing quota probe (open question 5)
+## 6. Licensing quota probe
 
 Before committing to the licensed Server long-term, project monthly node-execution consumption:
 
@@ -115,12 +115,12 @@ uv run python -m ops.maintenance spend-report --json
 uv run python -m ops.maintenance pg-dump --database-uri "$DATABASE_URI" --out-path /backup/db.dump
 ```
 
-`prune-threads` never deletes a `busy` or `interrupted` (pending-escalation) thread. In P4 these run
-under the APScheduler service (PLAN §3.7).
+`prune-threads` never deletes a `busy` or `interrupted` (pending-escalation) thread. In production
+these run under the scheduler service (see `guides/interfaces.md`).
 
 ## 8. Monitoring
 
 Grafana (`:3000`) is provisioned with the Prometheus datasource and the `opendevops — service ops`
 dashboard (runs, denials, daily spend, shipper lag). Alert rules live in `ops/prometheus/alerts.yml`
-(PLAN §6 cross-checks). Some series are **pre-provisioned** for P4 / a spend exporter and simply do
-not fire until those components ship — see the header comment in `alerts.yml`.
+Some series are **pre-provisioned** for the scheduler service / a spend exporter and simply do
+not fire until those components run — see the header comment in `alerts.yml`.

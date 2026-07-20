@@ -1,4 +1,4 @@
-"""ops/maintenance.py pure computations (T18): idle-thread filtering, spend rows, pg_dump argv.
+"""ops/maintenance.py pure computations: idle-thread filtering, spend rows, pg_dump argv.
 
 Only the pure functions are exercised — the live ``langgraph_sdk`` / subprocess seams are never
 called in CI (faked responses / argv inspection). Idle-thread filtering is the brief's named case.

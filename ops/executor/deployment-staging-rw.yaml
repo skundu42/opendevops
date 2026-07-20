@@ -1,4 +1,4 @@
-# opendevops executor service — hardened deployment (staging/rw) — P5d.
+# opendevops executor service — hardened deployment (staging/rw).
 #
 # Separate deployment per (environment, channel) so each holds EXACTLY ONE credential set: the
 # staging rw infra credential + secret source live in THIS pod's env only (never the agent's).
@@ -19,7 +19,7 @@ spec:
     metadata:
       labels: {app: opendevops-executor, env: staging, channel: rw}
     spec:
-      runtimeClassName: gvisor            # gVisor sandbox (PLAN §3.5)
+      runtimeClassName: gvisor            # gVisor sandbox
       automountServiceAccountToken: false
       serviceAccountName: opendevops-executor-staging-rw
       securityContext:

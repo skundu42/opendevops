@@ -1,22 +1,22 @@
-# az-read.yaml — the P5a read-only Azure CLI pack (curated read-command ALLOWLIST).
+# az-read.yaml — the read-only Azure CLI pack (curated read-command ALLOWLIST).
 #
-# tool_family binds this pack's allow rules to the "az" credential family: at boot (T8) the loader's
+# tool_family binds this pack's allow rules to the "az" credential family: at boot the loader's
 # check_credential_coverage() refuses to start unless targets.azure.credential_env names ≥1 env var
 # (e.g. AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_CLIENT_SECRET for a read-only service principal).
 # NOTE the family/argv0 is `az` but the config target is spelled `azure` (executor._CLOUD_FAMILY_
 # TARGET maps az -> azure). The executor injects ONLY those vars for an az-family exec, plus
 # KUBECONFIG=/dev/null.
 #
-# MATCHING NOTE (P5a fix round 3 — ALLOWLIST INVERSION, fail-CLOSED not fail-open). `az` is a
+# MATCHING NOTE (curated ALLOWLIST — fail-CLOSED, not fail-open). `az` is a
 # SUBCOMMAND_BINARY (parsing.py), so verb=<top-group> (e.g. `vm`). az commands take their TARGET via
 # flags (`--name`, `--resource-group`), NOT positional args, so the group SUBPATH + action verb are
 # `positionals`: `az vm list` -> verb=vm, positionals=[list]; `az storage account show -n x` ->
 # verb=storage, positionals=[account, show] (flags/operands consumed by VALUE_FLAGS).
 #
-# Fix rounds 1-2 keyed the read allow on `last_positional in [list, show]` — it fired for ANY az
-# command whose LAST positional is a read token, for ANY group, and subtracted mutations via a
-# *denylist*. For parity with the gcloud allowlist inversion, fix round 3 REPLACES that broad rule
-# with a CURATED POSITIVE ALLOWLIST of read command PATHS, one allow rule per service group. Each
+# A simpler design — keying the read allow on `last_positional in [list, show]`, firing for ANY az
+# command whose LAST positional is a read token, for ANY group, and subtracting mutations via a
+# *denylist* — is fail-open by construction (a denylist can never be complete). Exactly as in the
+# gcloud pack, this pack is a CURATED POSITIVE ALLOWLIST of read command PATHS, one rule per group. Each
 # rule pins `verb: <top-group>` AND the exact `[<subgroup...>, <read-verb>]` sequence(s) via
 # `positional_seq_prefix_any`, so an UNKNOWN verb, an unlisted mutation, an unknown GROUP, or a
 # secret SUBGROUP path (`keyvault secret`, `acr credential`, `cosmosdb keys`) does NOT match and
@@ -245,9 +245,9 @@ rules:
 
   # Mutation deny table (property pin): known az mutation verbs at ANY positional depth are denied
   # so deny > allow catches a mutation that also trails a literal read verb (e.g.
-  # `az vm delete -g g --name x list`, `az vm generalize list`) — closing the P5a fail-open where
-  # mutations relied solely on __default_deny__. Fix round 2 COMPLETES this bare-verb table and adds
-  # az-no-compound-mutations (a prefix guard) below, for parity with the gcloud hardening. `delete`
+  # `az vm delete -g g --name x list`, `az vm generalize list`) instead of relying solely on
+  # __default_deny__. az-no-compound-mutations (a prefix guard) below complements this bare-verb
+  # table, for parity with the gcloud hardening. `delete`
   # is handled by az-no-delete above (kept separate for its corpus rule-id pin); everything else
   # destructive lands here. Operator-extensible per deployment.
   - id: az-no-mutations

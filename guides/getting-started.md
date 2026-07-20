@@ -17,14 +17,14 @@ CLI REPL. The local CLI tier needs **zero infrastructure** — no server, no dat
 ```sh
 git clone https://github.com/skundu42/opendevops.git
 cd opendevops
-uv sync --extra p2 --extra server --extra dev
+uv sync --extra checkpoint --extra server --extra dev
 ```
 
 Extras, and when you need them:
 
 | Extra | Brings in | Needed for |
 |---|---|---|
-| `p2` | `langgraph-checkpoint-sqlite`, `aiosqlite` | escalation / resume (the CLI checkpointer) |
+| `checkpoint` | `langgraph-checkpoint-sqlite`, `aiosqlite` | escalation / resume (the CLI checkpointer) |
 | `server` | `langgraph-sdk`, `fastapi`, `redis`, … | service mode + parts of the test suite |
 | `slack` | `slack-bolt`, `apscheduler` | Slack chat-ops + the scheduler service |
 | `ssh` | `asyncssh` | the `ssh_run` remote-exec tool |
