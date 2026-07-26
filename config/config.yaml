@@ -1,7 +1,8 @@
 targets:
   kubernetes:
     kubeconfig_ro: ~/.kube/agent-view.yaml   # generated; contains ONLY allowed contexts
-    kubeconfig_rw: null                      # generated with --rw; staging mutations only
+    kubeconfig_rw: null                      # legacy staging-only fallback
+    kubeconfig_rw_by_environment: {}         # e.g. {staging: ~/.kube/staging-rw.yaml, prod: ~/.kube/prod-rw.yaml}
     allowed_contexts: []                     # OPEN QUESTION 1 — must be filled before first live run
   github:
     token_env: null                          # set to the name of an env var holding a read-only fine-grained PAT, e.g. OPENDEVOPS_GH_TOKEN
@@ -56,9 +57,21 @@ server:                                      # service mode: self-hosted LangGra
   # never a value; a route whose named env var is unset fails CLOSED (503), never "auth disabled".
   alertmanager_token_env: null               # env var holding the Alertmanager bearer token (also auths run-complete); null => 503
   github_webhook_secret_env: null            # env var holding the GitHub webhook HMAC secret; null => 503
-  dashboard_token_env: DASHBOARD_TOKEN       # env var holding the dashboard login token; unset => login fails closed (503)
-  dashboard_session_ttl_s: 3600              # short-lived signed HttpOnly session, maximum 86400
+  dashboard_auth_mode: static                # static is local-development only; use oidc in deployed environments
+  dashboard_token_env: DASHBOARD_TOKEN       # local-dev token; ignored in oidc mode
+  dashboard_session_backend: memory          # use redis for multi-replica/restart-safe revocation
+  dashboard_session_redis_url: null           # e.g. redis://redis:6379/2 (DB 1 belongs to LangGraph)
+  dashboard_session_ttl_s: 3600              # short-lived opaque server-side session (max 8h)
   dashboard_cookie_secure: false             # set true when production TLS termination is active
+  oidc:
+    issuer: null                              # https://login.microsoftonline.com/<tenant>/v2.0, Okta, Keycloak, etc.
+    client_id_env: null                       # NAME of the env var holding the OIDC client id
+    client_secret_env: null                   # NAME of the env var holding the OIDC client secret (optional for public+PKCE)
+    redirect_uri: null                        # exact registered callback: https://host/dashboard/oidc/callback
+    scopes: [openid, profile, email]
+    roles_claim: groups                       # dot-separated claim path; "roles" is common for Entra app roles
+    role_mappings: {}                         # viewer|operator|approver|admin -> accepted claim values
+    default_roles: []                         # fail closed by default when no claim maps
   source_allowlist: []                       # client IPs allowed to POST /webhooks/alertmanager (empty => allow all); direct peer only, proxy headers ignored (Caddy fronts this)
   webhook_environment: staging               # policy-environment overlay for webhook-initiated runs (staging|prod)
 slack:                                        # Slack Socket-Mode chat-ops adapter (opt-in; interfaces/slack_app.py)
@@ -69,3 +82,14 @@ scheduler:                                    # our own APScheduler service (int
   jobs_file: scheduler/jobs.yaml             # path to the job set (fixed knobs misfire=300/coalesce/max_instances=1/jitter=60 applied to every job)
   principal: scheduler                       # principal scheduled runs are attributed to (audit user + per-principal daily budget scope)
 principals: {}                               # slack user id -> {principal, profile}
+control_plane:
+  database: ./state/control-plane.sqlite3
+  production_requires_independent_approval: true
+  enforce_runtime_grants: true               # rw actions in required environments need an active grant
+  grant_required_environments: [prod]        # add staging for full change-window enforcement
+  max_rw_actions_per_run: 12
+  max_identical_rw_actions_per_run: 2
+  max_consecutive_failures: 3
+  default_grant_ttl_s: 3600
+  max_grant_ttl_s: 86400
+  minimum_cooldown_s: 5

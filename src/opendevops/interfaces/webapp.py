@@ -15,9 +15,9 @@ Turns infrastructure events into agent runs, and exposes operational endpoints:
   authenticated with the same Alertmanager token, logs + counts the completion, ``204``.
 * ``GET /healthz`` — unauthenticated liveness, ``200 {"status": "ok"}``.
 * ``GET /metrics`` — Prometheus exposition off a per-app :class:`CollectorRegistry`.
-* ``GET /dashboard`` — authenticated, read-only operations dashboard backed by the persisted audit
-  chains. A configured token is exchanged for a short-lived signed HttpOnly cookie; assets and
-  snapshot APIs live under the same ``/dashboard`` prefix.
+* ``GET /dashboard`` — OIDC/RBAC operations control plane backed by live gateway state, persisted
+  audit chains, and the capability-grant ledger. Browser sessions are opaque and server-side;
+  static-token login is a local-development mode.
 
 Firewall: this module depends ONLY on the :class:`~opendevops.gateway.base.AgentGateway`
 protocol — it never imports ``langgraph_sdk``. All route logic runs against the injected gateway,
@@ -44,6 +44,7 @@ import hmac
 import json
 import logging
 import os
+import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -51,6 +52,12 @@ from fastapi import FastAPI, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, generate_latest
 
 from opendevops.interfaces.dashboard import register_dashboard
+from opendevops.observability.live import LiveTelemetry
+from opendevops.observability.otel import (
+    configure_opentelemetry,
+    observe_operation,
+    span,
+)
 
 if TYPE_CHECKING:
     from opendevops.config import AppConfig
@@ -146,6 +153,13 @@ class _Metrics:
 
     def request(self, route: str, outcome: str, count: int = 1) -> None:
         self.webhook_requests.labels(route=route, outcome=outcome).inc(count)
+        for _ in range(count):
+            observe_operation(
+                "webhook",
+                0,
+                outcome,
+                {"opendevops.webhook.route": route},
+            )
 
     def run_started(self, interface: str) -> None:
         self.runs_started.labels(interface=interface).inc()
@@ -265,10 +279,12 @@ def create_app(
     app.state.notifier = notifier
     app.state.metrics = _Metrics()
     app.state.dedup = _TTLSet(_DEDUP_TTL_S)
+    app.state.live_telemetry = LiveTelemetry()
+    configure_opentelemetry()
     # Strong refs to in-flight background runs so the event loop does not GC a pending task; each
     # removes itself on completion (add_done_callback below).
     app.state.background_tasks = set()
-    register_dashboard(app, cfg)
+    register_dashboard(app, cfg, gateway=gateway, live_telemetry=app.state.live_telemetry)
 
     def _spawn_run(
         thread_id: str, user_input: str, *, principal: str, interface: str
@@ -280,18 +296,45 @@ def create_app(
         """
 
         async def _runner() -> None:
+            started = time.perf_counter()
+            await app.state.live_telemetry.queued(thread_id, principal, interface)
+            run_id: str | None = None
+            operation_status = "error"
             try:
-                await gateway.create_thread(thread_id=thread_id)
-                await gateway.run(
-                    thread_id,
-                    user_input,
-                    profile=_INCIDENT_PROFILE,
-                    principal=principal,
-                    interface=interface,
-                    environment=cfg.server.webhook_environment,
-                )
-            except Exception:  # noqa: BLE001 - a background run must never crash the app
+                with span(
+                    "opendevops.webhook_run",
+                    {
+                        "thread.id": thread_id,
+                        "opendevops.interface": interface,
+                        "opendevops.environment": cfg.server.webhook_environment,
+                    },
+                ):
+                    await gateway.create_thread(thread_id=thread_id)
+                    await app.state.live_telemetry.running(thread_id)
+                    result = await gateway.run(
+                        thread_id,
+                        user_input,
+                        profile=_INCIDENT_PROFILE,
+                        principal=principal,
+                        interface=interface,
+                        environment=cfg.server.webhook_environment,
+                    )
+                    run_id = result.run_id
+                    operation_status = "interrupted" if result.interrupted else "ok"
+            except Exception as exc:  # noqa: BLE001 - background failures are projected, not leaked
                 logger.exception("background webhook run failed for thread %s", thread_id)
+                await app.state.live_telemetry.completed(
+                    thread_id, run_id, error=type(exc).__name__
+                )
+            else:
+                await app.state.live_telemetry.completed(thread_id, run_id)
+            finally:
+                observe_operation(
+                    "gateway",
+                    (time.perf_counter() - started) * 1000,
+                    operation_status,
+                    {"opendevops.interface": interface},
+                )
 
         task = asyncio.create_task(_runner())
         app.state.background_tasks.add(task)

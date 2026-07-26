@@ -40,3 +40,4 @@ class AgentContext:
     environment: Environment
     budget_profile: str
     run_id: str
+    trace_id: str | None = None

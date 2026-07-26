@@ -21,6 +21,7 @@ not by anything the model can influence. The trail records:
 | Type | Written when |
 |---|---|
 | `run_started` | chain seed: principal, interface, environment, model, `agent_git_sha`, `policy_version` |
+| `model_call` | content-free model call id, duration, token usage and before/delta/after cost |
 | `decision` | before any execution — the parsed argv and the winning rule/effect/channel |
 | `execution` | after execution — exit code, duration, stdout sha256 + excerpt, staged-file sha256s |
 | `escalation` | a call suspended for human review |
@@ -45,6 +46,21 @@ A `decision` record looks like:
 Useful properties: `policy_version` pins exactly which policy files produced each decision;
 `rewritten_argv` records what a rewrite changed; `execution.staged_files[].sha256` records the
 exact manifest an `apply -f` applied (and is what the dry-run-before-apply hook keys on).
+`trace_id` is minted at the gateway and inherited by every event; model calls carry their own
+`model_call_id`, and tool events carry `tool_call_id`, so an OpenTelemetry trace can be reconciled
+with the durable ledger without storing model prompts or responses.
+
+## Control-event ledger
+
+Dashboard and configuration actions live in `control_plane.database`, separate from per-run JSONL
+because authentication events and proposals are not always associated with a run. Each row records
+the action, time, OIDC/CLI issuer, subject, bounded payload, previous hash and hash. It includes
+login/logout, dashboard detail access, SSE connection, cancellation, approval resolution, session
+revocation, proposal/approval/activation/revocation, and runtime grant consumption.
+
+As with the run chain, local hashes prove structural consistency rather than independent
+authenticity. Back up and ship the control database to the same independently administered
+retention boundary as run audit files.
 
 ## Verifying
 

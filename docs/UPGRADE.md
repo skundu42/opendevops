@@ -47,6 +47,13 @@ its mechanical audit gates (`tests/replay/audit_gates.py`) are reused by CI. A b
    pin tightly — re-verify them by hand.
 7. **Only merge if all four tiers are green.** That is the upgrade gate.
 
+OIDC and telemetry dependencies are not part of the pinned trio, but their upgrades are still
+security-sensitive. After changing Authlib/httpx, run `tests/unit/test_dashboard_auth.py` and an
+integration login against a disposable issuer to re-verify discovery, state, nonce, PKCE and ID
+token validation. After changing OpenTelemetry packages, boot once with and once without
+`OTEL_EXPORTER_OTLP_ENDPOINT`; exporter failure must remain non-fatal and model/tool execution must
+be unchanged.
+
 ---
 
 ## Landmine checklist (re-verify on every bump)

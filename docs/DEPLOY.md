@@ -25,7 +25,10 @@ uv run langgraph build -t opendevops-langgraph:latest
 | Variable | Purpose |
 |---|---|
 | `GATEWAY_TOKEN` | the static bearer token Caddy requires (and gateways/Alertmanager present) |
-| `DASHBOARD_TOKEN` | operator sign-in token exchanged for a short-lived signed dashboard session |
+| `DASHBOARD_TOKEN` | local-development dashboard login only; leave unset in OIDC deployments |
+| `OIDC_CLIENT_ID` | production dashboard OIDC client identifier |
+| `OIDC_CLIENT_SECRET` | production dashboard OIDC client secret |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | optional OTLP/HTTP collector endpoint for traces and metrics |
 | `LANGSMITH_API_KEY` | LangGraph Server license / tracing key (pass-through) |
 | `ANTHROPIC_API_KEY` | model key for live runs |
 | `POSTGRES_PASSWORD` | Postgres superuser password |
@@ -58,19 +61,28 @@ docker compose -f docker-compose.yml config -q     # validate (no pull)
 docker compose -f docker-compose.yml up -d
 curl -sf http://localhost:8123/healthz             # liveness passes Caddy unauthenticated
 curl -s -H "Authorization: Bearer $GATEWAY_TOKEN" http://localhost:8123/assistants/search -X POST -d '{}'
-# Open http://localhost:8123/dashboard and sign in with DASHBOARD_TOKEN.
+# The shipped local config signs in with DASHBOARD_TOKEN.
 ```
 
 The API is reachable only through Caddy on `:8123` (matching `config.yaml server.url`); the server
-container publishes no host port. Upgrade path for auth: front Caddy with oauth2-proxy (OIDC/SSO) —
-see `ops/caddy/Caddyfile`.
+container publishes no host port. The machine API keeps Caddy's bearer gate; dashboard identity is
+validated by the application.
 
 The dashboard routes bypass Caddy's API bearer and enforce authentication in the application.
-Login exchanges `DASHBOARD_TOKEN` for an HMAC-signed, time-limited `HttpOnly`,
-`SameSite=Strict` cookie scoped to `/dashboard`; missing secret configuration returns 503. The
-shipped `dashboard_cookie_secure: false` supports this local HTTP smoke test only. Set
-`server.dashboard_cookie_secure: true` whenever TLS is enabled, and add OIDC/SSO plus network
-restriction for a shared production installation.
+The shipped `static` mode exchanges `DASHBOARD_TOKEN` for an opaque local-development session.
+Production must configure `server.dashboard_auth_mode: oidc`, an exact issuer/redirect URI,
+explicit group-to-role mappings, Redis sessions on `redis://redis:6379/2`, a short session lifetime
+and `dashboard_cookie_secure: true` behind TLS. The authorization-code flow uses state, nonce and
+PKCE; login succeeds only after signature, issuer, audience, time and nonce validation.
+
+Keep `operator`, `approver` and `admin` provider groups separate. Production approve/edit actions
+from the same issuer/subject as the requester are rejected, and grant activation is a separate
+administrator transition. Sessions are server-side, immediately revocable, and protected by
+session-bound CSRF on every mutation.
+
+Configure a dedicated production write identity at
+`targets.kubernetes.kubeconfig_rw_by_environment.prod`. The legacy `kubeconfig_rw` field is a
+staging-only fallback and is deliberately refused for production.
 
 **Two URLs, one server (in-container loopback vs external Caddy).** `config.yaml server.url`
 (`:8123`) is the *external* URL — the address a human/CLI/second machine driving `ServerGateway`
@@ -104,6 +116,10 @@ the spool preserves every line verbatim and never reorders lines *within* a run 
 file is single-writer and Vector ships in append order). A tampered, reordered, or dropped line in
 any run's subsequence fails the file, naming the offending `run_id` and line.
 
+The Compose `agent-state` volume holds the capability-grant and control-event ledger. Back it up
+alongside the audit store. It is SQLite and therefore requires a shared single-writer durable
+volume when the application has multiple replicas.
+
 ## 6. Licensing quota probe
 
 Before committing to the licensed Server long-term, project monthly node-execution consumption:
@@ -134,7 +150,13 @@ dashboard (runs, denials, daily spend, shipper lag). Alert rules live in `ops/pr
 Some series are **pre-provisioned** for the scheduler service / a spend exporter and simply do
 not fire until those components run — see the header comment in `alerts.yml`.
 
-The application dashboard at `:8123/dashboard` complements Grafana with a run-level,
-audit-derived view: recent outcomes and cost, integrity state, policy decisions, sanitized event
-timeline, and integration posture. It scans a bounded audit window and does not return command
-arguments, subprocess output, or credential values.
+The application dashboard at `:8123/dashboard` complements Grafana with live run, queue, worker,
+retry/cancellation and pending-approval state plus verified audit truth. Run detail correlates
+`run_id`, `thread_id`, `tool_call_id`, model-call and trace identifiers and shows content-free
+timing/cost progression. It scans a bounded audit window and does not return prompts, responses,
+command arguments, subprocess output, or credential values.
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` to export OTLP/HTTP traces and metrics for gateway, webhook,
+scheduler, model, policy and executor operations. The dashboard projects the run-success,
+queue-latency, policy-latency, executor-error, audit-lag and budget-utilization SLIs. Updates are
+delivered over SSE; the full audit window is only re-sent when its digest changes.

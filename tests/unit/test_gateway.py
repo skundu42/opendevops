@@ -248,8 +248,10 @@ async def test_happy_run_returns_result_and_writes_verified_chain(
     # Audit chain book-ends verify and record the full turn.
     assert _event_types(cfg, result.run_id) == [
         "run_started",
+        "model_call",
         "decision",
         "execution",
+        "model_call",
         "run_completed",
     ]
     assert verify_run_file(Path(cfg.audit.dir) / f"{result.run_id}.jsonl").ok

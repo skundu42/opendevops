@@ -25,7 +25,12 @@ dependencies = [
 
 [project.optional-dependencies]
 checkpoint = ["langgraph-checkpoint-sqlite", "aiosqlite"]
-server     = ["langgraph-sdk>=0.4,<0.5", "fastapi", "sse-starlette", "redis>=5", "prometheus-client"]
+server     = [
+  "langgraph-sdk>=0.4,<0.5", "fastapi", "sse-starlette", "redis>=5",
+  "prometheus-client", "authlib>=1.6,<2", "httpx>=0.27,<1",
+  "opentelemetry-api>=1.30,<2", "opentelemetry-sdk>=1.30,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.30,<2",
+]
 slack      = ["slack-bolt==1.30.0", "aiohttp", "apscheduler>=3.10,<4"]
 ssh        = ["asyncssh==2.24.0"]
 # The executor service needs cryptography (ed25519), httpx, and fastapi — all already resolved +

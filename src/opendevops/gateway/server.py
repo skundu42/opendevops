@@ -59,6 +59,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -73,6 +74,7 @@ from opendevops.gateway.base import (
     GatewayRunError,
     RunEnd,
     RunResult,
+    enforce_approval_separation,
 )
 from opendevops.gateway.translate import extract_interrupt, final_text, translate_updates
 
@@ -211,6 +213,14 @@ class ServerGateway:
         Reuses the suspended run's ``run_id`` / ``ctx`` / ``prof`` so the resumed segment's audit
         events (written server-side) append to the SAME per-run chain file the first segment seeded.
         """
+        susp = self._require_suspended(thread_id)
+        enforce_approval_separation(
+            requester=str(susp.ctx.get("principal") or "unknown"),
+            approver=approver,
+            environment=str(susp.ctx.get("environment") or ""),
+            decisions=decisions,
+            required=self._cfg.control_plane.production_requires_independent_approval,
+        )
         susp = self._pop_suspended(thread_id)
         command = self._resume_command(decisions, approver)
         return await self._drive_wait(susp.run_id, thread_id, susp.ctx, susp.prof, None, command)
@@ -242,6 +252,14 @@ class ServerGateway:
         approver: str,
     ) -> AsyncIterator[RunEvent]:
         """Streaming variant of :meth:`resume_interrupt` (the CLI renders the resumed turn)."""
+        susp = self._require_suspended(thread_id)
+        enforce_approval_separation(
+            requester=str(susp.ctx.get("principal") or "unknown"),
+            approver=approver,
+            environment=str(susp.ctx.get("environment") or ""),
+            decisions=decisions,
+            required=self._cfg.control_plane.production_requires_independent_approval,
+        )
         susp = self._pop_suspended(thread_id)
         command = self._resume_command(decisions, approver)
         async for event in self._drive_stream(
@@ -494,6 +512,57 @@ class ServerGateway:
             raise GatewayError(f"no suspended run to resume for thread {thread_id!r}")
         return susp
 
+    def _require_suspended(self, thread_id: str) -> _Suspended:
+        susp = self._suspended.get(thread_id)
+        if susp is None:
+            raise GatewayError(f"no suspended run to resume for thread {thread_id!r}")
+        return susp
+
+    async def live_snapshot(self) -> dict[str, Any]:
+        """Merge gateway lifecycle state with SDK status for known threads."""
+        known_threads = set(self._tasks) | set(self._suspended) | set(self._server_runs)
+        active: list[dict[str, Any]] = []
+        for thread_id in sorted(known_threads):
+            try:
+                runs = await self._client.runs.list(thread_id, limit=10, status="running")
+            except Exception:  # noqa: BLE001 - telemetry cannot affect execution
+                runs = []
+            for run in runs:
+                data = (
+                    dict(run)
+                    if isinstance(run, dict)
+                    else {
+                        key: getattr(run, key, None)
+                        for key in ("run_id", "status", "created_at", "updated_at")
+                    }
+                )
+                active.append(
+                    {
+                        "thread_id": thread_id,
+                        "server_run_id": str(data.get("run_id") or ""),
+                        "status": str(data.get("status") or "running"),
+                        "created_at": data.get("created_at"),
+                        "updated_at": data.get("updated_at"),
+                    }
+                )
+        approvals = [
+            {
+                "thread_id": thread_id,
+                "run_id": suspended.run_id,
+                "status": "awaiting_approval",
+                "requester": str(suspended.ctx.get("principal") or "unknown"),
+                "environment": str(suspended.ctx.get("environment") or "unknown"),
+            }
+            for thread_id, suspended in self._suspended.items()
+        ]
+        return {
+            "active_runs": active,
+            "pending_approvals": approvals,
+            "queue_depth": None,
+            "workers": None,
+            "source": "langgraph_sdk",
+        }
+
     @staticmethod
     def _resume_command(decisions: list[dict[str, Any]], approver: str) -> dict[str, Any]:
         """A ``command={"resume": ...}`` with the approver injected into each decision (audited)."""
@@ -520,6 +589,7 @@ class ServerGateway:
             "environment": environment,
             "budget_profile": profile,
             "run_id": run_id,
+            "trace_id": uuid.uuid4().hex,
         }
 
     def _budget_result(

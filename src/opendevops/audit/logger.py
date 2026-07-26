@@ -108,6 +108,18 @@ def _content_sha(event: AuditEvent) -> str:
     path reuses it rather than reimplementing the derivation.
     """
     payload = event.model_dump(mode="json", exclude=_DEDUPE_EXCLUDE)
+    if event.event_type is EventType.decision and isinstance(payload.get("summary"), dict):
+        # Latency is an observation of this particular evaluation, not decision semantics.
+        # Ignoring only this field preserves interrupt/resume dedupe while argv/effect/rule/reason
+        # and every other summary value remain content-bearing.
+        summary = dict(payload["summary"])
+        summary.pop("duration_ms", None)
+        if summary:
+            payload["summary"] = summary
+        else:
+            payload.pop("summary", None)
+    elif event.event_type is EventType.decision and payload.get("summary") is None:
+        payload.pop("summary", None)
     canonical = canonical_dumps(payload)  # the single shared serializer (audit + decision token)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 

@@ -531,6 +531,7 @@ class RunLifecycleMiddleware(AgentMiddleware[BudgetStateMixin, Any, Any]):
                 "user": _ctx_attr(runtime, "principal") or "unknown",
             },
             "environment": _ctx_attr(runtime, "environment") or "staging",
+            "trace_id": _ctx_attr(runtime, "trace_id"),
             "model": self._model_key,
             "policy_version": self._policy_version,
             "agent_git_sha": self._git_sha,
@@ -598,6 +599,9 @@ def build_agent(
             "boot:\n  - " + "\n  - ".join(coverage_gaps)
         )
     engine = YamlRuleEngine(loaded, _make_config_resolver(cfg))
+    from opendevops.control_plane import ChangeControlService
+
+    change_control = ChangeControlService(cfg.control_plane)
 
     # --- budget middleware caps (per-run profile, resolved from runtime.context) ----------
     # Resolve every profile once here; CostCapMiddleware picks the per-run one from
@@ -622,6 +626,11 @@ def build_agent(
         middleware.append(
             RunLifecycleMiddleware(audit, model_key, loaded.policy_version, agent_git_sha())
         )
+    from opendevops.observability.model_audit import ModelAuditMiddleware
+
+    middleware.append(
+        ModelAuditMiddleware(audit, price_table, model_key, loaded.policy_version)
+    )
     middleware += [
         CostCapMiddleware(price_table, model_key, profiles, cfg.budgets.trip_ratio),
         DailyBudgetMiddleware(
@@ -644,7 +653,7 @@ def build_agent(
         # the escalate interrupt()'s replay window can never contain a sibling to double-execute
         # (the third replay-safety layer; see policy/guard.py). Innermost custom model wrap.
         SingleToolCallMiddleware(),
-        PolicyMiddleware(engine, audit, loaded, model_key),
+        PolicyMiddleware(engine, audit, loaded, model_key, change_control=change_control),
     ]
 
     # For the production model: hide `execute`, disable the auto-added general-purpose subagent (so

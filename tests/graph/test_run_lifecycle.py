@@ -122,7 +122,11 @@ async def test_server_build_writes_book_ends_in_chain_without_gateway_seed(
     )
 
     # The chain exists, is book-ended by the middleware, and verifies.
-    assert event_types(cfg.audit.dir, ctx.run_id) == ["run_started", "run_completed"]
+    assert event_types(cfg.audit.dir, ctx.run_id) == [
+        "run_started",
+        "model_call",
+        "run_completed",
+    ]
     assert chain_ok(cfg.audit.dir, ctx.run_id)
 
     events = read_events(cfg.audit.dir, ctx.run_id)

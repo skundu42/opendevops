@@ -122,7 +122,9 @@ def test_compose_has_no_known_default_service_credentials() -> None:
     assert "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}" in text
     assert "${GATEWAY_TOKEN:?set GATEWAY_TOKEN}" in text
     assert "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}" in text
-    assert "${DASHBOARD_TOKEN:?set DASHBOARD_TOKEN}" in text
+    assert "${DASHBOARD_TOKEN:-}" in text
+    assert "${OIDC_CLIENT_ID:-}" in text
+    assert "${OIDC_CLIENT_SECRET:-}" in text
     assert "change-me-before-deploy" not in text
     assert "POSTGRES_PASSWORD:-postgres" not in text
     assert "GRAFANA_ADMIN_PASSWORD:-admin" not in text

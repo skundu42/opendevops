@@ -91,6 +91,7 @@ class ExecDecision:
     channel: Literal["ro", "rw"]
     tool_family: str | None
     argv: tuple[str, ...]
+    environment: str | None = None
 
 
 current_decision: ContextVar[ExecDecision | None] = ContextVar(
@@ -268,7 +269,11 @@ async def run_command_core(
     #    credential), then resolve any {{secret:NAME}} into that env in-process.
     try:
         env = build_env(
-            cfg, decision.tool_family, decision.channel, active_executor.home
+            cfg,
+            decision.tool_family,
+            decision.channel,
+            active_executor.home,
+            environment=decision.environment,
         )
     except CredentialUnavailable as exc:
         return f"execution refused: {exc}"

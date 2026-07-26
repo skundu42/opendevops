@@ -19,20 +19,101 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # config.yaml
 # --------------------------------------------------------------------------------------
 
+DashboardRole = Literal["viewer", "operator", "approver", "admin"]
+
+
+class OIDCConfig(BaseModel):
+    """Generic OpenID Connect relying-party configuration.
+
+    Provider-specific behavior is expressed through discovery and claim mapping, so the same
+    implementation works with Entra ID, Google Workspace, Okta, Keycloak, and standards-compliant
+    providers. Secret *values* remain in the environment.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    issuer: str | None = None
+    client_id_env: str | None = None
+    client_secret_env: str | None = None
+    redirect_uri: str | None = None
+    scopes: list[str] = ["openid", "profile", "email"]
+    roles_claim: str = "groups"
+    role_mappings: dict[DashboardRole, list[str]] = {}
+    default_roles: list[DashboardRole] = []
+
+    @model_validator(mode="after")
+    def _validate_oidc(self) -> OIDCConfig:
+        if "openid" not in self.scopes:
+            raise ValueError("server.oidc.scopes must include 'openid'")
+        if len(set(self.scopes)) != len(self.scopes):
+            raise ValueError("server.oidc.scopes must not contain duplicates")
+        if self.issuer is not None:
+            issuer = self.issuer.rstrip("/")
+            if not issuer.startswith(("https://", "http://localhost", "http://127.0.0.1")):
+                raise ValueError("server.oidc.issuer must use HTTPS (except localhost development)")
+            self.issuer = issuer
+        if self.redirect_uri is not None and not self.redirect_uri.startswith(
+            ("https://", "http://localhost", "http://127.0.0.1")
+        ):
+            raise ValueError(
+                "server.oidc.redirect_uri must use HTTPS (except localhost development)"
+            )
+        return self
+
+
+class ControlPlaneConfig(BaseModel):
+    """Approval separation and guarded runtime-capability configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    database: Path = Path("./state/control-plane.sqlite3")
+    production_requires_independent_approval: bool = True
+    enforce_runtime_grants: bool = False
+    grant_required_environments: list[Literal["staging", "prod"]] = ["prod"]
+    max_rw_actions_per_run: int = Field(default=12, ge=1, le=100)
+    max_identical_rw_actions_per_run: int = Field(default=2, ge=1, le=10)
+    max_consecutive_failures: int = Field(default=3, ge=1, le=10)
+    default_grant_ttl_s: int = Field(default=3600, ge=60, le=86400)
+    max_grant_ttl_s: int = Field(default=86400, ge=300, le=604800)
+    minimum_cooldown_s: int = Field(default=5, ge=0, le=3600)
+
+    @field_validator("database", mode="after")
+    @classmethod
+    def _expand_database(cls, value: Path) -> Path:
+        return value.expanduser()
+
+    @model_validator(mode="after")
+    def _validate_limits(self) -> ControlPlaneConfig:
+        if self.default_grant_ttl_s > self.max_grant_ttl_s:
+            raise ValueError("default_grant_ttl_s must not exceed max_grant_ttl_s")
+        if len(set(self.grant_required_environments)) != len(
+            self.grant_required_environments
+        ):
+            raise ValueError("grant_required_environments must not contain duplicates")
+        return self
+
 
 class KubernetesTarget(BaseModel):
-    """Kubernetes execution target: the read-only kubeconfig, optional rw kubeconfig, allowlist."""
+    """Kubernetes target with a read identity and environment-scoped write identities."""
 
     model_config = ConfigDict(extra="forbid")
 
     kubeconfig_ro: Path
     kubeconfig_rw: Path | None = None
+    kubeconfig_rw_by_environment: dict[Literal["staging", "prod"], Path] = {}
     allowed_contexts: list[str] = []
 
     @field_validator("kubeconfig_ro", "kubeconfig_rw", mode="after")
     @classmethod
     def _expand_user(cls, v: Path | None) -> Path | None:
         return v.expanduser() if v is not None else None
+
+    @field_validator("kubeconfig_rw_by_environment", mode="after")
+    @classmethod
+    def _expand_environment_paths(
+        cls, values: dict[Literal["staging", "prod"], Path]
+    ) -> dict[Literal["staging", "prod"], Path]:
+        return {environment: path.expanduser() for environment, path in values.items()}
 
 
 class GithubTarget(BaseModel):
@@ -336,11 +417,40 @@ class ServerConfig(BaseModel):
     api_key_env: str | None = None
     alertmanager_token_env: str | None = None
     github_webhook_secret_env: str | None = None
+    dashboard_auth_mode: Literal["static", "oidc"] = "static"
     dashboard_token_env: str | None = None
+    dashboard_session_backend: Literal["memory", "redis"] = "memory"
+    dashboard_session_redis_url: str | None = None
     dashboard_session_ttl_s: int = Field(default=3600, gt=0, le=86400)
     dashboard_cookie_secure: bool = False
+    oidc: OIDCConfig = Field(default_factory=OIDCConfig)
     source_allowlist: list[str] = []
-    webhook_environment: str = "staging"
+    webhook_environment: Literal["staging", "prod"] = "staging"
+
+    @model_validator(mode="after")
+    def _validate_dashboard_auth(self) -> ServerConfig:
+        if self.dashboard_auth_mode == "oidc":
+            missing = [
+                field
+                for field, value in {
+                    "issuer": self.oidc.issuer,
+                    "client_id_env": self.oidc.client_id_env,
+                    "redirect_uri": self.oidc.redirect_uri,
+                }.items()
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    "OIDC dashboard authentication requires server.oidc "
+                    + ", ".join(missing)
+                )
+            if not self.oidc.role_mappings and not self.oidc.default_roles:
+                raise ValueError("OIDC authentication requires at least one mapped/default role")
+        if self.dashboard_session_backend == "redis" and not self.dashboard_session_redis_url:
+            raise ValueError("Redis dashboard sessions require dashboard_session_redis_url")
+        if self.dashboard_session_ttl_s > 8 * 60 * 60:
+            raise ValueError("dashboard sessions may not exceed eight hours")
+        return self
 
 
 class Principal(BaseModel):
@@ -350,6 +460,7 @@ class Principal(BaseModel):
 
     principal: str
     profile: str = "interactive"
+    roles: list[DashboardRole] = ["operator"]
 
 
 class SlackConfig(BaseModel):
@@ -585,6 +696,7 @@ class AppConfig(BaseModel):
     policy: PolicyConfig
     state: StateConfig = Field(default_factory=StateConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
+    control_plane: ControlPlaneConfig = Field(default_factory=ControlPlaneConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     principals: dict[str, Principal] = {}

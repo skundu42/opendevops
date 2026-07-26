@@ -291,6 +291,8 @@ async def test_run_happy_path_context_verbatim_and_result_fields() -> None:
     call = runs.calls[0]
     assert call["method"] == "wait"
     assert call["assistant_id"] == "devops"
+    trace_id = call["context"].pop("trace_id")
+    assert len(trace_id) == 32
     assert call["context"] == {
         "principal": "sandipan",
         "interface": "http",

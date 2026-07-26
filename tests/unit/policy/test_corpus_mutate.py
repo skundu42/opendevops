@@ -97,11 +97,19 @@ PROD_MUTATE_DEFAULT_DENY = [
 ]
 
 
-@pytest.mark.parametrize("argv", PROD_MUTATE_DEFAULT_DENY)
-async def test_prod_mutations_default_deny(engine: YamlRuleEngine, argv: list[object]) -> None:
+@pytest.mark.parametrize(
+    ("argv", "effect"),
+    [
+        (PROD_MUTATE_DEFAULT_DENY[0], "rewrite"),
+        (PROD_MUTATE_DEFAULT_DENY[1], "allow"),
+        (PROD_MUTATE_DEFAULT_DENY[2], "allow"),
+    ],
+)
+async def test_prod_mutations_reach_structural_policy_before_runtime_change_control(
+    engine: YamlRuleEngine, argv: list[object], effect: str
+) -> None:
     d = await _decide(engine, _cmd(argv, "prod"))
-    assert d.effect == "deny"
-    assert d.rule_id == "__default_deny__"
+    assert d.effect == effect
 
 
 # --------------------------------------------------------------------------- explicit denials
@@ -121,11 +129,12 @@ async def test_delete_workload_escalates_in_staging(engine: YamlRuleEngine) -> N
     assert d.rule_id == "kubectl-delete-workload-escalate"
 
 
-async def test_delete_default_deny_in_prod(engine: YamlRuleEngine) -> None:
-    # The escalate rule is staging-only; a prod delete falls to default-deny (no applicable rule).
+async def test_delete_escalates_in_prod_before_runtime_grant_gate(
+    engine: YamlRuleEngine,
+) -> None:
     d = await _decide(engine, _cmd(["kubectl", "delete", "pod", "x"], "prod"))
-    assert d.effect == "deny"
-    assert d.rule_id == "__default_deny__"
+    assert d.effect == "escalate"
+    assert d.rule_id == "kubectl-delete-workload-escalate"
 
 
 async def test_delete_force_denied_in_staging(engine: YamlRuleEngine) -> None:

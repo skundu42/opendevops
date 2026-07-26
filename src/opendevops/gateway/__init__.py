@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from opendevops.gateway.base import (
     AgentGateway,
+    ApprovalSeparationError,
     AssistantText,
     Escalation,
     EscalationEvent,
@@ -21,6 +22,7 @@ from opendevops.gateway.server import ServerGateway
 
 __all__ = [
     "AgentGateway",
+    "ApprovalSeparationError",
     "AssistantText",
     "Escalation",
     "EscalationEvent",

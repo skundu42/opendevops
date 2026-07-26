@@ -113,12 +113,16 @@ async def test_row6_file_less_apply_is_denied(engine: YamlRuleEngine) -> None:
     assert "--filename" in d.reason
 
 
-async def test_prod_apply_still_default_denies(engine: YamlRuleEngine) -> None:
-    # The rewrite + hook + allow rules are all staging-only; a prod apply falls to default-deny
-    # (no staging rule is applicable), never reaching the hook.
+async def test_prod_apply_is_rewritten_to_dry_run_before_control_plane_gate(
+    engine: YamlRuleEngine,
+) -> None:
+    # The structural policy performs the dry-run rewrite in prod. PolicyMiddleware then requires
+    # an active capability grant and independent approval before any real rw execution.
     d = await engine.decide(_ctx(["kubectl", "apply", "-f", PATH], environment="prod"))
-    assert d.effect == "deny"
-    assert d.rule_id == "__default_deny__"
+    assert d.effect == "rewrite"
+    assert d.rule_id == "force-server-dry-run-first"
+    assert d.rewritten_argv is not None
+    assert "--dry-run=server" in d.rewritten_argv
 
 
 async def test_explicit_server_dry_run_flag_still_flag_checked(engine: YamlRuleEngine) -> None:

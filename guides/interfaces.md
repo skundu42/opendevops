@@ -1,6 +1,6 @@
 # Interfaces
 
-Four run frontends, one agent, plus one read-only operations dashboard. Each run frontend depends
+Four run frontends, one agent, plus an OIDC/RBAC operations control plane. Each run frontend depends
 only on the `AgentGateway` protocol
 ([architecture](architecture.md#the-gateway-seam)), so they behave identically whether the graph
 runs in-process (CLI) or behind the LangGraph Server (everything else).
@@ -17,7 +17,7 @@ uv run opendevops chat [--environment staging|prod] [--profile <name>] [--princi
 - **Ctrl-C cancels the in-flight run** via the gateway (audited, graceful) without killing the
   REPL.
 - Other subcommands: `opendevops version`, `opendevops config check`,
-  `opendevops audit verify --dir <dir>`.
+  `opendevops audit verify --dir <dir>`, and the `opendevops config *-grant` lifecycle.
 
 ### Escalations in the CLI
 
@@ -50,10 +50,19 @@ Custom routes (mounted by the server from `interfaces/webapp.py`):
 | `POST /webhooks/alertmanager` | static bearer token (+ optional source-IP allowlist) | alert → RCA run on a **stable incident thread** (thread id derived from the alert fingerprint; duplicate alerts join the same thread) |
 | `POST /webhooks/github` | HMAC (`X-Hub-Signature-256`) | CI-failure diagnosis runs |
 | `POST /webhooks/run-complete` | bearer token | target of server-side run-completion webhooks; posts final answers back to Slack |
-| `GET /dashboard` | signed dashboard session | operational dashboard shell |
-| `GET /dashboard/api/snapshot` | signed dashboard session | bounded, redacted audit-derived telemetry |
-| `GET`, `POST /dashboard/login` | sign-in token on POST | exchange the configured token for a signed session |
-| `POST /dashboard/logout` | signed dashboard session | clear the browser session |
+| `GET /dashboard` | opaque server-side session | operational dashboard shell |
+| `GET /dashboard/api/snapshot` | viewer+ | bounded audit + live control-plane snapshot |
+| `GET /dashboard/api/events` | viewer+ | SSE audit changes and live run/queue/worker/approval state |
+| `GET /dashboard/api/runs/{run_id}` | viewer+ | correlated run, trace, model, policy, tool and integrity detail |
+| `POST /dashboard/api/runs/{run_id}/cancel` | operator/admin + CSRF | cancel a correlated run |
+| `POST /dashboard/api/approvals/{thread_id}` | approver/admin + CSRF | approve/edit/reject a suspended run |
+| `GET`, `POST /dashboard/api/config/proposals` | viewer / operator+ | list or propose typed capability grants |
+| `POST /dashboard/api/config/proposals/{id}/approve` | approver/admin + CSRF | approve; production enforces requester separation |
+| `POST /dashboard/api/config/proposals/{id}/activate` | admin + CSRF | activate an approved grant |
+| `POST /dashboard/api/config/proposals/{id}/revoke` | admin + CSRF | immediately revoke a grant |
+| `POST /dashboard/api/sessions/revoke` | admin + CSRF | revoke every session for issuer + subject |
+| `GET /dashboard/oidc/login`, `GET /dashboard/oidc/callback` | OIDC | state + nonce + PKCE login flow |
+| `POST /dashboard/logout` | session + CSRF | revoke the current session |
 | `GET /healthz` | none | liveness |
 | `GET /metrics` | none (network-internal) | Prometheus |
 
@@ -63,27 +72,34 @@ the `incident` budget profile pattern.
 
 ## Operations dashboard
 
-The service-mode dashboard at `/dashboard` is an audit-led control room for answering: what ran,
-where, under whose authority, what it cost, and which policy decisions shaped the result. It
-shows:
+The service-mode dashboard at `/dashboard` is an audit-led control room for answering: what is
+running, what is queued, which approvals are waiting, where an action ran, under whose authority,
+what it cost, and which policy decisions shaped the result. It shows:
 
+- active LangGraph/gateway runs, queue and worker state, retries/errors and pending approvals;
 - run counts and success rate, audit-recorded spend, denials and escalations;
 - seven-day run and spend activity;
-- recent run status, principal, environment, model/tool counts and cost;
-- a policy-decision breakdown and a sanitized event timeline;
+- recent run status, OIDC/service principal, environment, model/tool counts and cost;
+- run-detail correlation by `run_id`, `thread_id`, `tool_call_id` and `trace_id`;
+- content-free model timing/token/cost progression, policy decisions and tool timing;
+- versioned dangerous-capability proposals with approval/activation/revocation;
 - runtime mode plus integration-configuration posture.
 
-Its data source is the hash-chained JSONL audit directory, not an additional analytics database.
-Reads are bounded to the newest 200 files and 16 MiB per file. Corrupt or incomplete chains are
-surfaced as operational state rather than hidden. The API deliberately excludes command argv,
-stdout/stderr and credential values; integration posture reports only configured/unconfigured
-counts.
+Persisted truth comes from the hash-chained JSONL audit directory; live state comes from the
+gateway/LangGraph SDK and the web control projection. The browser receives changes over SSE
+instead of polling the entire audit window. Reads are bounded to the newest 200 files and 16 MiB
+per file. Corrupt or incomplete chains are surfaced, not hidden. The API deliberately excludes
+command argv, prompt/response content, stdout/stderr and credential values.
 
-Set `server.dashboard_token_env` to the **name** of a strong token environment variable. Login
-compares the submitted value in constant time and returns a short-lived, signed `HttpOnly`,
-`SameSite=Strict` cookie. Missing configuration fails closed. Set
-`server.dashboard_cookie_secure: true` behind HTTPS, rotate the token like any operator
-credential, and add OIDC/SSO at the ingress for multi-user production installations.
+Production uses `server.dashboard_auth_mode: oidc` with an exact issuer, registered redirect URI,
+client env names and explicit role mappings. Sessions are opaque, server-side, short-lived and
+revocable; state-changing calls require CSRF. Static-token mode gives the local developer all four
+roles and must not be used as a deployed authentication system.
+
+RBAC is intentionally non-hierarchical around approval: `operator` can cancel and propose but
+cannot approve; `approver` can approve but cannot operate; `admin` is the emergency/full-control
+role. Every login, approval, cancellation, session revocation, dashboard detail view and
+configuration transition is written to the hash-linked control-event ledger with issuer + subject.
 
 ## Slack chat-ops
 
@@ -102,8 +118,9 @@ Requires the `slack` extra and `slack.bot_token_env` / `slack.app_token_env` con
   `{principal, profile}`; unmapped users are not served. Runs are attributed (audit +
   per-principal daily budget) to the mapped principal.
 
-> Go-live gate: approver dedupe is not yet enforced — any mapped principal can approve an
-> escalation, including the requester. Recorded in the standing pre-deploy gates.
+Production approval separation is enforced inside both gateway implementations before the
+suspended context is removed. A requester may reject their own request, but may not approve or edit
+it into an authorized production action.
 
 ## Scheduler
 

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
+  <meta name="csrf-token" content="{{CSRF_TOKEN}}">
   <title>Agent operations · opendevops</title>
   <link rel="icon" href="/dashboard/assets/logo.png">
   <link rel="stylesheet" href="/dashboard/assets/dashboard.css">
@@ -20,7 +21,9 @@
 
       <nav class="primary-nav" aria-label="Dashboard sections">
         <a href="#overview">Overview</a>
+        <a href="#live-control">Live</a>
         <a href="#runs">Runs</a>
+        <a href="#change-control">Change control</a>
         <a href="#integrations">Integrations</a>
       </nav>
 
@@ -37,9 +40,11 @@
             <path d="M16.2 6.3A7 7 0 1 0 17 11h-1.8a5.2 5.2 0 1 1-.5-2.2l-2.4.1V7.2l4.7-.1.1 4.6h-1.8l-.1-2.1a7 7 0 0 0 1-3.3Z"/>
           </svg>
         </button>
-        <form method="post" action="/dashboard/logout">
-          <button class="sign-out-button" type="submit">Sign out</button>
-        </form>
+        <div class="identity-chip">
+          <strong>{{IDENTITY_NAME}}</strong>
+          <small>{{IDENTITY_ROLES}}</small>
+        </div>
+        <button class="sign-out-button" id="sign-out-button" type="button">Sign out</button>
       </div>
     </div>
   </header>
@@ -50,7 +55,7 @@
         <p class="breadcrumb">Operations / Agent telemetry</p>
         <h1 id="page-title">Agent operations</h1>
         <p class="page-description">
-          A read-only view of execution, policy decisions, spend, and audit integrity.
+          Live execution, approvals, spend, policy decisions, and verifiable audit history.
         </p>
       </div>
       <dl class="runtime-summary" aria-label="Agent runtime">
@@ -91,7 +96,7 @@
           <h2 id="overview-title">Today</h2>
           <p>Current UTC reporting window</p>
         </div>
-        <span class="read-only-label">Read-only</span>
+        <span class="read-only-label">OIDC attributed</span>
       </div>
 
       <dl class="metric-row">
@@ -119,6 +124,36 @@
           <p><span id="audit-failed">—</span> failed verification</p>
         </div>
       </dl>
+    </section>
+
+    <section id="live-control" class="panel live-panel" aria-labelledby="live-title">
+      <div class="panel-header">
+        <div>
+          <h2 id="live-title">Live control plane</h2>
+          <p>Gateway runs, queue pressure, workers, failures, and pending human decisions</p>
+        </div>
+        <span class="stream-label"><i></i>SSE live</span>
+      </div>
+      <dl class="live-metrics">
+        <div><dt>Active runs</dt><dd id="live-active">—</dd></div>
+        <div><dt>Queue depth</dt><dd id="live-queue">—</dd></div>
+        <div><dt>Workers active</dt><dd id="live-workers">—</dd></div>
+        <div><dt>Executor errors</dt><dd id="live-errors">—</dd></div>
+        <div><dt>Queue latency</dt><dd id="live-queue-latency">—</dd></div>
+        <div><dt>Pending approvals</dt><dd id="live-approvals">—</dd></div>
+      </dl>
+      <div class="sli-heading">Service indicators</div>
+      <dl class="sli-metrics">
+        <div><dt>Run success</dt><dd id="sli-run-success">—</dd></div>
+        <div><dt>Queue latency</dt><dd id="sli-queue-latency">—</dd></div>
+        <div><dt>Policy latency</dt><dd id="sli-policy-latency">—</dd></div>
+        <div><dt>Executor errors</dt><dd id="sli-executor-errors">—</dd></div>
+        <div><dt>Audit lag</dt><dd id="sli-audit-lag">—</dd></div>
+        <div><dt>Budget used</dt><dd id="sli-budget-used">—</dd></div>
+      </dl>
+      <div id="approval-list" class="approval-list">
+        <p class="empty-state">No approvals are waiting.</p>
+      </div>
     </section>
 
     <section class="signal-grid">
@@ -184,6 +219,61 @@
       </div>
     </section>
 
+    <section id="change-control" class="panel change-panel" aria-labelledby="change-title">
+      <div class="panel-header">
+        <div>
+          <h2 id="change-title">Dangerous capability grants</h2>
+          <p>Typed, expiring changes with independent production approval and bounded execution</p>
+        </div>
+        <code id="control-revision">revision —</code>
+      </div>
+      <div class="change-layout">
+        <form id="proposal-form" class="proposal-form">
+          <label>Environment
+            <select name="environment">
+              <option value="staging">Staging</option>
+              <option value="prod">Production</option>
+            </select>
+          </label>
+          <label>Capability
+            <select name="capability">
+              <option value="kubernetes_deploy">Kubernetes deployment</option>
+              <option value="github_write">GitHub write</option>
+              <option value="aws_deploy">AWS deployment</option>
+              <option value="gcp_deploy">GCP deployment</option>
+              <option value="azure_deploy">Azure deployment</option>
+              <option value="ssh_mutation">SSH mutation</option>
+            </select>
+          </label>
+          <label>Explicit targets
+            <input name="targets" required placeholder="cluster-a, namespace/service">
+          </label>
+          <label>Reason
+            <textarea
+              name="reason"
+              required
+              minlength="8"
+              maxlength="500"
+              placeholder="Why this capability is needed"
+            ></textarea>
+          </label>
+          <div class="form-pair">
+            <label>Lifetime (seconds)
+              <input name="ttl_s" type="number" min="60" max="604800" value="3600">
+            </label>
+            <label>Max executions
+              <input name="max_executions" type="number" min="1" max="100" value="10">
+            </label>
+          </div>
+          <button class="primary-action" type="submit">Propose grant</button>
+          <p id="proposal-feedback" class="form-feedback" aria-live="polite"></p>
+        </form>
+        <div id="proposal-list" class="proposal-list">
+          <p class="empty-state">No capability changes have been proposed.</p>
+        </div>
+      </div>
+    </section>
+
     <section id="integrations" class="panel integrations-panel" aria-labelledby="integrations-title">
       <div class="panel-header">
         <div>
@@ -195,10 +285,25 @@
     </section>
 
     <footer class="dashboard-footer">
-      <span>Audit-derived telemetry · refreshes every 15 seconds</span>
+      <span>Audit + control-plane telemetry · streamed with SSE</span>
       <span id="snapshot-id">Snapshot —</span>
     </footer>
   </main>
+  <aside id="run-detail" class="run-detail" aria-hidden="true" aria-labelledby="run-detail-title">
+    <div class="run-detail-header">
+      <div>
+        <p class="breadcrumb">Correlated run</p>
+        <h2 id="run-detail-title">Run detail</h2>
+      </div>
+      <button
+        id="close-run-detail"
+        class="icon-button"
+        type="button"
+        aria-label="Close run detail"
+      >×</button>
+    </div>
+    <div id="run-detail-body"><p class="empty-state">Select a run to inspect it.</p></div>
+  </aside>
   <script src="/dashboard/assets/dashboard.js" defer></script>
 </body>
 </html>

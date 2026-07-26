@@ -103,7 +103,12 @@ _CLOUD_FAMILY_TARGET: dict[str, str] = {"aws": "aws", "gcloud": "gcloud", "az": 
 
 
 def build_env(
-    cfg: AppConfig, tool_family: str | None, channel: str, home: str
+    cfg: AppConfig,
+    tool_family: str | None,
+    channel: str,
+    home: str,
+    *,
+    environment: str | None = None,
 ) -> dict[str, str]:
     """Construct the child env for one exec: fixed base + exactly one credential decision.
 
@@ -115,8 +120,9 @@ def build_env(
     ``KUBECONFIG`` is **always** set explicitly, keyed by ``(tool_family, channel)``:
       * ``kubectl`` / ``helm`` + ``ro`` -> ``KUBECONFIG`` = ``targets.kubernetes.kubeconfig_ro``
         (``helm`` talks to the cluster with the same kube credentials as ``kubectl``)
-      * ``kubectl`` / ``helm`` + ``rw`` -> ``KUBECONFIG`` = ``targets.kubernetes.kubeconfig_rw``
-        (raises :class:`CredentialUnavailable` if that path is not configured)
+      * ``kubectl`` / ``helm`` + ``rw`` -> ``KUBECONFIG`` comes from
+        ``targets.kubernetes.kubeconfig_rw_by_environment[environment]``. The legacy
+        ``kubeconfig_rw`` is a staging-only fallback; production never falls back to it.
       * any other / unknown family -> ``KUBECONFIG`` = ``/dev/null`` (the fail-closed sentinel:
         a mistagged kube call reports "no configuration provided" instead of silently falling
         back to the operator's cluster-admin kubeconfig).
@@ -144,9 +150,15 @@ def build_env(
     if tool_family in _KUBE_FAMILIES:
         k8s = cfg.targets.kubernetes
         if channel == "rw":
-            if k8s.kubeconfig_rw is None:
-                raise CredentialUnavailable("rw kubeconfig not configured")
-            env["KUBECONFIG"] = str(Path(k8s.kubeconfig_rw).expanduser())
+            selected = k8s.kubeconfig_rw_by_environment.get(environment) if environment else None
+            if selected is None and environment in {None, "staging"}:
+                selected = k8s.kubeconfig_rw
+            if selected is None:
+                label = environment or "unspecified"
+                raise CredentialUnavailable(
+                    f"rw kubeconfig not configured for environment {label!r}"
+                )
+            env["KUBECONFIG"] = str(Path(selected).expanduser())
         else:
             env["KUBECONFIG"] = str(Path(k8s.kubeconfig_ro).expanduser())
     else:

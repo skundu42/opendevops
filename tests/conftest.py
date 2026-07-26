@@ -26,6 +26,7 @@ BASE_CONFIG: dict[str, Any] = {
         "kubernetes": {
             "kubeconfig_ro": "~/.kube/agent-view.yaml",
             "kubeconfig_rw": None,
+            "kubeconfig_rw_by_environment": {},
             "allowed_contexts": [],
         }
     },

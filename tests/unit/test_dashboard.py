@@ -42,6 +42,7 @@ def _cfg(audit_dir: Path, **server: object) -> AppConfig:
                 "dashboard_token_env": _TOKEN_ENV,
                 **server,
             },
+            "control_plane": {"database": str(audit_dir / "control-plane.sqlite3")},
             "models": copy.deepcopy(MODELS),
             "budgets": budgets(),
         }
@@ -78,6 +79,7 @@ def _seed_run(audit_dir: Path) -> None:
             "reason": "read command",
             "channel": "ro",
         },
+        summary={"duration_ms": 6},
     )
     audit.append(
         "run-dashboard",
@@ -104,6 +106,7 @@ def _seed_run(audit_dir: Path) -> None:
             "reason": "destructive command",
             "channel": "ro",
         },
+        summary={"duration_ms": 4},
     )
     audit.append(
         "run-dashboard",
@@ -184,6 +187,7 @@ async def test_dashboard_login_sets_hardened_cookie_and_exposes_snapshot(
         "escalations": 1,
     }
     assert payload["runs"][0]["cost_usd"] == 0.12
+    assert payload["slis"]["policy_latency_ms"] == 5.0
     assert payload["runs"][0]["principal"] == "alertmanager"
     assert payload["integrations"][0]["state"] == "configured"
     serialized = snapshot.text
@@ -231,3 +235,70 @@ def test_snapshot_is_safe_and_useful_when_audit_dir_is_empty(tmp_path: Path) -> 
     assert snapshot["runs"] == []
     assert len(snapshot["daily"]) == 7
     assert all("credential_env" not in integration for integration in snapshot["integrations"])
+
+
+async def test_dashboard_configuration_mutations_require_csrf_and_follow_lifecycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(_TOKEN_ENV, _TOKEN)
+    app = create_app(_cfg(tmp_path), AsyncMock())
+    async with _client(app) as client:
+        await client.post("/dashboard/login", data={"token": _TOKEN})
+        snapshot = await client.get("/dashboard/api/snapshot")
+        csrf = snapshot.json()["identity"]["csrf_token"]
+        payload = {
+            "environment": "staging",
+            "capability": "kubernetes_deploy",
+            "targets": ["kind-opendevops/default/api"],
+            "reason": "deploy the reviewed api release",
+        }
+        missing_csrf = await client.post("/dashboard/api/config/proposals", json=payload)
+        proposed = await client.post(
+            "/dashboard/api/config/proposals",
+            json=payload,
+            headers={"X-CSRF-Token": csrf},
+        )
+        proposal_id = proposed.json()["proposal_id"]
+        approved = await client.post(
+            f"/dashboard/api/config/proposals/{proposal_id}/approve",
+            json={},
+            headers={"X-CSRF-Token": csrf},
+        )
+        activated = await client.post(
+            f"/dashboard/api/config/proposals/{proposal_id}/activate",
+            json={},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert missing_csrf.status_code == 403
+    assert proposed.status_code == 201
+    assert approved.json()["status"] == "approved"
+    assert activated.json()["status"] == "active"
+
+
+async def test_dashboard_production_configuration_rejects_self_approval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(_TOKEN_ENV, _TOKEN)
+    app = create_app(_cfg(tmp_path), AsyncMock())
+    async with _client(app) as client:
+        await client.post("/dashboard/login", data={"token": _TOKEN})
+        csrf = (await client.get("/dashboard/api/snapshot")).json()["identity"]["csrf_token"]
+        proposal = await client.post(
+            "/dashboard/api/config/proposals",
+            json={
+                "environment": "prod",
+                "capability": "aws_deploy",
+                "targets": ["account-123/us-east-1/api"],
+                "reason": "deploy the approved production release",
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        response = await client.post(
+            f"/dashboard/api/config/proposals/{proposal.json()['proposal_id']}/approve",
+            json={},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 409
+    assert "different from the requester" in response.json()["detail"]

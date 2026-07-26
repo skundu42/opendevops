@@ -48,14 +48,14 @@ spent $0.0841 (run) / $0.34 (today)
 
 | Area | Supported today | Boundary |
 |---|---|---|
-| Kubernetes | diagnostics, logs, events, Helm inspection | staging mutations only; server dry-run enforced before apply |
+| Kubernetes | diagnostics, logs, events, Helm inspection, controlled apply/rollout/scale | production rw requires an active expiring grant, server dry-run, independent approval and rw kubeconfig |
 | GitHub | CI diagnosis, run inspection, PR-based remediation | repository and API method/path allowlists |
 | AWS | curated EC2, ECS, RDS, CloudFormation, S3, Lambda, CloudWatch and related reads | no cloud-resource deployment or IAM access |
 | Google Cloud | curated Compute, GKE, Cloud SQL, Pub/Sub, Logging, Storage, Run and Functions reads | mutations and secret access denied |
 | Azure | curated VM, AKS, ACR, networking, SQL, Cosmos DB, Monitor and resource reads | mutations and secret material denied |
 | Remote hosts | structured, read-only SSH checks | pinned user, key, hosts and `known_hosts` |
 | Interfaces | CLI, HTTP, Slack, scheduler, Alertmanager and GitHub webhooks | one shared gateway and safety core |
-| Operations UI | authenticated run, policy, cost, integration and audit monitoring | read-only; secret values and command output are never exposed |
+| Operations UI | live runs, queues, approvals, cancellation, policy/cost/audit detail and capability grants | OIDC RBAC + CSRF; secret values, prompts, responses and command output are never exposed |
 
 > [!IMPORTANT]
 > This is not a general AWS, Google Cloud, or Azure deployment engine. Terraform, Pulumi,
@@ -64,42 +64,90 @@ spent $0.0841 (run) / $0.34 (today)
 
 ## Operations dashboard
 
-The service-mode dashboard is a read-only view derived directly from persisted audit chains. It
-shows run lifecycle, principals, environments, policy decisions, executions, denials, escalations,
-spend, structural integrity, and integration configuration.
+The service-mode dashboard merges verified audit chains with live gateway telemetry. It shows
+active runs, queues, workers, pending approvals, per-model timing and cost progression, policy
+decisions, tool timing, correlation IDs, spend, SLIs, and audit integrity. Operators can cancel
+runs; approvers can resolve interruptions; admins can activate or revoke typed capability grants.
 
 <p align="center">
   <img src="docs/assets/dashboard.png" alt="Authenticated opendevops operations dashboard showing run activity, policy events, costs, audit integrity, and recent runs">
 </p>
 
-Browser authentication uses a dedicated token exchanged for a short-lived, HMAC-authenticated
-HttpOnly cookie. The raw token is never stored in browser storage or returned by an API.
+Production authentication is generic OpenID Connect (Entra ID, Google Workspace, Okta, Keycloak,
+or another standards-compliant issuer). Groups/roles map to `viewer`, `operator`, `approver`, and
+`admin`. Browser cookies contain only an opaque random session handle; session state and OIDC
+transactions are stored server-side, support immediate revocation, and expire within eight hours.
+Every control action records the OIDC issuer and subject. Static-token login remains available only
+as the explicit local-development mode.
+
+```yaml
+server:
+  dashboard_auth_mode: oidc
+  dashboard_session_backend: redis
+  dashboard_session_redis_url: redis://redis:6379/2
+  dashboard_cookie_secure: true
+  oidc:
+    issuer: https://id.example.com/realms/operations
+    client_id_env: OIDC_CLIENT_ID
+    client_secret_env: OIDC_CLIENT_SECRET
+    redirect_uri: https://ops.example.com/dashboard/oidc/callback
+    roles_claim: groups
+    role_mappings:
+      viewer: [devops-readers]
+      operator: [devops-operators]
+      approver: [change-approvers]
+      admin: [devops-admins]
+```
 
 ```sh
-# service-mode secrets
-export POSTGRES_PASSWORD='...'
-export GATEWAY_TOKEN='...'
-export GRAFANA_ADMIN_PASSWORD='...'
-export DASHBOARD_TOKEN='...'
-
 docker compose up -d
 open http://localhost:8123/dashboard
 ```
 
-For production, terminate TLS before Caddy and set
-`server.dashboard_cookie_secure: true`. See [deployment](guides/deployment.md#operator-dashboard).
+For production, register the callback exactly, terminate TLS before Caddy, use Redis sessions, and
+keep requester and approver group membership operationally separate. See
+[deployment](guides/deployment.md#operator-dashboard).
+
+## Guarded dangerous actions
+
+Dangerous capabilities are versioned state, not free-form dashboard YAML. An operator proposes a
+specific environment, capability, explicit target set, reason, lifetime, execution count,
+per-run/repeat limit, failure threshold, cooldown, and mandatory dry-run. An approver approves it;
+an admin activates it. Production rejects requester self-approval, and the executor atomically
+consumes the grant before each rw action.
+
+```sh
+uv run opendevops config propose-grant \
+  --environment prod \
+  --capability kubernetes_deploy \
+  --target kind-prod/web \
+  --reason "Deploy reviewed release 2026.07.26"
+
+uv run opendevops config approve-grant <proposal-id> --actor change-approver
+uv run opendevops config activate-grant <proposal-id> --actor platform-admin
+uv run opendevops config grants
+```
+
+The control plane is an additional gate: a grant never overrides a policy deny, credential scope,
+target allowlist, or dry-run requirement. AWS, GCP, and Azure policy packs remain read-only until
+reviewed deployment commands and distinct rw credentials are added. Production Kubernetes
+execution also requires `targets.kubernetes.kubeconfig_rw_by_environment.prod`; the legacy
+`kubeconfig_rw` field is accepted only as a staging fallback.
 
 ## Why the execution model is different
 
 ```mermaid
 flowchart LR
-    I["CLI · API · Slack · Scheduler · Webhooks"] --> G["AgentGateway"]
+    I["CLI · API · Slack · Scheduler · Webhooks · OIDC dashboard"] --> G["AgentGateway"]
+    O["OIDC session + RBAC"] --> I
     G --> B["Budgets and call limits"]
     B --> P["Fail-closed policy"]
     P -->|allow / rewrite| E["argv-only executor"]
     P -->|escalate| H["Human decision"]
     P -->|deny| D["Refusal"]
     E --> C["One scoped credential"]
+    X["Expiring capability grant + loop limits"] --> P
+    H --> X
     C --> T["Kubernetes · GitHub · Cloud CLIs · SSH"]
     P --> A["Audit chain"]
     E --> A
@@ -203,6 +251,10 @@ quota planning, and go-live gates.
 |---|---|
 | `opendevops chat` | streaming REPL with environment, profile and principal selection |
 | `opendevops config check` | validate runtime-critical configuration |
+| `opendevops config grants` | list the control-plane revision and capability proposals |
+| `opendevops config propose-grant` | propose a typed, expiring dangerous capability |
+| `opendevops config approve-grant` | approve a proposal (requester separation in prod) |
+| `opendevops config activate-grant` / `revoke-grant` | activate or immediately revoke a grant |
 | `opendevops audit verify --dir <dir>` | strictly verify audit structure and completion |
 | `opendevops audit verify --allow-incomplete` | diagnose structurally valid crashed/in-progress runs |
 | `opendevops version` | print the installed version |

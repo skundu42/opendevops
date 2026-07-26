@@ -29,11 +29,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from opendevops.interfaces.scheduler.jobs import JobSpec, scheduler_job_kwargs
+from opendevops.observability.otel import observe_operation, span
 
 if TYPE_CHECKING:
     from opendevops.gateway.base import AgentGateway
@@ -105,9 +107,25 @@ class SchedulerService:
 
     async def run_job(self, spec: JobSpec) -> JobOutcome:
         """Run one job to an outcome. Never raises — a failure becomes an ``error`` outcome."""
-        if spec.job_type is not None:
-            return await self._run_job_type(spec)
-        return await self._run_command_job(spec)
+        started = time.perf_counter()
+        with span(
+            "opendevops.scheduler.job",
+            {
+                "opendevops.scheduler.job_id": spec.id,
+                "opendevops.environment": spec.environment,
+            },
+        ):
+            if spec.job_type is not None:
+                outcome = await self._run_job_type(spec)
+            else:
+                outcome = await self._run_command_job(spec)
+        observe_operation(
+            "scheduler",
+            (time.perf_counter() - started) * 1000,
+            outcome.status,
+            {"opendevops.environment": spec.environment},
+        )
+        return outcome
 
     async def _run_command_job(self, spec: JobSpec) -> JobOutcome:
         """A fresh thread + a scheduled ``gateway.run`` bounded by the caller-side ``timeout_s``."""

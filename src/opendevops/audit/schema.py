@@ -69,6 +69,7 @@ class EventType(StrEnum):
     """The kinds of audit event. ``run_started`` seeds the chain; ``run_completed`` closes it."""
 
     run_started = "run_started"  # chain seed
+    model_call = "model_call"  # content-free model timing/usage/cost
     decision = "decision"  # pre-exec policy decision
     execution = "execution"  # post-exec result
     escalation = "escalation"  # awaiting human approval

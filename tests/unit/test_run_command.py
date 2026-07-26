@@ -108,6 +108,7 @@ def make_cfg(tmp_path: Path) -> Callable[..., AppConfig]:
         cmd_timeout_seconds: int | None = None,
         kubeconfig_ro: str | None = None,
         kubeconfig_rw: str | None = None,
+        kubeconfig_rw_by_environment: dict[str, str] | None = None,
         github_token_env: str | None = None,
         github_token_env_rw: str | None = None,
         github_write_repos: list[str] | None = None,
@@ -124,6 +125,10 @@ def make_cfg(tmp_path: Path) -> Callable[..., AppConfig]:
             cfg["targets"]["kubernetes"]["kubeconfig_ro"] = kubeconfig_ro
         if kubeconfig_rw is not None:
             cfg["targets"]["kubernetes"]["kubeconfig_rw"] = kubeconfig_rw
+        if kubeconfig_rw_by_environment is not None:
+            cfg["targets"]["kubernetes"]["kubeconfig_rw_by_environment"] = (
+                kubeconfig_rw_by_environment
+            )
         gh_target: dict[str, Any] = {}
         if github_token_env is not None:
             gh_target["token_env"] = github_token_env
@@ -393,6 +398,39 @@ def test_build_env_kubectl_rw(make_cfg: Callable[..., AppConfig]) -> None:
     cfg = make_cfg(kubeconfig_rw="/tmp/fake-rw.yaml")
     env = build_env(cfg, "kubectl", "rw", _SANDBOX_HOME)
     assert env["KUBECONFIG"] == "/tmp/fake-rw.yaml"
+
+
+def test_build_env_kubectl_prod_rw_requires_environment_scoped_credential(
+    make_cfg: Callable[..., AppConfig],
+) -> None:
+    cfg = make_cfg(kubeconfig_rw="/tmp/legacy-staging-rw.yaml")
+    with pytest.raises(CredentialUnavailable, match="environment 'prod'"):
+        build_env(
+            cfg,
+            "kubectl",
+            "rw",
+            _SANDBOX_HOME,
+            environment="prod",
+        )
+
+
+def test_build_env_kubectl_rw_selects_credential_by_environment(
+    make_cfg: Callable[..., AppConfig],
+) -> None:
+    cfg = make_cfg(
+        kubeconfig_rw_by_environment={
+            "staging": "/tmp/staging-rw.yaml",
+            "prod": "/tmp/prod-rw.yaml",
+        }
+    )
+    env = build_env(
+        cfg,
+        "kubectl",
+        "rw",
+        _SANDBOX_HOME,
+        environment="prod",
+    )
+    assert env["KUBECONFIG"] == "/tmp/prod-rw.yaml"
 
 
 def test_build_env_kubectl_rw_none_raises(

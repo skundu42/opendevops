@@ -38,12 +38,18 @@
         <img src="/dashboard/assets/logo.png" alt="" width="42" height="42">
         <div>
           <h2>Sign in to dashboard</h2>
-          <p>Use the operator token configured for this deployment.</p>
+          <p>Use your organization identity to access the control plane.</p>
         </div>
       </div>
 
       <p class="auth-error" role="alert">{{AUTH_ERROR}}</p>
-      <form method="post" action="/dashboard/login">
+      <div class="{{OIDC_FORM_CLASS}}">
+        <a class="primary-action oidc-action" href="/dashboard/oidc/login">Continue with SSO</a>
+        <p class="auth-method-note">
+          Your issuer, subject, and mapped roles are recorded with every action.
+        </p>
+      </div>
+      <form class="{{STATIC_FORM_CLASS}}" method="post" action="/dashboard/login">
         <label class="visually-hidden" for="dashboard-user">Account</label>
         <input
           class="visually-hidden"
@@ -75,15 +81,15 @@
           <path d="M10 1.8 17 4.6v4.7c0 4.4-2.9 7.5-7 8.9-4.1-1.4-7-4.5-7-8.9V4.6l7-2.8Zm0 2L4.8 5.9v3.4c0 3.3 2 5.7 5.2 7 3.2-1.3 5.2-3.7 5.2-7V5.9L10 3.8Zm-.8 3.1h1.6v3.9H9.2V6.9Zm0 5.2h1.6v1.6H9.2v-1.6Z"/>
         </svg>
         <p>
-          The token is exchanged for a short-lived, signed HttpOnly session and is not stored in
-          browser storage.
+          Login creates a short-lived, opaque HttpOnly session. Sessions are stored server-side
+          and can be revoked immediately.
         </p>
       </div>
     </section>
   </main>
 
   <footer class="login-footer">
-    Authentication fails closed when <code>server.dashboard_token_env</code> is not configured.
+    Static-token authentication is retained only for local development. Deployments should use OIDC.
   </footer>
   <script src="/dashboard/assets/login.js" defer></script>
 </body>

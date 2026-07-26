@@ -3,8 +3,9 @@
 opendevops is **one agent graph, many frontends**. A single LangChain
 [deepagents](https://github.com/langchain-ai/deepagents) graph carries the entire safety core as
 middleware; every run interface (CLI, HTTP, Slack, scheduler) talks to it through one narrow
-protocol. The operations dashboard is deliberately off that command path: it derives a read-only
-projection from the audit ledger.
+protocol. The operations dashboard uses the same gateway for explicitly authorized cancellation
+and approval actions, while its observability projection merges live gateway state with the audit
+ledger.
 
 ```
  Local tier (zero infra)                  Service tier (docker-compose)
@@ -17,7 +18,7 @@ projection from the audit ledger.
         ▼                                                        ▼
  ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
  │  ONE CompiledStateGraph from create_deep_agent(...)                                         │
- │  middleware: CostCap · DailyBudget · ModelCallLimit · ToolCallLimit(s) · Policy(+Audit)     │
+ │  middleware: ModelAudit · CostCap · DailyBudget · CallLimits · Policy · CapabilityGuard     │
  │  tools: run_command(argv) · ssh_run · task(log-summarizer only) · deepagents virtual FS     │
  └───────────────┬─────────────────────────────────────────────────────────────────────────────┘
                  │ executor.mode=local: in-process subprocess, constructed env
@@ -27,9 +28,10 @@ projection from the audit ledger.
         tokens / roles. Audit: hash-chained per-run JSONL the agent has no write path to.
 ```
 
-The authenticated `/dashboard` surface reads a bounded window of those audit chains and emits a
-sanitized operational projection. It never calls tools, resumes runs, or exposes argv/output. That
-separation keeps monitoring from becoming a second control plane.
+The authenticated `/dashboard` surface reads a bounded window of those audit chains and subscribes
+to live gateway state. Viewer routes expose a sanitized projection. Mutations are narrow gateway
+operations protected by OIDC RBAC, CSRF, control-event attribution and gateway-level approval
+separation; no route accepts an arbitrary command, policy rule or YAML document.
 
 ## The three load-bearing decisions
 
@@ -44,7 +46,9 @@ separation keeps monitoring from becoming a second control plane.
    advisory-grade UX; the real boundary is what credentials the executor holds. Every allow rule
    names a **channel** (`ro` | `rw`), and each `(tool-family, environment, channel)` triple maps to
    a distinct, minimally-scoped credential provisioned *before* the policy referencing it ships.
-   The design invariant: **even a total policy bypass is read-only-and-no-secrets**.
+   The design invariant: a grant cannot create authority. Cloud identities remain
+   read-only-and-no-secrets; production Kubernetes writes select an explicitly
+   environment-scoped `rw` kubeconfig and remain bounded by that identity's RBAC.
 
 3. **Policy and audit are one middleware, layered, default-deny.** `PolicyMiddleware` embeds the
    `AuditLogger` and writes a `decision` event before execution and an `execution` event after — a
@@ -76,11 +80,18 @@ closest to execution:
 
 | Middleware | Job |
 |---|---|
+| `ModelAuditMiddleware` | content-free model duration, usage and cost progression correlated to the run/trace |
 | `CostCapMiddleware` | accumulates per-run USD from `usage_metadata`; gracefully jumps to end at 90% of cap |
 | `DailyBudgetMiddleware` | global + per-principal daily USD envelopes via a pluggable `DailyCounter` (sqlite / redis) |
 | `ModelCallLimitMiddleware` | hard cap on model calls per run |
 | `ToolCallLimitMiddleware` (×2) | run-wide and `run_command`-specific tool-call caps |
-| `PolicyMiddleware` | parse → cache check → decide → audit → execute → audit (see [policy](policy.md)) |
+| `PolicyMiddleware` | parse → cache check → decide → grant/loop gate → approval → execute → audit (see [policy](policy.md)) |
+
+Production rw behavior has two stages. Static YAML policy first proves the command shape and
+credential channel. `ChangeControlService` then requires an active typed capability grant,
+atomically consumes its operation allowance, applies run/repeat/cooldown/failure ceilings, and
+upgrades non-dry-run production allows to a human interrupt. The gateways enforce that approver
+and requester differ before consuming the suspended run.
 
 ## Tools
 
@@ -128,6 +139,18 @@ The process fails to boot — loudly, by design — if reality drifts from the r
   rule's pack, overlay restrictions, unreachable-rule detection ([policy](policy.md#loader-lints)).
 - **Config coverage gates**: a configured pack whose tool family has no credential refuses to boot.
 
+## Identity and control-plane state
+
+OIDC identity is represented as the stable pair `(issuer, subject)`; display name and email are
+presentation only. The browser holds an opaque random handle, while memory (local development) or
+Redis stores session claims, roles, CSRF token and expiry. OIDC state/nonce/PKCE verifier data is
+also server-side and one-time consumed.
+
+The control ledger is SQLite with transactional proposal transitions and a separate hash-linked
+event stream. Proposal states are `pending → approved → active`, with terminal
+`rejected|revoked|expired`. CLI and dashboard instantiate the same service over the same database,
+so revisions and execution allowances cannot diverge.
+
 ## Executor: local and remote
 
 `executor.mode=local` (default, the reviewed production path): `run_command` subprocesses run
@@ -153,6 +176,8 @@ pre-deployment conditions — see [deployment](deployment.md#executor-service-re
 | `src/opendevops/policy/` | schema, loader+lints, engine, hooks, middleware ([policy](policy.md)) |
 | `src/opendevops/budget/` | cost cap + daily budget middleware, counters ([budgets](budgets.md)) |
 | `src/opendevops/audit/` | hash-chain logger, schema, verifier ([audit](audit.md)) |
+| `src/opendevops/control_plane/` | identity-aware proposal ledger and transactional rw guard |
+| `src/opendevops/observability/` | live projection, OpenTelemetry setup, content-free model audit |
 | `src/opendevops/tools/` | `run_command`, `ssh_run`, executor, scrubber, staging bridge, signing |
 | `src/opendevops/executor_service/` | the standalone remote executor service (FastAPI) |
 | `src/opendevops/gateway/` | the protocol + Local/Server implementations |

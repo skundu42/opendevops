@@ -203,8 +203,10 @@ async def test_concurrent_runs_produce_independent_verifiable_chains(
         assert {e["run_id"] for e in events} == {result.run_id}
         assert [e["event_type"] for e in events] == [
             "run_started",
+            "model_call",
             "decision",
             "execution",
+            "model_call",
             "run_completed",
         ]
 

@@ -15,10 +15,11 @@ radius when every softer layer fails?*
 | 5. Output scrubbing | token patterns + entropy scan → `***` before model/FS/audit | backstop, not the control |
 | 6. Audit | hash chains plus an independently protected WORM/SIEM sink | detection, not prevention |
 
-The invariant that anchors everything: **a total policy bypass in the default deployment is
-read-only and cannot read secrets** — because the only credential the executor holds is a
-`view`-ClusterRole ServiceAccount whose RBAC excludes Secrets, and the generated kubeconfig
-contains only explicitly-allowed contexts.
+The invariant that anchors everything: **a capability grant never creates authority**. It can only
+unlock an `rw` path already constrained by a reviewed policy rule, parsed target allowlist and
+minimally scoped credential. The default cloud credentials remain read-only and secrets-denied.
+Production Kubernetes writes require a separate `rw` identity whose namespace/resource scope is
+the final boundary even if the model, approval workflow, and policy layer all fail.
 
 ## Credentials: the real boundary
 
@@ -29,7 +30,8 @@ contains only explicitly-allowed contexts.
   - k8s ro: ServiceAccount + `view` ClusterRoleBinding; verify per cluster that
     `kubectl auth can-i get secrets --as=system:serviceaccount:opendevops:sa-agent-view` → `no`.
   - k8s rw: namespace-scoped Role enumerating exact verbs/resources (deployments, replicasets,
-    rollouts, scale, configmaps; **no** secrets/rbac/CRD writes), staging only.
+    rollouts, scale, configmaps; **no** secrets/RBAC/CRD writes), with a separate credential for
+    each enabled environment.
   - cloud ro: roles with explicit **Denies** on `secretsmanager:GetSecretValue`,
     `ssm:GetParameter*` (decrypt), `kms:Decrypt` — the policy-layer secret-read denies are the
     compensating control on top, never a substitute.
@@ -98,6 +100,9 @@ reaches execution without passing the policy engine.
 - **Interrupt-replay guards**: the per-`tool_call_id` execution cache + disabled parallel tool
   calls ensure an approval resume can never re-execute an already-executed sibling call
   ([architecture](architecture.md#interrupt-replay-safety)).
+- **Dangerous-action loop guards**: each `rw` execution transactionally consumes an expiring
+  capability grant and enforces global/per-grant totals, per-run totals, identical-action limits,
+  failure stop-loss and cooldown. Concurrent workers share the same SQLite transaction boundary.
 - **Fail-closed everywhere**: policy exceptions deny; unknown tools deny; hook timeouts deny; a
   daily-counter outage refuses new runs; unset webhook secrets return 503 (never "auth
   disabled"); unpriced models, uncovered packs, and empty context allowlists refuse to boot.
@@ -109,6 +114,17 @@ inline, in Slack as Block Kit buttons, and for non-interactive runs an **escalat
 sweeper** auto-rejects after the rule's `timeout_s` with an audited `approver="__timeout__"`
 resolution ([interfaces](interfaces.md)). Every resolution records the approver in the audit
 chain.
+
+Production browser control uses OpenID Connect authorization code flow with state, nonce and PKCE.
+The application validates ID-token signature, exact issuer, audience, expiry, issued-at and nonce.
+It maps provider claims to non-hierarchical `viewer`, `operator`, `approver` and `admin` roles.
+Sessions and login transactions are server-side; the browser has only an opaque, revocable,
+short-lived cookie and every state-changing route requires CSRF.
+
+Every control event records the stable OIDC issuer + subject. The gateways also refuse production
+approve/edit decisions when that identity matches the run requester; the grant ledger refuses
+requester self-approval before a separate administrator activation. Static-token dashboard auth is
+an explicit local-development mode, not a deployed identity system.
 
 ## Detection
 
@@ -122,7 +138,11 @@ policy-denial-spike rule — repeated denials are a bypass-probing signal, not n
 - Policy is **not** the boundary; treat every pack as bypassable when reasoning about risk.
 - The scrubber is pattern-based; an exotic secret format can slip it. The hard control is
   server-side denial of secret reads.
-- `mode=remote` is experimental (gates above). Slack approval currently allows any mapped
-  principal to approve, including the requester (dedupe is a recorded pre-go-live gate).
-- Prod is read-only by standing decision; mutations reach prod only via PRs the agent opens
-  (`gh-write` pack, staging-scoped repos allowlist).
+- `mode=remote` is experimental (gates above); production currently uses the local executor with
+  carefully scoped credentials.
+- The control ledger is SQLite. Multi-replica service mode needs a shared single-writer durable
+  volume until a Postgres backend lands.
+- AWS, GCP and Azure packs remain read-only. A deploy capability type exists in change control,
+  but no grant can override the absent/denied mutation rules or create cloud `rw` credentials.
+- Grant target strings record the reviewed change scope; executable target enforcement remains in
+  the policy pack's parsed allowlists and credential scope.

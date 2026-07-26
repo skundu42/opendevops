@@ -25,6 +25,13 @@ from rich.panel import Panel
 from opendevops import __version__
 from opendevops.audit import main as audit_verify_main
 from opendevops.config import load_config, validate_runtime_config
+from opendevops.control_plane import (
+    ActionIdentity,
+    Capability,
+    CapabilityGrantRequest,
+    ChangeControlError,
+    ChangeControlService,
+)
 from opendevops.gateway import (
     AssistantText,
     EscalationEvent,
@@ -82,6 +89,135 @@ def config_check() -> None:
         f"[green]config OK[/green]: {contexts} contexts allowed, "
         f"{profiles} budget profiles, {priced} priced models"
     )
+
+
+def _control_actor(cfg: AppConfig, actor: str | None, required_role: str) -> ActionIdentity:
+    subject = actor or _default_principal()
+    mapped = cfg.principals.get(subject)
+    roles = set(mapped.roles) if mapped is not None else set()
+    # Static auth is explicitly the local-development mode; mirror its local admin session for the
+    # OS user. OIDC deployments must map CLI identities explicitly under principals.
+    if cfg.server.dashboard_auth_mode == "static" and mapped is None:
+        roles = {"viewer", "operator", "approver", "admin"}
+    allowed = {
+        "viewer": {"viewer", "operator", "approver", "admin"},
+        "operator": {"operator", "admin"},
+        "approver": {"approver", "admin"},
+        "admin": {"admin"},
+    }[required_role]
+    if not roles & allowed:
+        raise ChangeControlError(
+            f"CLI identity {subject!r} lacks the required {required_role} role"
+        )
+    return ActionIdentity(issuer="cli-local", subject=subject)
+
+
+def _change_service() -> tuple[AppConfig, ChangeControlService]:
+    cfg = load_config()
+    return cfg, ChangeControlService(cfg.control_plane)
+
+
+@config_app.command("grants")
+def config_grants() -> None:
+    """List versioned dangerous-capability proposals and active grants."""
+    cfg, service = _change_service()
+    _control_actor(cfg, None, "viewer")
+    console.print(f"[dim]revision {service.revision()}[/dim]")
+    proposals = service.list()
+    if not proposals:
+        console.print("No capability proposals.")
+        return
+    for proposal in proposals:
+        console.print(
+            f"[bold]{proposal.proposal_id}[/bold] "
+            f"{proposal.status.value} {proposal.request.environment}/"
+            f"{proposal.request.capability.value} "
+            f"targets={','.join(proposal.request.targets)} "
+            f"used={proposal.executions_used}/{proposal.request.max_executions}"
+        )
+
+
+@config_app.command("propose-grant")
+def config_propose_grant(
+    capability: Capability = typer.Option(..., "--capability"),  # noqa: B008
+    target: list[str] = typer.Option(  # noqa: B008
+        ..., "--target", help="Repeat for each explicit target."
+    ),
+    reason: str = typer.Option(..., "--reason"),
+    environment: str = typer.Option("staging", "--environment"),
+    ttl_s: int = typer.Option(3600, "--ttl"),
+    max_executions: int = typer.Option(10, "--max-executions"),
+    actor: str | None = typer.Option(None, "--actor"),
+) -> None:
+    """Propose an expiring, bounded capability grant through the shared control ledger."""
+    try:
+        cfg, service = _change_service()
+        identity = _control_actor(cfg, actor, "operator")
+        proposal = service.propose(
+            CapabilityGrantRequest(
+                capability=capability,
+                targets=target,
+                reason=reason,
+                environment=environment,
+                ttl_s=ttl_s,
+                max_executions=max_executions,
+            ),
+            identity,
+        )
+    except Exception as exc:  # noqa: BLE001 - CLI surfaces validation/refusal without traceback
+        err_console.print(f"[red]proposal refused:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(
+        f"[green]proposal created[/green] {proposal.proposal_id} "
+        f"revision={proposal.revision} status={proposal.status.value}"
+    )
+
+
+@config_app.command("approve-grant")
+def config_approve_grant(
+    proposal_id: str,
+    actor: str | None = typer.Option(None, "--actor"),
+) -> None:
+    """Approve a pending grant; production rejects requester self-approval."""
+    try:
+        cfg, service = _change_service()
+        proposal = service.approve(
+            proposal_id, _control_actor(cfg, actor, "approver")
+        )
+    except Exception as exc:  # noqa: BLE001
+        err_console.print(f"[red]approval refused:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(f"[green]approved[/green] {proposal.proposal_id} revision={proposal.revision}")
+
+
+@config_app.command("activate-grant")
+def config_activate_grant(
+    proposal_id: str,
+    actor: str | None = typer.Option(None, "--actor"),
+) -> None:
+    """Activate an approved grant as an admin (a distinct lifecycle step)."""
+    try:
+        cfg, service = _change_service()
+        proposal = service.activate(proposal_id, _control_actor(cfg, actor, "admin"))
+    except Exception as exc:  # noqa: BLE001
+        err_console.print(f"[red]activation refused:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(f"[green]active[/green] {proposal.proposal_id} revision={proposal.revision}")
+
+
+@config_app.command("revoke-grant")
+def config_revoke_grant(
+    proposal_id: str,
+    actor: str | None = typer.Option(None, "--actor"),
+) -> None:
+    """Immediately revoke a proposed, approved, or active grant."""
+    try:
+        cfg, service = _change_service()
+        proposal = service.revoke(proposal_id, _control_actor(cfg, actor, "admin"))
+    except Exception as exc:  # noqa: BLE001
+        err_console.print(f"[red]revocation refused:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(f"[yellow]revoked[/yellow] {proposal.proposal_id} revision={proposal.revision}")
 
 
 @audit_app.command("verify")

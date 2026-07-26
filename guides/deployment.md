@@ -24,6 +24,7 @@ The stack (`docker-compose.yml`):
 | `caddy` | the only ingress — API bearer gate plus pass-through to application-authenticated dashboard routes on `:8123`; terminate TLS upstream in production |
 | `vector` | tails per-run audit chains, merges them into the durable spool |
 | `prometheus` + `grafana` | metrics, alert rules, the provisioned ops dashboard |
+| `agent-state` volume | capability-grant/control-event ledger; back it up with the audit store |
 
 ### Bring-up
 
@@ -32,8 +33,10 @@ The stack (`docker-compose.yml`):
 uv run langgraph build -t opendevops-langgraph:latest
 
 # 2. secrets — in the environment or a .env next to docker-compose.yml:
-#    GATEWAY_TOKEN, DASHBOARD_TOKEN, ANTHROPIC_API_KEY, LANGSMITH_API_KEY,
+#    GATEWAY_TOKEN, ANTHROPIC_API_KEY, LANGSMITH_API_KEY,
 #    POSTGRES_PASSWORD, GRAFANA_ADMIN_PASSWORD
+#    Local development: DASHBOARD_TOKEN
+#    Production OIDC: OIDC_CLIENT_ID, OIDC_CLIENT_SECRET
 
 # 3. switch the daily counter to the shared backend (config/budgets.yaml):
 #    daily: {backend: redis, redis_url: redis://redis:6379/0}
@@ -44,32 +47,39 @@ docker compose up -d
 curl -sf http://localhost:8123/healthz
 curl -s -H "Authorization: Bearer $GATEWAY_TOKEN" \
   http://localhost:8123/assistants/search -X POST -d '{}'
-# Then open http://localhost:8123/dashboard and sign in with DASHBOARD_TOKEN.
+# The shipped local config signs in with DASHBOARD_TOKEN.
 ```
 
-The server container publishes no host port — Caddy on `:8123` is the sole ingress. Auth upgrade
-path: front Caddy with oauth2-proxy (OIDC/SSO); see `ops/caddy/Caddyfile`.
+The server container publishes no host port — Caddy on `:8123` is the sole ingress. Keep the
+gateway bearer on the machine-to-machine LangGraph API; the dashboard has its own OIDC session
+boundary.
 
 The three `/webhooks/*` application routes bypass Caddy's gateway bearer because external senders
 cannot supply it; the app still requires its configured HMAC or route-specific bearer credential.
-The `/dashboard*` routes also bypass the API bearer at Caddy because the application performs its
-own token-to-signed-session exchange. All remaining server API and metrics routes stay
+The `/dashboard*` routes also bypass the API bearer at Caddy because the application validates
+OIDC and manages opaque server-side sessions. All remaining server API and metrics routes stay
 gateway-token protected.
 
 ### Operator dashboard
 
-`/dashboard` provides a read-only, audit-derived view of runs, spend, policy decisions, the event
-timeline and integration posture. `DASHBOARD_TOKEN` is required by Compose; the application
-returns 503 rather than silently disabling authentication if its configured environment variable
-is absent.
+`/dashboard` merges verified audit chains with live run/queue/worker/approval telemetry and exposes
+RBAC-controlled cancellation, approval resolution, capability-grant configuration and session
+revocation. The run-detail API contains correlation, timing, policy and cost metadata but never
+prompts, responses, command arguments, output, or credential values. Updates use SSE.
 
-The shipped configuration supports local HTTP and therefore uses
-`server.dashboard_cookie_secure: false`. For every TLS deployment, set it to `true`. The cookie is
-otherwise `HttpOnly`, `SameSite=Strict`, signed and time-limited. For shared or internet-reachable
-installations, put Caddy behind OIDC/SSO (for example oauth2-proxy), restrict the network path, and
-rotate both the dashboard and gateway tokens. The application dashboard complements Grafana:
-Grafana answers fleet/alerting questions from metrics; `/dashboard` answers run-level,
-audit-integrity and policy questions.
+The shipped configuration uses `static` authentication and
+`server.dashboard_cookie_secure: false` for a localhost smoke test only. A deployed configuration
+must use `dashboard_auth_mode: oidc`, exact issuer and redirect URI, explicit role mappings,
+`dashboard_session_backend: redis`, `dashboard_session_redis_url: redis://redis:6379/2`, a short
+session lifetime, and `dashboard_cookie_secure: true` behind HTTPS. Set `OIDC_CLIENT_ID` and
+`OIDC_CLIENT_SECRET` in the server environment. State, nonce and PKCE transactions are one-time and
+server-side; ID tokens are signature/issuer/audience/time/nonce validated. Browser cookies are
+opaque `HttpOnly`, `SameSite=Strict` handles, and administrators can immediately revoke every
+session for an issuer/subject.
+
+Map provider groups to separate `operator` and `approver` roles. Production rejects an approval or
+edited approval from the same issuer/subject that requested the run or grant. `admin` can perform
+both duties and should be a tightly controlled break-glass role.
 
 ### Two URLs, one server
 
@@ -125,9 +135,11 @@ rules (`ops/prometheus/alerts.yml`) cover policy-denial spikes (bypass probing),
 components that ship later and simply don't fire until then (see the header comment in
 `alerts.yml`).
 
-The authenticated application dashboard at `:8123/dashboard` is the run-level companion. It reads
-the bounded local audit window, exposes no command output or credential values, and requires
-`DASHBOARD_TOKEN` as described above.
+The authenticated application dashboard at `:8123/dashboard` is the run-level companion. It
+publishes the defined run-success, queue-latency, policy-latency, executor-error, audit-lag and
+budget-utilization SLIs. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to export OTLP/HTTP traces and metrics
+for gateway, webhook, scheduler, model, policy and executor operations; run, thread, tool-call,
+model-call and application trace identifiers are attached where available.
 
 ## Executor service (remote mode)
 
@@ -170,6 +182,9 @@ code:
   scoped kubeconfig(s);
 - run the RBAC apply + secrets-denied verification against **every** configured cluster;
 - scoped-role IAM docs before enabling any cloud credentials; e2e sshd tier before live `ssh_run`;
-- Slack approver dedupe before Slack go-live; write-PAT repo scoping before `gh-write`;
+- keep requester, approver and administrator OIDC groups operationally separate; scope the
+  `gh-write` PAT before enabling it;
+- back up and monitor the `agent-state` volume; a multi-replica deployment currently requires a
+  shared single-writer volume for the SQLite control ledger;
 - choose the audit durable sink + retention with the compliance owner;
 - the blast-radius rule: stack placement off any managed cluster.

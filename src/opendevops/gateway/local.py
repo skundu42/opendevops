@@ -67,6 +67,7 @@ from opendevops.gateway.base import (
     RunEnd,
     RunEvent,
     RunResult,
+    enforce_approval_separation,
 )
 from opendevops.gateway.translate import (
     extract_interrupt,
@@ -209,6 +210,14 @@ class LocalGateway:
         approver: str,
     ) -> RunResult:
         """Resume a suspended (escalated) run on ``thread_id`` with the approver's decisions."""
+        susp = self._require_suspended(thread_id)
+        enforce_approval_separation(
+            requester=susp.ctx.principal,
+            approver=approver,
+            environment=susp.ctx.environment,
+            decisions=decisions,
+            required=self._cfg.control_plane.production_requires_independent_approval,
+        )
         susp = self._pop_suspended(thread_id)
         await self._ensure_checkpointer()
         return await self._drive(
@@ -294,6 +303,14 @@ class LocalGateway:
         re-registered record; a second approver "deciding" an action that already happened).
         Fail-closed beats clever: close the chain and record the truth.
         """
+        susp = self._require_suspended(thread_id)
+        enforce_approval_separation(
+            requester=susp.ctx.principal,
+            approver=approver,
+            environment=susp.ctx.environment,
+            decisions=decisions,
+            required=self._cfg.control_plane.production_requires_independent_approval,
+        )
         susp = self._pop_suspended(thread_id)
         await self._ensure_checkpointer()
         completed = False
@@ -559,6 +576,37 @@ class LocalGateway:
             raise GatewayError(f"no suspended run to resume for thread {thread_id!r}")
         return susp
 
+    def _require_suspended(self, thread_id: str) -> _Suspended:
+        susp = self._suspended.get(thread_id)
+        if susp is None:
+            raise GatewayError(f"no suspended run to resume for thread {thread_id!r}")
+        return susp
+
+    async def live_snapshot(self) -> dict[str, Any]:
+        """Return secret-free in-process run and approval state for the dashboard."""
+        active = [
+            {"thread_id": thread_id, "status": "running"}
+            for thread_id, task in self._tasks.items()
+            if not task.done()
+        ]
+        approvals = [
+            {
+                "thread_id": thread_id,
+                "run_id": suspended.run_id,
+                "status": "awaiting_approval",
+                "requester": suspended.ctx.principal,
+                "environment": suspended.ctx.environment,
+            }
+            for thread_id, suspended in self._suspended.items()
+        ]
+        return {
+            "active_runs": active,
+            "pending_approvals": approvals,
+            "queue_depth": 0,
+            "workers": 1,
+            "source": "local_gateway",
+        }
+
     @staticmethod
     def _resume_command(decisions: list[dict[str, Any]], approver: str) -> Command[Any]:
         """A ``Command(resume=...)`` with the approver injected into each decision (audit trail)."""
@@ -574,6 +622,7 @@ class LocalGateway:
             environment=environment,
             budget_profile=profile,
             run_id=run_id,
+            trace_id=uuid.uuid4().hex,
         )
 
     # -- accounting + finalization --------------------------------------------------------
@@ -878,6 +927,7 @@ class LocalGateway:
         return {
             "principal": {"interface": ctx.interface, "user": ctx.principal},
             "environment": ctx.environment,
+            "trace_id": ctx.trace_id,
             "model": self._model_key,
             "policy_version": self._policy_version,
             "agent_git_sha": self._git_sha,

@@ -128,7 +128,7 @@ async def test_deny_flow_blocks_bash_decision_only(built_agent: Any, cfg: Any) -
 
     # A decision event fired, but NO execution event (the tool never ran).
     types = event_types(cfg.audit.dir, ctx.run_id)
-    assert types == ["run_started", "decision"]
+    assert types == ["run_started", "model_call", "decision", "model_call"]
     decision = next(
         e for e in read_events(cfg.audit.dir, ctx.run_id) if e["event_type"] == "decision"
     )

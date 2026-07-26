@@ -31,6 +31,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import logging
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal, cast
 
@@ -41,6 +42,8 @@ from langgraph.types import Command, interrupt
 
 from opendevops.audit.logger import AuditLogger
 from opendevops.audit.schema import EventType, canonical_dumps
+from opendevops.control_plane import ChangeControlError, ChangeControlService
+from opendevops.observability.otel import observe_operation, span
 from opendevops.policy.engine import RUN_COMMAND, PolicyEngine
 from opendevops.policy.loader import LoadedPolicy
 from opendevops.policy.parsing import ParseError, parse_argv
@@ -91,6 +94,7 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
         model: str,
         *,
         policy_version: str | None = None,
+        change_control: ChangeControlService | None = None,
     ) -> None:
         super().__init__()
         self._engine = engine
@@ -98,6 +102,7 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
         self._loaded = loaded
         self._model = model
         self._policy_version = policy_version or loaded.policy_version
+        self._change_control = change_control
 
     # -- entrypoint -------------------------------------------------------------------------
 
@@ -161,11 +166,79 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
             files=_read_files(request.state) if is_run_command else None,
             dry_run_ok=_read_dry_run_ok(request.state) if is_run_command else None,
         )
-        decision = await self._engine.decide(ctx)
+        trace_id = str(
+            _ctx_attr(getattr(request.runtime, "context", None), "trace_id") or ""
+        )
+        policy_attributes = {
+            "run.id": run_id,
+            "tool.call.id": tool_call_id,
+            "opendevops.trace_id": trace_id,
+            "opendevops.tool": tool_name,
+            "opendevops.environment": env,
+        }
+        policy_started = time.perf_counter()
+        try:
+            with span("opendevops.policy.decide", policy_attributes):
+                decision = await self._engine.decide(ctx)
+        except Exception:
+            observe_operation(
+                "policy",
+                (time.perf_counter() - policy_started) * 1000,
+                "error",
+                {"opendevops.environment": env},
+            )
+            raise
+        policy_duration_ms = max(
+            0, int((time.perf_counter() - policy_started) * 1000)
+        )
+        observe_operation(
+            "policy",
+            policy_duration_ms,
+            decision.effect,
+            {"opendevops.environment": env},
+        )
+
+        # Production rw actions are available only inside an active, expiring capability grant.
+        # A plain allow is upgraded to an interrupt so a different approver must authorize it.
+        # Server-side dry-runs still consume the grant but do not need a human decision.
+        rule = self._loaded.rules_by_id.get(decision.rule_id)
+        rule_channel = rule.channel if rule is not None else decision.channel
+        if (
+            env == "prod"
+            and rule_channel == "rw"
+            and decision.effect in {"allow", "rewrite", "escalate"}
+            and self._change_control is not None
+        ):
+            family = self._loaded.tool_family_by_rule.get(decision.rule_id)
+            try:
+                self._change_control.require_active_grant(
+                    environment=env, tool_family=family
+                )
+            except ChangeControlError as exc:
+                decision = Decision.deny("__capability_grant__", str(exc))
+            else:
+                effective_argv = decision.rewritten_argv or args.get("argv")
+                is_server_dry_run = (
+                    isinstance(effective_argv, list)
+                    and "--dry-run=server" in effective_argv
+                )
+                if decision.effect in {"allow", "rewrite"} and not is_server_dry_run:
+                    decision = Decision.escalate(
+                        decision.rule_id,
+                        "production rw action requires independent human approval",
+                    )
 
         # 4. Audit the decision (every effect, including deny/escalate — a complete record).
         self._audit_decision(
-            run_id, principal, interface, env, tool_name, tool_call_id, args, decision
+            run_id,
+            principal,
+            interface,
+            env,
+            tool_name,
+            tool_call_id,
+            args,
+            decision,
+            policy_duration_ms,
         )
 
         # 5. Act on the effect.
@@ -217,6 +290,7 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
 
         channel: Literal["ro", "rw"] | None = None
         token = None
+        exec_decision: ExecDecision | None = None
         if is_decision_gated:
             channel = decision.channel if decision.channel is not None else "ro"
             exec_decision = ExecDecision(
@@ -224,13 +298,77 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
                 channel=channel,
                 tool_family=self._loaded.tool_family_by_rule.get(decision.rule_id),
                 argv=tuple(exec_argv) if isinstance(exec_argv, list) else (),
+                environment=env,
             )
+
+        fingerprint = hashlib.sha256(
+            canonical_dumps(
+                {
+                    "tool": tool_name,
+                    "family": self._loaded.tool_family_by_rule.get(decision.rule_id),
+                    "argv": exec_argv,
+                }
+            ).encode()
+        ).hexdigest()
+        if channel == "rw" and self._change_control is not None:
+            try:
+                self._change_control.authorize_rw(
+                    run_id=run_id,
+                    environment=env,
+                    principal=principal,
+                    tool_family=self._loaded.tool_family_by_rule.get(decision.rule_id),
+                    fingerprint=fingerprint,
+                )
+            except ChangeControlError as exc:
+                self._audit.append(
+                    run_id,
+                    EventType.policy_error,
+                    tool_call_id=tool_call_id or None,
+                    principal={"interface": interface, "user": principal},
+                    environment=env,
+                    model=self._model,
+                    policy_version=self._policy_version,
+                    tool=tool_name,
+                    summary={"kind": "dangerous_action_guard", "reason": str(exc)},
+                )
+                return ToolMessage(
+                    content=f"Denied by change control: {exc}.",
+                    tool_call_id=tool_call_id,
+                    name=tool_name,
+                    status="error",
+                )
+        if exec_decision is not None:
             token = current_decision.set(exec_decision)
+        execution_started = time.perf_counter()
+        execution_status = "error"
         try:
-            result = await handler(exec_request)
+            with span(
+                "opendevops.executor.tool",
+                {
+                    "run.id": run_id,
+                    "tool.call.id": tool_call_id,
+                    "opendevops.trace_id": str(
+                        _ctx_attr(getattr(request.runtime, "context", None), "trace_id")
+                        or ""
+                    ),
+                    "opendevops.tool": tool_name,
+                    "opendevops.channel": channel or "none",
+                },
+            ):
+                result = await handler(exec_request)
+                execution_status = "ok"
         finally:
             if token is not None:
                 current_decision.reset(token)
+            observe_operation(
+                "executor",
+                (time.perf_counter() - execution_started) * 1000,
+                execution_status,
+                {
+                    "opendevops.tool": tool_name,
+                    "opendevops.channel": channel or "none",
+                },
+            )
 
         # 6. Execution audit — ONLY when the tool actually ran. run_command tags its ToolMessage
         #    with EXEC_META_KEY; built-in FS tools and any refusal do not, so they get a decision
@@ -239,6 +377,17 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
         #    command that actually ran is recoverable from the chain on every path — including an
         #    approved escalation or an edited argv, where the execution differs from the request.
         meta = _pop_exec_meta(result)
+        if channel == "rw" and self._change_control is not None:
+            try:
+                self._change_control.record_rw_result(
+                    run_id=run_id,
+                    fingerprint=fingerprint,
+                    succeeded=meta is not None and int(meta.get("exit_code") or 0) == 0,
+                )
+            except Exception:  # noqa: BLE001 - post-exec telemetry must not invite a retry
+                logger.exception(
+                    "failed to record dangerous-action result for run %s", run_id
+                )
         if meta is not None:
             self._audit_execution(
                 run_id, principal, interface, env, tool_name, tool_call_id, meta, result,
@@ -454,6 +603,7 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
         tool_call_id: str,
         args: dict[str, Any],
         decision: Decision,
+        duration_ms: int,
     ) -> None:
         self._audit.append(
             run_id,
@@ -474,6 +624,7 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
                 "channel": decision.channel or "none",
                 "rewritten_argv": decision.rewritten_argv,
             },
+            summary={"duration_ms": duration_ms},
         )
 
     def _audit_execution(

@@ -1,11 +1,12 @@
-# kubectl-mutate.yaml — the staging-only mutation pack (apply / rollout / scale).
+# kubectl-mutate.yaml — controlled Kubernetes mutations (apply / rollout / scale).
 #
 # tool_family binds this pack's allow rules to the "kubectl" credential family (the rw
 # kubeconfig — cfg.targets.kubernetes.kubeconfig_rw). At boot the loader's
 # check_credential_coverage() refuses to start if no kubectl credential is configured.
 #
-# SCOPE: every allow here is `environments: [staging]` and `channel: rw`. Production gets NO
-# mutate allows — a prod apply/rollout/scale therefore falls through to __default_deny__.
+# SCOPE: staging uses the normal rw rules. Production reaches the same structurally constrained
+# rules only when the runtime control plane has an active kubernetes_deploy grant; middleware then
+# upgrades every non-dry-run rw allow to an independent human approval interrupt.
 #
 # flags_allowed is THIS pack's own complete kubectl allowlist. The engine enforces the
 # *winning rule's* pack list (no cross-pack merge), so this list must stand alone — it is not
@@ -54,7 +55,7 @@ rules:
       verb: {eq: apply}
       flags_absent: ["--dry-run"]
     effect: rewrite
-    environments: [staging]
+    environments: [staging, prod]
     rewrite:
       inject_flags: ["--dry-run=server"]
     reason: "apply must be dry-run-first; injecting --dry-run=server"
@@ -68,7 +69,7 @@ rules:
       argv0: kubectl
       verb: {eq: apply}
     effect: hook
-    environments: [staging]
+    environments: [staging, prod]
     hook: dry_run_before_apply
     reason: "a real apply requires a prior successful server-side dry-run of the same manifest"
 
@@ -80,7 +81,7 @@ rules:
       verb: {eq: apply}
     effect: allow
     channel: rw
-    environments: [staging]
+    environments: [staging, prod]
     reason: "kubectl apply is permitted in staging (read-write)"
 
   # rollout status / history / undo / restart — all acceptable at staging-rw.
@@ -90,7 +91,7 @@ rules:
       verb: {eq: rollout}
     effect: allow
     channel: rw
-    environments: [staging]
+    environments: [staging, prod]
     reason: "kubectl rollout (status/history/undo/restart) is permitted in staging (read-write)"
 
   # Scale a workload. Staging-rw only.
@@ -100,7 +101,7 @@ rules:
       verb: {eq: scale}
     effect: allow
     channel: rw
-    environments: [staging]
+    environments: [staging, prod]
     reason: "kubectl scale is permitted in staging (read-write)"
 
   # Destructive delete of a workload → HUMAN APPROVAL (escalate via interrupt()). delete has
@@ -115,7 +116,7 @@ rules:
       resource_any: [pod, pods, pvc, persistentvolumeclaim, deployment, deployments]
     effect: escalate
     channel: rw
-    environments: [staging]
+    environments: [staging, prod]
     escalation: {timeout_s: 1800, on_timeout: deny}
     reason: "destructive delete requires human approval"
 

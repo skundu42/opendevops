@@ -228,6 +228,34 @@ def test_dedupe_same_key_appended_twice_is_one_line(tmp_path: Path) -> None:
     assert len(lines) == 2  # seed + one decision
 
 
+def test_decision_latency_does_not_break_resume_dedupe(tmp_path: Path) -> None:
+    logger = AuditLogger(tmp_path)
+    _start(logger, "run-A")
+    decision = {
+        "effect": "escalate",
+        "rule_id": "R1",
+        "reason": "approval required",
+        "channel": "rw",
+        "rewritten_argv": None,
+    }
+    first = logger.append(
+        "run-A",
+        EventType.decision,
+        tool_call_id="call_1",
+        decision=decision,
+        summary={"duration_ms": 4},
+    )
+    replay = logger.append(
+        "run-A",
+        EventType.decision,
+        tool_call_id="call_1",
+        decision=decision,
+        summary={"duration_ms": 7},
+    )
+    assert first is not None
+    assert replay is None
+
+
 def test_dedupe_different_event_type_same_call_keeps_both(tmp_path: Path) -> None:
     logger = AuditLogger(tmp_path)
     _start(logger, "run-A")

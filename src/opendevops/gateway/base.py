@@ -133,6 +133,28 @@ class GatewayConfigError(GatewayError):
     """The gateway could not be constructed from config (invalid config or an unusable target)."""
 
 
+class ApprovalSeparationError(GatewayError):
+    """A production requester attempted to authorize their own mutation."""
+
+
+def enforce_approval_separation(
+    *,
+    requester: str,
+    approver: str,
+    environment: str,
+    decisions: list[dict[str, Any]],
+    required: bool,
+) -> None:
+    """Reject self-approval/edit for production while still allowing self-rejection."""
+    authorizes = any(
+        str(item.get("type") or "").lower() in {"approve", "edit"} for item in decisions
+    )
+    if required and environment == "prod" and authorizes and requester == approver:
+        raise ApprovalSeparationError(
+            "production changes require an approver different from the requester"
+        )
+
+
 class GatewayRunError(GatewayError):
     """An unexpected (non-budget, non-timeout) failure escaped a run; wraps the original.
 
