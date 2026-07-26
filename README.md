@@ -223,16 +223,6 @@ quota planning, and go-live gates.
 | [Development](guides/development.md) | tests, conventions and extension points |
 | [Upgrade notes](docs/UPGRADE.md) | dependency and migration guidance |
 
-## Project status
-
-opendevops is **beta software**. The core safety paths are covered by a deterministic suite of more
-than 2,300 tests with no live-model cost, but production readiness still depends on your
-credentials, policy extensions, audit sink, network boundary, TLS termination, and failure drills.
-
-The remote executor split is experimental and must not be used for production until every gate in
-[`ops/executor/README.md`](ops/executor/README.md) is closed. The default local executor is the
-reviewed path.
-
 ## Development
 
 ```sh
