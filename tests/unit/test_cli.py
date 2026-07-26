@@ -49,6 +49,19 @@ def test_help_lists_chat_and_audit() -> None:
     assert "audit" in result.output
 
 
+def test_config_check_rejects_empty_context_allowlist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _valid_cfg(tmp_path, allowed_contexts=[])
+    monkeypatch.setattr(cli, "load_config", lambda: cfg)
+
+    result = runner.invoke(cli.app, ["config", "check"])
+
+    assert result.exit_code == 1
+    assert "config INVALID" in result.output
+    assert "allowed_contexts is empty" in result.output
+
+
 # -- audit verify --------------------------------------------------------------------------
 
 
@@ -93,6 +106,23 @@ def test_audit_verify_fails_on_tampered_chain(tmp_path: Path) -> None:
     result = runner.invoke(cli.app, ["audit", "verify", "--dir", str(audit_dir)])
     assert result.exit_code == 1
     assert "FAIL" in result.output
+
+
+def test_audit_verify_is_strict_about_missing_completion_tail(tmp_path: Path) -> None:
+    audit_dir = tmp_path / "audit"
+    _write_good_chain(audit_dir, run_id="run-truncated")
+    chain = audit_dir / "run-truncated.jsonl"
+    chain.write_text("\n".join(chain.read_text().splitlines()[:-1]) + "\n")
+
+    strict = runner.invoke(cli.app, ["audit", "verify", "--dir", str(audit_dir)])
+    diagnostic = runner.invoke(
+        cli.app,
+        ["audit", "verify", "--dir", str(audit_dir), "--allow-incomplete"],
+    )
+
+    assert strict.exit_code == 1
+    assert "run_completed" in strict.output
+    assert diagnostic.exit_code == 0
 
 
 # -- chat REPL smoke -----------------------------------------------------------------------

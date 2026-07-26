@@ -24,7 +24,7 @@ from rich.panel import Panel
 
 from opendevops import __version__
 from opendevops.audit import main as audit_verify_main
-from opendevops.config import load_config
+from opendevops.config import load_config, validate_runtime_config
 from opendevops.gateway import (
     AssistantText,
     EscalationEvent,
@@ -70,6 +70,7 @@ def config_check() -> None:
     """Load and validate config; print a one-line OK with counts, or the validation error."""
     try:
         cfg = load_config()
+        validate_runtime_config(cfg)
     except Exception as exc:  # noqa: BLE001 - surface any load/validation failure to the user
         err_console.print(f"[red]config INVALID:[/red] {exc}")
         raise typer.Exit(code=1) from exc
@@ -88,9 +89,14 @@ def audit_verify(
     dir: Path = typer.Option(  # noqa: B008 - typer.Option belongs in the signature default
         Path("./audit"), "--dir", help="Directory of per-run <run_id>.jsonl chain files."
     ),
+    allow_incomplete: bool = typer.Option(
+        False,
+        "--allow-incomplete",
+        help="Accept structurally valid runs without a terminal run_completed event.",
+    ),
 ) -> None:
-    """Verify every audit chain under --dir; print per-run OK/FAIL, exit 1 on any bad chain."""
-    code = audit_verify_main(dir)
+    """Strictly verify every audit chain under --dir; exit 1 on corruption or truncation."""
+    code = audit_verify_main(dir, allow_incomplete=allow_incomplete)
     raise typer.Exit(code=code)
 
 

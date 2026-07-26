@@ -356,13 +356,19 @@ _EXPECTED_BASE_KEYS = {
 _SANDBOX_HOME = "/tmp/opendevops-sandbox-home"
 
 
-def test_build_env_base_keys_only(make_cfg: Callable[..., AppConfig]) -> None:
-    env = build_env(make_cfg(), None, None, _SANDBOX_HOME)
+def test_build_env_base_keys_only(
+    make_cfg: Callable[..., AppConfig], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", "/tmp/operator-controlled-bin")
+    cfg = make_cfg()
+    env = build_env(cfg, None, None, _SANDBOX_HOME)
     # KUBECONFIG is now always set (to the /dev/null sentinel when no kubectl cred applies).
     assert set(env) == _EXPECTED_BASE_KEYS | {"KUBECONFIG"}
     # HOME is the sandbox dir, never the operator's $HOME.
     assert env["HOME"] == _SANDBOX_HOME
     assert env["HOME"] != os.environ.get("HOME")
+    assert env["PATH"] == cfg.execution.trusted_path
+    assert env["PATH"] != os.environ["PATH"]
     assert env["KUBECONFIG"] == "/dev/null"
     assert env["NO_COLOR"] == "1"
     assert env["PAGER"] == "cat"
@@ -429,13 +435,9 @@ async def test_executor_env_is_never_inherited(
     cfg = make_cfg(kubeconfig_ro="/tmp/fake-ro.yaml")
     ex = LocalExecutor()
     env = build_env(cfg, "kubectl", "ro", ex.home)
-    res = await ex.execute(
-        ["python3", "-c", "import os,json;print(json.dumps(dict(os.environ)))"],
-        10,
-        env,
-    )
+    res = await ex.execute(["env"], 10, env)
     assert res.exit_code == 0
-    child_env = json.loads(res.output)
+    child_env = dict(line.split("=", 1) for line in res.output.splitlines() if "=" in line)
     # every constructed key is present with the constructed value
     assert set(child_env) >= _EXPECTED_BASE_KEYS
     assert child_env["KUBECONFIG"] == "/tmp/fake-ro.yaml"

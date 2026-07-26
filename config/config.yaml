@@ -34,7 +34,11 @@ targets:
     key_passphrase_env: null                   # optional NAME of the env var holding the key passphrase (null => passphrase-less key)
     known_hosts_path: null                     # pinned known_hosts file (host-key verification is ON; null => ssh_run refuses, never disables checking)
     port: 22
-execution: {cmd_timeout_seconds: 60, output_max_chars: 50000, env_allowlist: [PATH, HOME]}
+execution:
+  cmd_timeout_seconds: 60
+  output_max_chars: 50000
+  env_allowlist: [PATH, HOME]                 # exactly these constructed keys; never parent-env passthrough
+  trusted_path: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 executor:                                    # Executor split. Default local = the in-process executor (holds creds+secrets); remote splits execution into a separate service.
   mode: local                                # local | remote. remote is EXPERIMENTAL — not production-deployable until the ops/executor/README.md "Pre-deployment gates" close (token must bind environment + service (env,channel) self-check + per-(env,channel) client routing). ssh_run always stays agent-side (holds the SSH key) even on remote.
   url: null                                  # remote: executor service base URL, e.g. http://executor:8090 (required when mode=remote)

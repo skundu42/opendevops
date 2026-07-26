@@ -1,4 +1,4 @@
-"""Tamper-evident audit trail: per-run hash-chained JSONL events.
+"""Structurally verifiable audit trail: per-run hash-chained JSONL events.
 
 Public surface:
 - :class:`AuditEvent` (+ nested :class:`Principal`, :class:`Decision`, :class:`Execution`,

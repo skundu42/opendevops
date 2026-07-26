@@ -85,7 +85,7 @@ def test_server_graph_builds_with_no_checkpointer_and_run_lifecycle(
             "execution": {
                 "cmd_timeout_seconds": 60,
                 "output_max_chars": 50000,
-                "env_allowlist": ["PATH"],
+                "env_allowlist": ["PATH", "HOME"],
             },
             "audit": {"dir": str(tmp_path / "audit")},
             "policy": {"dir": str(REPO_ROOT / "config" / "policy")},

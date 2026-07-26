@@ -12,6 +12,7 @@ Two tiers, per the task brief:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -54,6 +55,12 @@ def test_docker_compose_config_validates() -> None:
         text=True,
         timeout=120,
         check=False,
+        env={
+            **os.environ,
+            "POSTGRES_PASSWORD": "test-only-postgres-password",
+            "GATEWAY_TOKEN": "test-only-gateway-token",
+            "GRAFANA_ADMIN_PASSWORD": "test-only-grafana-password",
+        },
     )
     assert result.returncode == 0, f"`docker compose config` failed:\n{result.stderr}"
 
@@ -101,6 +108,20 @@ def test_caddyfile_gates_on_bearer_token() -> None:
     text = (OPS / "caddy" / "Caddyfile").read_text()
     assert "Bearer {$GATEWAY_TOKEN}" in text
     assert "reverse_proxy langgraph-server:8000" in text
+    assert "/webhooks/alertmanager" in text
+    assert "/webhooks/github" in text
+    assert "/webhooks/run-complete" in text
+    assert text.index("@native_webhooks") < text.index("@authorized")
+
+
+def test_compose_has_no_known_default_service_credentials() -> None:
+    text = COMPOSE.read_text()
+    assert "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}" in text
+    assert "${GATEWAY_TOKEN:?set GATEWAY_TOKEN}" in text
+    assert "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}" in text
+    assert "change-me-before-deploy" not in text
+    assert "POSTGRES_PASSWORD:-postgres" not in text
+    assert "GRAFANA_ADMIN_PASSWORD:-admin" not in text
 
 
 # --------------------------------------------------------------------------------------

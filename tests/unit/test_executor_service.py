@@ -385,7 +385,7 @@ async def test_secret_resolved_into_env_not_argv(tmp_path: Any) -> None:
         executor=spy,
         now=lambda: 1000.0,
     )
-    argv = ["myapp", "--auth", "{{secret:MYSECRET}}"]
+    argv = ["myapp", "--mode", "sync", "{{secret:MYSECRET}}"]
     token = _sign(priv, argv)
     async with _client(app) as client:
         resp = await client.post("http://svc/execute", json=_body(argv, token))
@@ -393,7 +393,7 @@ async def test_secret_resolved_into_env_not_argv(tmp_path: Any) -> None:
     call = spy.calls[0]
     assert call["env"]["MYSECRET"] == "topsecretvalue"
     assert "topsecretvalue" not in " ".join(call["argv"])
-    assert "$MYSECRET" in call["argv"]
+    assert call["argv"] == ["myapp", "--mode", "sync"]
 
 
 async def test_full_scrub_redacts_secret_value_from_output(tmp_path: Any) -> None:

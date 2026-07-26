@@ -53,7 +53,7 @@ def _make_cfg(**server_overrides: Any) -> AppConfig:
             "execution": {
                 "cmd_timeout_seconds": 60,
                 "output_max_chars": 50000,
-                "env_allowlist": ["PATH"],
+                "env_allowlist": ["PATH", "HOME"],
             },
             "audit": {"dir": "/tmp/audit"},
             "policy": {"dir": "/tmp/policy"},

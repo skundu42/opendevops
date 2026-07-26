@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from graph.helpers import MODELS, budgets
-from opendevops.config import AppConfig, ModelsConfig, load_config
+from opendevops.config import AppConfig, ModelsConfig, load_config, validate_runtime_config
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -22,6 +22,9 @@ def test_load_shipped_config() -> None:
     assert cfg.targets.kubernetes.allowed_contexts == []
     assert cfg.execution.cmd_timeout_seconds == 60
     assert cfg.execution.env_allowlist == ["PATH", "HOME"]
+    assert cfg.execution.trusted_path == (
+        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    )
     assert cfg.principals == {}
     assert cfg.models.agents == {
         "main": "opus",
@@ -29,6 +32,43 @@ def test_load_shipped_config() -> None:
         "log_summarizer": "haiku",
     }
     assert cfg.budgets.trip_ratio == 0.9
+
+
+def test_runtime_validation_rejects_empty_context_allowlist() -> None:
+    cfg = load_config(REPO_ROOT)
+    with pytest.raises(ValueError, match="allowed_contexts is empty"):
+        validate_runtime_config(cfg)
+
+
+def test_execution_env_allowlist_rejects_missing_or_unknown_base_keys() -> None:
+    from opendevops.config import Execution
+
+    common = {"cmd_timeout_seconds": 60, "output_max_chars": 100}
+    with pytest.raises(ValidationError, match="exactly PATH and HOME"):
+        Execution.model_validate({**common, "env_allowlist": ["PATH"]})
+    with pytest.raises(ValidationError):
+        Execution.model_validate({**common, "env_allowlist": ["PATH", "HOME", "LD_PRELOAD"]})
+
+
+@pytest.mark.parametrize(
+    ("path", "match"),
+    [
+        ("./bin:/usr/bin", "absolute directories"),
+        ("/usr/bin::/bin", "absolute directories"),
+    ],
+)
+def test_trusted_path_rejects_unsafe_entries(path: str, match: str) -> None:
+    from opendevops.config import Execution
+
+    with pytest.raises(ValidationError, match=match):
+        Execution.model_validate(
+            {
+                "cmd_timeout_seconds": 60,
+                "output_max_chars": 100,
+                "env_allowlist": ["PATH", "HOME"],
+                "trusted_path": path,
+            }
+        )
 
 
 def test_tilde_expansion() -> None:
@@ -67,7 +107,7 @@ def test_server_section_defaults_absent() -> None:
             "execution": {
                 "cmd_timeout_seconds": 60,
                 "output_max_chars": 50000,
-                "env_allowlist": ["PATH"],
+                "env_allowlist": ["PATH", "HOME"],
             },
             "audit": {"dir": "./audit"},
             "policy": {"dir": "./config/policy"},
@@ -120,6 +160,31 @@ def test_unknown_profile_raises() -> None:
     cfg = load_config(REPO_ROOT)
     with pytest.raises(KeyError):
         cfg.budgets.profile("does-not-exist")
+
+
+@pytest.mark.parametrize(
+    ("field_path", "value"),
+    [
+        (("trip_ratio",), 0),
+        (("trip_ratio",), 1.01),
+        (("per_run", "default", "usd"), 0),
+        (("per_run", "default", "model_calls"), -1),
+        (("daily", "global_usd"), 0),
+        (("daily", "per_principal_usd"), -1),
+    ],
+)
+def test_budget_limits_must_be_positive_and_trip_ratio_bounded(
+    field_path: tuple[str, ...], value: float
+) -> None:
+    from opendevops.config import BudgetsConfig
+
+    raw = budgets()
+    target: dict[str, object] = raw
+    for part in field_path[:-1]:
+        target = target[part]  # type: ignore[assignment,index]
+    target[field_path[-1]] = value
+    with pytest.raises(ValidationError):
+        BudgetsConfig.model_validate(raw)
 
 
 def test_extra_forbid_rejects_unknown_config_key(

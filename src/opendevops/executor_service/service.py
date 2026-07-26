@@ -186,7 +186,7 @@ def create_app(
                 status_code=409, detail="decision token already spent (replay rejected)"
             )
 
-        # 2. Resolve {{secret:NAME}} into env vars, rewriting the tokens to $NAME (verified only).
+        # 2. Resolve standalone {{secret:NAME}} declarations into env vars and remove the markers.
         try:
             resolved = resolve_secrets(req.argv, source)
         except SecretResolutionError as exc:

@@ -303,11 +303,12 @@ class AuditLogger:
         return event
 
     def _append_line(self, run_id: str, event: AuditEvent) -> None:
-        """Serialize one event and append it via a single ``os.write`` on an ``O_APPEND`` fd."""
+        """Serialize, append, and fsync one event before advancing the in-memory chain tip."""
         payload = event.model_dump(mode="json", exclude_none=True)
         line = json.dumps(payload, separators=(",", ":"), default=str) + "\n"
         fd = os.open(self._path(run_id), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         try:
             os.write(fd, line.encode("utf-8"))
+            os.fsync(fd)
         finally:
             os.close(fd)

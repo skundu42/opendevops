@@ -1,14 +1,14 @@
 # The audit trail
 
-Every run produces a **tamper-evident, hash-chained JSONL file** written by the policy/budget
-middleware itself — not by anything the model can influence. The trail answers, verifiably:
+Every run produces a **hash-chained JSONL file** written by the policy/budget middleware itself —
+not by anything the model can influence. The trail records:
 *what did the agent decide, what did it execute, who approved what, and what did it cost?*
 
 ## Chain design
 
-- One file per run: `audit/<run_id>.jsonl`, appended with single-line `O_APPEND` writes.
+- One file per run: `audit/<run_id>.jsonl`, appended with single-line `O_APPEND` writes and fsynced.
 - Each event carries `prev_hash` and `hash = sha256(prev_hash || canonical_json(event))`, seeded
-  from a signed `run_started` header event.
+  from the fixed genesis value in a `run_started` event. The seed is not signed.
 - **Chains are per-run, deliberately**: the server executes runs concurrently across workers, and
   `prev_hash` is a read-modify-write — parallel appends to one shared file would race and
   permanently break verification. Per-run files make each chain single-writer; a concurrency test
@@ -57,8 +57,15 @@ The verifier auto-detects each file's shape: a per-run `<run_id>.jsonl` verifies
 chain; a merged day file (`audit-merged-<date>.jsonl`, many interleaved runs) is **regrouped by
 `run_id`** and each run's subsequence verified independently. Regrouping is sound because the
 spool preserves lines verbatim and never reorders within a run (each source file is single-writer
-and shipped in append order). A tampered, reordered, or dropped line fails the file, naming the
-offending `run_id` and line. Exit code 1 on any bad chain — CI-able.
+and shipped in append order). A modified, reordered, or interior-dropped line fails the file,
+naming the offending `run_id` and line. Strict CLI verification also requires a terminal
+`run_completed` event, catching removal of that tail; use `--allow-incomplete` only to diagnose a
+crashed/in-progress run. Exit code 1 on any bad chain — CI-able.
+
+The SHA-256 links provide structural consistency, not standalone authenticity: an attacker able
+to rewrite the entire local file can recompute them. Production authenticity therefore depends on
+the independently administered WORM/INSERT-only sink below, which anchors the observed stream
+outside the agent's write boundary.
 
 ## Separation from the agent
 

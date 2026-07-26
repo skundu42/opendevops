@@ -21,7 +21,7 @@ from langgraph.types import Command
 from opendevops.audit import AuditLogger, verify_run_file
 from opendevops.context import AgentContext
 from opendevops.policy.loader import LoadedPolicy
-from opendevops.policy.middleware import PolicyMiddleware
+from opendevops.policy.middleware import PolicyMiddleware, _cache_key
 from opendevops.policy.schema import Decision, ToolCallCtx
 from opendevops.tools.run_command import EXEC_META_KEY, current_decision
 
@@ -191,6 +191,12 @@ def _types(tmp_path: Path, run_id: str = "run-1") -> list[str]:
     return [e["event_type"] for e in _events(tmp_path, run_id)]
 
 
+def _expected_cache(
+    tool_name: str, args: dict[str, Any], content: str, *, run_id: str = "run-1"
+) -> dict[str, str]:
+    return {_cache_key(run_id, "call_1", tool_name, args): content}
+
+
 # --------------------------------------------------------------------------------------
 # allow path (run_command)
 # --------------------------------------------------------------------------------------
@@ -222,7 +228,9 @@ async def test_allow_sets_gate_audits_both_and_caches(tmp_path: Path) -> None:
     # the result is a Command that both delivers the ToolMessage and persists the cache entry
     assert isinstance(result, Command)
     assert result.update["messages"][0].content == "exit_code: 0\nok"
-    assert result.update["tool_results_cache"] == {"call_1": "exit_code: 0\nok"}
+    assert result.update["tool_results_cache"] == _expected_cache(
+        "run_command", {"argv": argv, "timeout_s": 10}, "exit_code: 0\nok"
+    )
     # the exec-meta transport key was stripped before the message reached the model/cache
     assert EXEC_META_KEY not in result.update["messages"][0].additional_kwargs
 
@@ -252,6 +260,41 @@ async def test_allow_second_call_same_id_is_served_from_cache(tmp_path: Path) ->
     assert isinstance(second, ToolMessage)
     assert second.content == "exit_code: 0\nok"
     assert second.tool_call_id == "call_1"
+
+
+async def test_same_call_id_on_later_run_cannot_replay_stale_cache(tmp_path: Path) -> None:
+    """Checkpoint state survives turns, but cache entries are bound to run + exact payload."""
+    engine = FakeEngine(Decision.allow("kubectl-get", "ro", channel="ro"))
+    handler = SpyHandler(sets_exec_meta=True, content="fresh")
+    audit = _started_logger(tmp_path, "run-1")
+    audit.start_run(
+        "run-2",
+        principal={"interface": "cli", "user": "sandipan"},
+        environment="staging",
+        policy_version="sha256:test-policy",
+    )
+    mw = _mw(engine, audit)
+    stale_args = {"argv": ["kubectl", "get", "pods"]}
+    stale = _expected_cache("run_command", stale_args, "stale", run_id="run-1")
+    fresh_args = {"argv": ["kubectl", "get", "services"]}
+
+    result = await mw.awrap_tool_call(
+        _request(
+            "run_command",
+            fresh_args,
+            "call_1",
+            state={"tool_results_cache": stale},
+            context=_context(run_id="run-2"),
+        ),
+        handler,
+    )
+
+    assert engine.calls == 1
+    assert handler.calls == 1
+    assert isinstance(result, Command)
+    assert result.update["tool_results_cache"] == _expected_cache(
+        "run_command", fresh_args, "fresh", run_id="run-2"
+    )
 
 
 # --------------------------------------------------------------------------------------
@@ -384,7 +427,9 @@ async def test_escalate_approve_executes_once_and_audits_escalation_resolution(
     assert handler.calls == 1
     assert handler.seen_decision.channel == "rw"
     assert isinstance(result, Command)
-    assert result.update["tool_results_cache"] == {"call_1": handler._content}
+    assert result.update["tool_results_cache"] == _expected_cache(
+        "run_command", {"argv": ["kubectl", "delete", "pod", "x"]}, handler._content
+    )
     # Full audit trail: decision(escalate) -> escalation -> resolution(alice) -> execution.
     assert _types(tmp_path) == [
         "run_started",
@@ -581,7 +626,9 @@ async def test_builtin_fs_tool_decision_only_no_execution_event(tmp_path: Path) 
     assert _types(tmp_path) == ["run_started", "decision"]
     # still cached (absorbs resume re-execution), keyed by tool_call_id
     assert isinstance(result, Command)
-    assert result.update["tool_results_cache"] == {"call_1": "exit_code: 0\nok"}
+    assert result.update["tool_results_cache"] == _expected_cache(
+        "read_file", {"file_path": "/output/x.txt"}, "exit_code: 0\nok"
+    )
 
 
 async def test_builtin_tool_returning_command_passes_files_through_and_caches(
@@ -606,7 +653,11 @@ async def test_builtin_tool_returning_command_passes_files_through_and_caches(
     # files + messages preserved unchanged; cache added additively
     assert result.update["files"] == {"/output/big.txt": {"content": "ZZZ"}}
     assert result.update["messages"][0].content == "wrote file"
-    assert result.update["tool_results_cache"] == {"call_1": "wrote file"}
+    assert result.update["tool_results_cache"] == _expected_cache(
+        "write_file",
+        {"file_path": "/output/big.txt", "content": "ZZZ"},
+        "wrote file",
+    )
 
 
 # --------------------------------------------------------------------------------------
@@ -635,7 +686,7 @@ async def test_run_command_spill_records_staged_file_and_passes_command_through(
 
     assert isinstance(result, Command)
     assert spill_path in result.update["files"]
-    assert result.update["tool_results_cache"]["call_1"].startswith("exit_code: 0")
+    assert next(iter(result.update["tool_results_cache"].values())).startswith("exit_code: 0")
 
     exec_event = next(e for e in _events(tmp_path) if e["event_type"] == "execution")
     assert exec_event["execution"]["staged_files"] == [
@@ -751,7 +802,9 @@ async def test_successful_server_dry_run_records_dry_run_ok(tmp_path: Path) -> N
     # Keys are RUN-SCOPED (``{run_id}:{sha}``); the default context's run_id is "run-1".
     assert result.update["dry_run_ok"] == {"run-1:manifest-sha-abc": True}
     # the cache entry rides on the same Command update
-    assert result.update["tool_results_cache"] == {"call_1": handler._content}
+    assert result.update["tool_results_cache"] == _expected_cache(
+        "run_command", {"argv": bare}, handler._content
+    )
 
 
 async def test_explicit_server_dry_run_also_records(tmp_path: Path) -> None:

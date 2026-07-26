@@ -59,7 +59,7 @@ def _make_cfg(*, principals: dict[str, Any] | None = None, slack_env: str = "sta
             "execution": {
                 "cmd_timeout_seconds": 60,
                 "output_max_chars": 50000,
-                "env_allowlist": ["PATH"],
+                "env_allowlist": ["PATH", "HOME"],
             },
             "audit": {"dir": "/tmp/audit"},
             "policy": {"dir": "/tmp/policy"},
@@ -531,7 +531,7 @@ def _webapp_cfg() -> AppConfig:
             "execution": {
                 "cmd_timeout_seconds": 60,
                 "output_max_chars": 50000,
-                "env_allowlist": ["PATH"],
+                "env_allowlist": ["PATH", "HOME"],
             },
             "audit": {"dir": "/tmp/audit"},
             "policy": {"dir": "/tmp/policy"},

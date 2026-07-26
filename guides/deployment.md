@@ -21,7 +21,7 @@ The stack (`docker-compose.yml`):
 | `langgraph-server` | the agent graph + webhook app, built **from this repo**; durable run queue, exactly-once, SSE streaming |
 | `postgres` | the server's queue + checkpoint store |
 | `redis` | the server's task queue **and** the shared `RedisDailyCounter` |
-| `caddy` | the only ingress — TLS + static bearer-token gate on `:8123` |
+| `caddy` | the only ingress — HTTP static bearer-token gate on `:8123`; terminate TLS upstream in production |
 | `vector` | tails per-run audit chains, merges them into the durable spool |
 | `prometheus` + `grafana` | metrics, alert rules, the provisioned ops dashboard |
 
@@ -49,6 +49,10 @@ curl -s -H "Authorization: Bearer $GATEWAY_TOKEN" \
 The server container publishes no host port — Caddy on `:8123` is the sole ingress. Auth upgrade
 path: front Caddy with oauth2-proxy (OIDC/SSO); see `ops/caddy/Caddyfile`.
 
+The three `/webhooks/*` application routes bypass Caddy's gateway bearer because external senders
+cannot supply it; the app still requires its configured HMAC or route-specific bearer credential.
+All server API and metrics routes remain gateway-token protected.
+
 ### Two URLs, one server
 
 `config.yaml server.url` (`:8123`) is the **external** URL every outside consumer uses, through
@@ -68,7 +72,7 @@ Never configure a local checkpointer on this path — the platform injects Postg
 Vector merges `audit/*.jsonl` into the spool volume by default. Pick the real durable sink with
 the compliance owner (S3 + Object Lock, or Loki/SIEM — blocks are ready to uncomment in
 `ops/vector/vector.yaml`), with the bucket/table policy denying every agent role. Verify shipped
-chains end-to-end with `uv run opendevops audit verify --dir <spool>` ([audit](audit.md#verifying)).
+chain structure with `uv run opendevops audit verify --dir <spool>` ([audit](audit.md#verifying)).
 
 ### Licensing quota probe
 

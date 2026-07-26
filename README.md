@@ -5,7 +5,7 @@
 An **autonomous DevOps agent** built on LangChain [deepagents](https://github.com/langchain-ai/deepagents):
 it investigates and operates Kubernetes, GitHub, cloud CLIs, and remote hosts **fully
 autonomously** — no human in the loop as the normal path — under a fail-closed policy engine,
-hard budget ceilings, and a tamper-evident audit trail.
+budget stop-losses, and a hash-chained audit trail.
 
 ```text
 you › why is pod api-0 in namespace web crash-looping?
@@ -27,10 +27,12 @@ spent $0.0841 (run) / $0.34 (today)
 - **Default-deny, fail-closed policy.** Layered YAML rules + code hooks decide
   allow / deny / rewrite / escalate per call; no matching rule — or any pipeline exception — is a
   deny. Residual risky calls suspend for human approve / edit / reject.
-- **Hard budgets.** Per-run and daily USD caps, model/tool/step limits, wall clocks — each
-  enforced by its own mechanism, all fail-closed. An unpriced model refuses to boot.
-- **Tamper-evident audit.** Every decision and execution lands in a per-run sha256 hash chain the
-  agent has no write path to; `opendevops audit verify` proves integrity end-to-end.
+- **Budget guardrails.** Model/tool/step limits and wall clocks are hard controls; USD limits are
+  post-usage stop-losses and can overshoot by in-flight model calls. Counter outages fail closed,
+  and an unpriced model refuses to boot.
+- **Verifiable audit structure.** Every decision and execution lands in a per-run sha256 hash
+  chain the agent cannot reach. Strict verification catches corruption and missing completion;
+  authenticity comes from shipping the chain to an independently protected WORM/SIEM sink.
 
 The full reasoning lives in the [security model](guides/security-model.md).
 

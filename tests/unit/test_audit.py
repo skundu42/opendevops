@@ -186,24 +186,8 @@ def test_tamper_corrupt_json(tmp_path: Path) -> None:
     assert result.first_bad_line == 2
 
 
-def test_tamper_delete_last_line_is_undetected(tmp_path: Path) -> None:
-    """Documented blind spot, pinned so it can't regress silently.
-
-    Deleting the LAST line(s) of a chain leaves a strictly shorter, but fully self-consistent,
-    prefix chain: every surviving event's prev_hash/hash still link up correctly. Linkage and
-    recomputation (the two checks verify_run_file performs) only ever compare a line against
-    its neighbors *within the file*, so there is nothing in the remaining bytes that reveals an
-    event used to follow the new last line. This is indistinguishable from a run that crashed
-    or was interrupted before writing more events (see
-    test_crashed_run_without_completed_still_verifies) — and a crashed run legitimately must
-    still verify ok=True. See the module docstring in verify.py for what tail-truncation
-    detection would require (a signed run header/trailer or an external tip anchor — a possible
-    future hardening).
-
-    If a future change (e.g. a signed trailer) makes tail truncation detectable, this test
-    should start failing its `ok is True` assertion — update it consciously rather than
-    patching it to pass.
-    """
+def test_strict_verification_detects_missing_completion_tail(tmp_path: Path) -> None:
+    """Structural mode supports crash diagnosis; strict mode detects a removed completion tail."""
     logger, path = _standard_chain(tmp_path)
     logger.end_run("run-A", summary={"cost_usd": 0.01})
 
@@ -212,9 +196,12 @@ def test_tamper_delete_last_line_is_undetected(tmp_path: Path) -> None:
     del lines[-1]  # drop the trailing run_completed line only
     path.write_text("\n".join(lines) + "\n")
 
-    result = verify_run_file(path)
-    assert result.ok is True  # accepted blind spot, not a bug — see docstring above
-    assert result.events == 4
+    structural = verify_run_file(path)
+    assert structural.ok is True
+    strict = verify_run_file(path, require_complete=True)
+    assert strict.ok is False
+    assert strict.events == 4
+    assert strict.reason and "run_completed" in strict.reason
 
 
 # --------------------------------------------------------------------------------------

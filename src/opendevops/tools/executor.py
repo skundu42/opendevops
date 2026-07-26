@@ -1,8 +1,8 @@
 """LocalExecutor + constructed-env / credential map for the argv-only run_command tool.
 
 The executor runs a single ``argv`` (no shell) in its **own process group** with a fully
-**constructed** environment — nothing is inherited from the agent process except ``PATH``, so
-the agent's own ``ANTHROPIC_API_KEY`` (and everything else in ``os.environ``) is physically
+**constructed** environment — neither ``PATH`` nor any other ambient process value is inherited,
+so the agent's own ``ANTHROPIC_API_KEY`` (and everything else in ``os.environ``) is physically
 absent from the child. Exactly one credential is injected per exec, keyed by
 ``(tool_family, channel)``.
 
@@ -11,7 +11,7 @@ Constructed-env table (every child sees exactly these, nothing more):
 ===========================  ==================================================================
 key                          value
 ===========================  ==================================================================
-``PATH``                     inherited from the operator (the only inherited value)
+``PATH``                     fixed ``execution.trusted_path`` from validated configuration
 ``HOME``                     a **private per-executor sandbox** dir (NOT the operator's ``$HOME``),
                              so ``~/.kube/config`` / ``~/.aws/credentials`` / ``~/.config/gh``
                              are unreachable by executed tools
@@ -80,8 +80,8 @@ class CredentialUnavailable(Exception):
     """Raised when a decision requests a credential that is not configured (e.g. rw kube)."""
 
 
-# Base environment: literally nothing from os.environ except PATH (HOME is a private sandbox
-# supplied per-executor, not inherited). Everything else here is a fixed literal that
+# Base environment: literally nothing from os.environ (HOME is a private sandbox supplied
+# per-executor, not inherited). Everything else here is a fixed literal that
 # suppresses pagers / colour / interactive prompts across CLIs.
 _BASE_ENV_LITERALS: dict[str, str] = {
     "NO_COLOR": "1",
@@ -107,7 +107,8 @@ def build_env(
 ) -> dict[str, str]:
     """Construct the child env for one exec: fixed base + exactly one credential decision.
 
-    ``PATH`` is inherited from the operator; ``HOME`` is set to *home* — a private sandbox dir
+    ``PATH`` is the fixed, validated ``execution.trusted_path``; ``HOME`` is set to *home* — a
+    private sandbox dir
     (supplied by the executor), never the operator's ``$HOME`` — so ambient config files like
     ``~/.kube/config`` / ``~/.aws/credentials`` / ``~/.config/gh/hosts.yml`` are unreachable.
 
@@ -136,7 +137,8 @@ def build_env(
     never appear in any log or error. Each still gets ``KUBECONFIG=/dev/null`` and never sees
     ``GH_TOKEN`` or another cloud family's variables — one credential family per exec.
     """
-    env: dict[str, str] = {"PATH": os.environ["PATH"], "HOME": home}
+    safe_base = {"PATH": cfg.execution.trusted_path, "HOME": home}
+    env = {name: safe_base[name] for name in cfg.execution.env_allowlist}
     env.update(_BASE_ENV_LITERALS)
 
     if tool_family in _KUBE_FAMILIES:

@@ -120,6 +120,7 @@ from opendevops.budget.middleware import (
     CostCapMiddleware,
     DailyBudgetMiddleware,
 )
+from opendevops.config import validate_runtime_config
 from opendevops.context import AgentContext
 from opendevops.models import registry
 from opendevops.models.pricing import PriceTable
@@ -577,6 +578,11 @@ def build_agent(
     Raises:
         RuntimeError: on a credential-coverage gap, a surplus bound tool, or a lost state reducer.
     """
+    try:
+        validate_runtime_config(cfg)
+    except ValueError as exc:
+        raise RuntimeError(f"unsafe runtime configuration; refusing to boot: {exc}") from exc
+
     # Defensive re-assertion of the load-time invariant (every agent model is priced).
     registry.assert_all_agents_priced(cfg)
 

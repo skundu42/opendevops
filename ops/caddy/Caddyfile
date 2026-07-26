@@ -1,13 +1,13 @@
 # Caddy ingress for the opendevops LangGraph Server.
 #
 # The public API port. Caddy is the SOLE ingress — the langgraph-server container publishes no host
-# port, so every external request is authenticated here before it reaches the server's REST surface
-# (threads / runs / stream / wait / cancel) and the mounted webhook app.
+# port. The server's REST surface (threads / runs / stream / wait / cancel and metrics) is
+# authenticated here. The three webhook routes pass through without the gateway token because
+# external senders cannot add it; the application verifies their native HMAC/bearer credentials.
 #
-# Auth model: a STATIC BEARER TOKEN. Alertmanager sends it in its
-# webhook_config.authorization; CLI/Slack gateways send it as the server api_key. A request whose
-# `Authorization: Bearer <GATEWAY_TOKEN>` matches is proxied; anything else gets 401 (fail-closed).
-# The token is injected from the environment as {$GATEWAY_TOKEN} (set in the compose env / .env).
+# Auth model: a STATIC BEARER TOKEN for the server API. CLI/Slack gateways send it as the server
+# api_key. Webhook routes retain their own application-level authentication. The gateway token is
+# injected from the environment as {$GATEWAY_TOKEN} (set in the compose env / .env).
 #
 # Upgrade path (deferred): swap this static-token gate for oauth2-proxy in front
 # (OIDC / SSO, per-user identity, short-lived tokens) — reverse_proxy to oauth2-proxy:4180 and let
@@ -17,6 +17,14 @@
 :8123 {
 	# Liveness probe passes through unauthenticated (no secrets on /healthz); everything else is gated.
 	handle /healthz {
+		reverse_proxy langgraph-server:8000
+	}
+
+	# Native webhook authentication happens in webapp.py:
+	#   alertmanager + run-complete -> configured bearer token
+	#   github                     -> HMAC-SHA256 signature
+	@native_webhooks path /webhooks/alertmanager /webhooks/github /webhooks/run-complete
+	handle @native_webhooks {
 		reverse_proxy langgraph-server:8000
 	}
 

@@ -210,7 +210,7 @@ def _make_cfg(*, url: str | None = "http://localhost:8123", api_key_env: str | N
             "execution": {
                 "cmd_timeout_seconds": 60,
                 "output_max_chars": 50000,
-                "env_allowlist": ["PATH"],
+                "env_allowlist": ["PATH", "HOME"],
             },
             "audit": {"dir": "/tmp/opendevops-test-audit"},
             "policy": {"dir": "./config/policy"},

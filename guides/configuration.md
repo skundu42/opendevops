@@ -64,12 +64,17 @@ the policy packs are the compensating control on top of that role, not a substit
 ### `execution`
 
 ```yaml
-execution: {cmd_timeout_seconds: 60, output_max_chars: 50000, env_allowlist: [PATH, HOME]}
+execution:
+  cmd_timeout_seconds: 60
+  output_max_chars: 50000
+  env_allowlist: [PATH, HOME]
+  trusted_path: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ```
 
 Default subprocess timeout, output truncation threshold (full scrubbed output spills to the
-virtual FS), and which vars of the parent env may be forwarded (everything else in the child env
-is constructed).
+virtual FS), and the safe base environment. `env_allowlist` must contain exactly `PATH` and `HOME`;
+both are constructed values, not forwarded from the parent. `trusted_path` accepts only absolute
+directory entries.
 
 ### `executor` — local vs remote execution
 
@@ -82,6 +87,10 @@ executor:
   secret_source: env         # {{secret:NAME}} backend (env-backed; vault can plug into the same seam)
   secret_env_prefix: ""      # optional namespace prefix for {{secret:NAME}} lookups
 ```
+
+A standalone `{{secret:NAME}}` argv entry declares a child environment variable and is removed
+before execution. Use it only with programs that natively read that variable (for example
+`PGPASSWORD`). Embedded references are rejected; there is no shell expansion.
 
 `mode: remote` is not production-deployable until the gates in `ops/executor/README.md` close —
 see [security model](security-model.md#the-executor-split-moderemote).

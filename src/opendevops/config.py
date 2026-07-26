@@ -164,9 +164,29 @@ class Execution(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    cmd_timeout_seconds: int
-    output_max_chars: int
-    env_allowlist: list[str]
+    cmd_timeout_seconds: int = Field(gt=0)
+    output_max_chars: int = Field(gt=0)
+    env_allowlist: list[Literal["PATH", "HOME"]]
+    trusted_path: str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+    @field_validator("env_allowlist")
+    @classmethod
+    def _require_safe_execution_env(cls, value: list[str]) -> list[str]:
+        """The executor needs both safe base keys and must never accept arbitrary parent keys."""
+        if len(value) != 2 or set(value) != {"PATH", "HOME"}:
+            raise ValueError("execution.env_allowlist must contain exactly PATH and HOME")
+        return value
+
+    @field_validator("trusted_path")
+    @classmethod
+    def _trusted_path_is_absolute(cls, value: str) -> str:
+        """Reject empty, relative, and current-directory PATH entries."""
+        entries = value.split(":")
+        if not entries or any(not entry or not Path(entry).is_absolute() for entry in entries):
+            raise ValueError(
+                "execution.trusted_path must be a colon-separated list of absolute directories"
+            )
+        return value
 
 
 class ExecutorConfig(BaseModel):
@@ -431,12 +451,12 @@ class ResolvedProfile(BaseModel):
 
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
-    usd: float
-    model_calls: int
-    tool_calls: int
-    shell_calls: int
-    recursion_limit: int
-    wall_clock_s: int
+    usd: float = Field(gt=0)
+    model_calls: int = Field(gt=0)
+    tool_calls: int = Field(gt=0)
+    shell_calls: int = Field(gt=0)
+    recursion_limit: int = Field(gt=0)
+    wall_clock_s: int = Field(gt=0)
 
 
 class PartialProfile(BaseModel):
@@ -444,12 +464,12 @@ class PartialProfile(BaseModel):
 
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
-    usd: float | None = None
-    model_calls: int | None = None
-    tool_calls: int | None = None
-    shell_calls: int | None = None
-    recursion_limit: int | None = None
-    wall_clock_s: int | None = None
+    usd: float | None = Field(default=None, gt=0)
+    model_calls: int | None = Field(default=None, gt=0)
+    tool_calls: int | None = Field(default=None, gt=0)
+    shell_calls: int | None = Field(default=None, gt=0)
+    recursion_limit: int | None = Field(default=None, gt=0)
+    wall_clock_s: int | None = Field(default=None, gt=0)
 
 
 class PerRun(BaseModel):
@@ -479,8 +499,8 @@ class Daily(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    global_usd: float
-    per_principal_usd: float
+    global_usd: float = Field(gt=0)
+    per_principal_usd: float = Field(gt=0)
     backend: Literal["sqlite", "redis"] = "sqlite"
     redis_url: str | None = None
 
@@ -500,7 +520,7 @@ class BudgetsConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    trip_ratio: float
+    trip_ratio: float = Field(gt=0, le=1)
     fail_mode_on_counter_outage: Literal["closed", "open"]
     per_run: PerRun
     daily: Daily
@@ -560,6 +580,21 @@ class AppConfig(BaseModel):
     models: ModelsConfig
     budgets: BudgetsConfig
     secrets: Secrets = Field(default_factory=Secrets)
+
+
+def validate_runtime_config(cfg: AppConfig) -> None:
+    """Validate safety invariants required to execute, not merely parse, the template config.
+
+    The repository intentionally ships with an empty Kubernetes context allowlist so operators
+    must make an explicit deployment choice. Loading remains useful for tooling and editing, but
+    every execution entry point calls this gate and refuses to build until at least one context is
+    named.
+    """
+    if not cfg.targets.kubernetes.allowed_contexts:
+        raise ValueError(
+            "targets.kubernetes.allowed_contexts is empty; configure at least one explicitly "
+            "allowed context before starting the agent"
+        )
 
 
 def _read_yaml(path: Path) -> dict[str, object]:

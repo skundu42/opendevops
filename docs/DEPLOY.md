@@ -86,7 +86,7 @@ compliance owner and uncomment the relevant block in `ops/vector/vector.yaml`:
 - **S3 with Object Lock** (WORM retention), bucket policy denying every agent role; or
 - **Loki / SIEM** forwarding (INSERT-only), labelled by `run_id`.
 
-Verify shipped chains end-to-end: `uv run opendevops audit verify --dir <spool>`. The command
+Verify shipped chain structure: `uv run opendevops audit verify --dir <spool>`. The command
 auto-detects each `*.jsonl` file's shape — a Vector-merged day-file (`audit-merged-<date>.jsonl`,
 carrying many interleaved runs) is **regrouped by `run_id`** and each run's subsequence verified as
 an independent hash chain; a plain per-run `<run_id>.jsonl` file is verified as a single chain. The

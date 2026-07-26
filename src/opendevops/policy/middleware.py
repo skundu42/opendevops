@@ -3,7 +3,7 @@
 This is the integration heart of the safety core: the ``awrap_tool_call`` hook every tool call
 passes through. The pipeline is::
 
-    cache-check -> read context -> engine.decide -> audit(decision) -> gate+execute
+    read context -> run-scoped cache-check -> engine.decide -> audit(decision) -> gate+execute
                 -> audit(execution) -> cache the result
 
 Fail-closed invariant: *any* exception raised inside this middleware's own code becomes a
@@ -29,6 +29,7 @@ Interfaces consumed (their real APIs are ground truth):
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal, cast
@@ -39,7 +40,7 @@ from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command, interrupt
 
 from opendevops.audit.logger import AuditLogger
-from opendevops.audit.schema import EventType
+from opendevops.audit.schema import EventType, canonical_dumps
 from opendevops.policy.engine import RUN_COMMAND, PolicyEngine
 from opendevops.policy.loader import LoadedPolicy
 from opendevops.policy.parsing import ParseError, parse_argv
@@ -132,18 +133,20 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
         tool_name: str,
         args: dict[str, Any],
     ) -> ToolMessage | Command[Any]:
-        # 2. Execution-cache check: a tool_call_id already recorded in state is replayed from
-        #    the cache without re-deciding or re-executing. This absorbs LangGraph node
-        #    re-execution after an interrupt-resume; the audit-logger dedupe absorbs any duplicate
-        #    events the graph would otherwise emit. Done first so a cache hit is the cheapest path.
-        cache = _read_cache(request.state)
-        if tool_call_id and tool_call_id in cache:
-            return ToolMessage(
-                content=cache[tool_call_id], tool_call_id=tool_call_id, name=tool_name
-            )
-
-        # 1. Runtime context (environment / principal / interface / run_id).
+        # 1. Runtime context (environment / principal / interface / run_id). A run_id is required
+        #    before reading the replay cache because checkpointer state survives across turns.
         env, principal, interface, run_id = self._read_context(request.runtime)
+
+        # 2. Execution-cache check. The key binds run + call id + canonical tool payload, so a
+        #    provider reusing an id on a later run (or for divergent args) cannot replay stale
+        #    output without authorization. It still absorbs exact LangGraph interrupt/resume
+        #    re-execution within the same run.
+        cache_key = _cache_key(run_id, tool_call_id, tool_name, args)
+        cache = _read_cache(request.state)
+        if tool_call_id and cache_key in cache:
+            return ToolMessage(
+                content=cache[cache_key], tool_call_id=tool_call_id, name=tool_name
+            )
 
         # 3. Authorize. For run_command, surface the virtual-FS ``files`` and the recorded
         #    ``dry_run_ok`` shas from state so the dry_run_before_apply hook can verify a real
@@ -255,7 +258,12 @@ class PolicyMiddleware(AgentMiddleware[DevOpsState, Any, Any]):
         #    the dry-run recording (if any) rides on the same Command update.
         content = _result_content(result)
         if content is not None and tool_call_id:
-            return _with_cache(result, tool_call_id, content, dry_run_ok)
+            return _with_cache(
+                result,
+                _cache_key(run_id, tool_call_id, tool_name, args),
+                content,
+                dry_run_ok,
+            )
         return result
 
     # -- context ----------------------------------------------------------------------------
@@ -584,6 +592,15 @@ def _read_cache(state: Any) -> dict[str, str]:
     return cache if isinstance(cache, dict) else {}
 
 
+def _cache_key(
+    run_id: str, tool_call_id: str, tool_name: str, args: Mapping[str, Any]
+) -> str:
+    """Bind a replay-cache entry to the run and exact canonical tool request."""
+    payload = canonical_dumps({"tool": tool_name, "args": dict(args)})
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"{run_id}:{tool_call_id}:{digest}"
+
+
 def _read_state_key(state: Any, key: str) -> Any:
     """Read ``key`` off the agent state (mapping or object), or ``None``."""
     if isinstance(state, Mapping):
@@ -680,7 +697,7 @@ def _as_text(content: Any) -> str:
 
 def _with_cache(
     result: ToolMessage | Command[Any],
-    tool_call_id: str,
+    cache_key: str,
     content: str,
     dry_run_ok: dict[str, bool] | None = None,
 ) -> Command[Any]:
@@ -696,7 +713,7 @@ def _with_cache(
     Both state updates go through the ``DevOpsState`` dict-merge reducers, so they accumulate
     across tool calls rather than clobbering earlier entries.
     """
-    extra: dict[str, Any] = {"tool_results_cache": {tool_call_id: content}}
+    extra: dict[str, Any] = {"tool_results_cache": {cache_key: content}}
     if dry_run_ok:
         extra["dry_run_ok"] = dry_run_ok
     if isinstance(result, Command):

@@ -13,7 +13,7 @@ radius when every softer layer fails?*
 | 3. Constructed env | child env built from scratch; agent secrets physically absent | nothing to leak |
 | 4. Policy engine | default-deny, fail-closed, layered YAML + hooks | velocity/UX layer, assumed bypassable |
 | 5. Output scrubbing | token patterns + entropy scan → `***` before model/FS/audit | backstop, not the control |
-| 6. Audit | tamper-evident hash chains the agent cannot write to | detection, not prevention |
+| 6. Audit | hash chains plus an independently protected WORM/SIEM sink | detection, not prevention |
 
 The invariant that anchors everything: **a total policy bypass in the default deployment is
 read-only and cannot read secrets** — because the only credential the executor holds is a
@@ -55,7 +55,8 @@ missing `known_hosts_path` makes the tool refuse rather than disable checking.
 
 - **Into the agent**: config files carry env var **names**, never values
   ([configuration](configuration.md#the-name-not-value-convention)). A `{{secret:NAME}}` reference
-  resolves into the subprocess environment only — never into argv, logs, or model context.
+  must be a standalone argv entry; it declares `NAME` in the subprocess environment and is removed
+  before execution. Embedded expansion is rejected because commands run without a shell.
 - **Out of the infrastructure**: secret-material reads are denied at the policy layer *and* by the
   credential's own RBAC/IAM ([policy](policy.md#what-baseyaml-denies-and-why)).
 - **Through tool output**: a scrubber runs on every `run_command` output **before** it reaches the

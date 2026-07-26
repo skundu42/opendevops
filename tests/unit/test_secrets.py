@@ -1,4 +1,4 @@
-"""{{secret:NAME}} resolver: value into env, $NAME into argv, unknown → fail-closed."""
+"""{{secret:NAME}} resolver: standalone env declaration, never argv expansion."""
 
 from __future__ import annotations
 
@@ -25,20 +25,17 @@ class DictSource:
         return self.data.get(name)
 
 
-def test_resolves_value_into_env_not_argv() -> None:
+def test_embedded_secret_reference_fails_closed() -> None:
     src = DictSource({"TOKEN": "s3cr3t-value"})
-    r = resolve_secrets(["curl", "-H", "Authorization: Bearer {{secret:TOKEN}}", "url"], src)
-    assert r.argv == ["curl", "-H", "Authorization: Bearer $TOKEN", "url"]
-    assert r.env == {"TOKEN": "s3cr3t-value"}
-    assert r.values == ["s3cr3t-value"]
-    # the VALUE never appears in the rewritten argv
-    assert "s3cr3t-value" not in " ".join(r.argv)
+    with pytest.raises(SecretResolutionError, match="standalone argv"):
+        resolve_secrets(["curl", "-H", "Authorization: Bearer {{secret:TOKEN}}", "url"], src)
 
 
-def test_bare_token_becomes_ref() -> None:
+def test_bare_token_declares_env_and_is_removed_from_argv() -> None:
     r = resolve_secrets(["psql", "{{secret:PGPASSWORD}}"], DictSource({"PGPASSWORD": "pw"}))
-    assert r.argv == ["psql", "$PGPASSWORD"]
+    assert r.argv == ["psql"]
     assert r.env == {"PGPASSWORD": "pw"}
+    assert "pw" not in " ".join(r.argv)
 
 
 def test_unknown_secret_fails_closed() -> None:
@@ -48,8 +45,8 @@ def test_unknown_secret_fails_closed() -> None:
 
 def test_multiple_and_repeated_dedupe_first_seen() -> None:
     src = DictSource({"A": "aaa", "B": "bbb"})
-    r = resolve_secrets(["cmd", "{{secret:A}}-{{secret:B}}", "{{secret:A}}"], src)
-    assert r.argv == ["cmd", "$A-$B", "$A"]
+    r = resolve_secrets(["cmd", "--flag", "{{secret:A}}", "{{secret:B}}", "{{secret:A}}"], src)
+    assert r.argv == ["cmd", "--flag"]
     assert r.env == {"A": "aaa", "B": "bbb"}
     assert r.values == ["aaa", "bbb"]  # first-seen order, deduped
     assert r.names == ["A", "B"]
@@ -73,7 +70,7 @@ def test_env_source_reads_env_with_prefix(monkeypatch: pytest.MonkeyPatch) -> No
     src = EnvSecretSource(prefix="DEVOPS_SECRET_")
     assert src.get("FOO") == "val"
     r = resolve_secrets(["app", "{{secret:FOO}}"], src)
-    assert r.env == {"FOO": "val"} and r.argv == ["app", "$FOO"]
+    assert r.env == {"FOO": "val"} and r.argv == ["app"]
 
 
 def test_env_source_empty_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:

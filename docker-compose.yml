@@ -15,8 +15,8 @@
 # Validate this file without pulling/running anything:
 #     docker compose -f docker-compose.yml config -q
 #
-# Secrets are read from the environment (or a sibling .env); unset ones fall back to safe defaults
-# here so `config` stays quiet. Set GATEWAY_TOKEN + LANGSMITH_API_KEY before `up`.
+# Secrets are read from the environment (or a sibling .env). Security-sensitive service
+# credentials are required at Compose interpolation time; there are no deployable default values.
 
 name: opendevops
 
@@ -47,7 +47,7 @@ services:
         condition: service_healthy
     environment:
       # The platform's own persistence + queue (NOT our LocalGateway saver — the server injects it).
-      DATABASE_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres?sslmode=disable
+      DATABASE_URI: postgres://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/postgres?sslmode=disable
       REDIS_URI: redis://redis:6379/1
       # LangSmith licensing / tracing key — passed through from the environment (never baked).
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
@@ -74,7 +74,7 @@ services:
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -100,7 +100,9 @@ services:
     networks:
       - agent-net
 
-  # -- Caddy: TLS + bearer-token ingress gate in front of the server ---------------------------
+  # -- Caddy: bearer-token HTTP ingress gate in front of the server ----------------------------
+  # Production deployments must terminate TLS before this port (or configure a hostname/certs in
+  # the Caddyfile); the shipped :8123 listener is intentionally plain HTTP for local/VM wiring.
   caddy:
     image: caddy:2
     restart: unless-stopped
@@ -109,7 +111,7 @@ services:
     ports:
       - "8123:8123"        # the public API port (matches config.yaml server.url)
     environment:
-      GATEWAY_TOKEN: ${GATEWAY_TOKEN:-change-me-before-deploy}
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?set GATEWAY_TOKEN}
     volumes:
       - ./ops/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -160,7 +162,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro

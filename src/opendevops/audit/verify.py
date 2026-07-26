@@ -1,7 +1,7 @@
 """Audit chain walker for `opendevops audit verify` (per-run files).
 
-Pure functions: walk a per-run JSONL chain and recompute every hash. Two independent checks
-make the log tamper-evident:
+Pure functions: walk a per-run JSONL chain and recompute every hash. Two independent structural
+consistency checks are applied:
 
 - **linkage** — each event's ``prev_hash`` must equal the previous line's ``hash`` (and the
   first must be a ``run_started`` seed linking to ``GENESIS``).
@@ -18,17 +18,11 @@ caught: an unknown top-level key fails ``AuditEvent`` validation (``extra="forbi
 change to a known field's value — including inside free-form dicts like ``args`` — breaks hash
 recomputation, since the hash covers the full canonical payload.
 
-What this does **not** detect: silent truncation of the **tail** — deleting the last N lines of
-a file leaves a shorter, fully self-consistent chain that verifies ``ok=True`` (see
-``test_tamper_delete_last_line_is_undetected`` in ``test_audit.py``, which pins this as
-accepted behavior). Nothing in the file itself records how many events *should* exist or
-what the true last hash *should* be, so a truncated prefix is indistinguishable from a run that
-legitimately ended early (e.g. a crash before ``run_completed`` — see
-``test_crashed_run_without_completed_still_verifies``). Detecting tail truncation requires an
-external anchor for the chain's tip/count: an ed25519-signed run header or trailer, or a
-second sink (e.g. a remote log shipper) that independently observes the tip. Until then, this
-verifier's guarantee is "every surviving line is exactly as written and in order," not
-"nothing was ever removed from the end."
+The CLI additionally requires a terminal ``run_completed`` event, so deletion of that tail fails
+verification. ``verify_run_file(..., require_complete=False)`` remains available for diagnosing a
+legitimately crashed/in-progress run. A malicious actor able to rewrite the whole file can still
+recompute the unkeyed chain; authenticity requires an independently protected/WORM sink or signed
+external anchor. The local verifier proves structural consistency and, in strict mode, completion.
 
 ``ts`` monotonicity is checked warn-only (clock skew is not tampering). The ``main`` helper is
 the entry point the ``audit verify`` CLI subcommand calls.
@@ -129,7 +123,9 @@ def _read_events(path: Path) -> tuple[list[tuple[int, AuditEvent]], VerifyResult
     return events, None
 
 
-def _verify_chain(events: list[tuple[int, AuditEvent]]) -> VerifyResult:
+def _verify_chain(
+    events: list[tuple[int, AuditEvent]], *, require_complete: bool = False
+) -> VerifyResult:
     """Verify an ordered list of ``(source_line, event)`` as ONE hash chain — the shared core.
 
     Performs the two tamper-evidence checks the module documents (linkage + recomputation), the
@@ -180,11 +176,19 @@ def _verify_chain(events: list[tuple[int, AuditEvent]]) -> VerifyResult:
 
     if count == 0:
         return VerifyResult(ok=False, events=0, reason="empty chain (no events)")
+    if require_complete and events[-1][1].event_type is not EventType.run_completed:
+        return VerifyResult(
+            ok=False,
+            events=count,
+            first_bad_line=events[-1][0],
+            reason="incomplete chain (terminal run_completed event is missing)",
+            warnings=warnings,
+        )
 
     return VerifyResult(ok=True, events=count, warnings=warnings)
 
 
-def verify_run_file(path: Path) -> VerifyResult:
+def verify_run_file(path: Path, *, require_complete: bool = False) -> VerifyResult:
     """Verify one ``<run_id>.jsonl`` chain file (a single linear chain). Line numbers are 1-based.
 
     Every non-blank line is one event in append order: this parses each line (a parse failure is
@@ -196,10 +200,10 @@ def verify_run_file(path: Path) -> VerifyResult:
     events, read_error = _read_events(path)
     if read_error is not None:
         return read_error
-    return _verify_chain(events)
+    return _verify_chain(events, require_complete=require_complete)
 
 
-def verify_merged_file(path: Path) -> MergedVerifyResult:
+def verify_merged_file(path: Path, *, require_complete: bool = False) -> MergedVerifyResult:
     """Verify a Vector-MERGED spool file (``audit-merged-<date>.jsonl``): the interleaved lines of
     many per-run chains in one append-only file.
 
@@ -218,11 +222,14 @@ def verify_merged_file(path: Path) -> MergedVerifyResult:
     file, naming the run_id + physical line of the break.
     """
     events, read_error = _read_events(path)
-    return _verify_merged(events, read_error)
+    return _verify_merged(events, read_error, require_complete=require_complete)
 
 
 def _verify_merged(
-    events: list[tuple[int, AuditEvent]], read_error: VerifyResult | None
+    events: list[tuple[int, AuditEvent]],
+    read_error: VerifyResult | None,
+    *,
+    require_complete: bool = False,
 ) -> MergedVerifyResult:
     """Regroup pre-parsed ``(line, event)`` pairs by ``run_id`` and verify each run's chain.
 
@@ -245,7 +252,10 @@ def _verify_merged(
             ok=False, runs=0, events=0, reason="empty merged file (no events)"
         )
 
-    per_run = {run_id: _verify_chain(evs) for run_id, evs in groups.items()}
+    per_run = {
+        run_id: _verify_chain(evs, require_complete=require_complete)
+        for run_id, evs in groups.items()
+    }
     total = sum(result.events for result in per_run.values())
     warnings = [f"{run_id}: {w}" for run_id, result in per_run.items() for w in result.warnings]
 
@@ -311,7 +321,7 @@ def _is_merged_file(path: Path) -> bool:
     return False
 
 
-def main(dir: Path) -> int:
+def main(dir: Path, *, allow_incomplete: bool = False) -> int:
     """CLI helper for ``opendevops audit verify``: print a summary, return an exit code.
 
     Auto-detects each ``*.jsonl`` file's shape so ONE command works for both a per-run audit dir
@@ -330,7 +340,7 @@ def main(dir: Path) -> int:
     all_ok = True
     for path in files:
         if _is_merged_file(path):
-            merged = verify_merged_file(path)
+            merged = verify_merged_file(path, require_complete=not allow_incomplete)
             if merged.ok:
                 suffix = f" ({len(merged.warnings)} warning(s))" if merged.warnings else ""
                 print(f"OK   {path.name}: {merged.runs} run(s), {merged.events} events{suffix}")
@@ -345,7 +355,7 @@ def main(dir: Path) -> int:
                 else:
                     print(f"FAIL {path.name}: {merged.reason}")
         else:
-            result = verify_run_file(path)
+            result = verify_run_file(path, require_complete=not allow_incomplete)
             if result.ok:
                 suffix = f" ({len(result.warnings)} warning(s))" if result.warnings else ""
                 print(f"OK   {path.stem}: {result.events} events{suffix}")

@@ -1,7 +1,7 @@
 # Budgets and cost control
 
-An autonomous agent with no human in the loop needs hard resource ceilings, each with a distinct
-enforcement mechanism. Configuration lives in `config/budgets.yaml`
+An autonomous agent with no human in the loop needs bounded resource use, with each control's
+actual enforcement semantics stated precisely. Configuration lives in `config/budgets.yaml`
 ([reference](configuration.md#configbudgetsyaml)); enforcement lives in `src/opendevops/budget/`
 and the gateway.
 
@@ -16,6 +16,11 @@ and the gateway.
 | Graph super-steps | `recursion_limit` per budget profile (default 250) | `GraphRecursionError`; state survives in the checkpointer |
 | Wall clock | `LocalGateway`: `asyncio.wait_for` around the run; `ServerGateway`: server `run_timeout` + caller-side cancel timer | run cancelled; resumable on the same thread |
 | Context growth | deepagents summarization middleware on the haiku alias | bounds per-iteration input tokens |
+
+USD accounting is necessarily post-usage: the final cost of a model call is known only after it
+returns, and concurrent in-flight runs may cross a daily threshold together. Treat these limits as
+stop-losses, not transactional spending reservations. Model/tool/step counts and wall-clock
+timeouts are the hard ceilings.
 
 Two design rules make the suite robust:
 
