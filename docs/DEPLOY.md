@@ -25,6 +25,7 @@ uv run langgraph build -t opendevops-langgraph:latest
 | Variable | Purpose |
 |---|---|
 | `GATEWAY_TOKEN` | the static bearer token Caddy requires (and gateways/Alertmanager present) |
+| `DASHBOARD_TOKEN` | operator sign-in token exchanged for a short-lived signed dashboard session |
 | `LANGSMITH_API_KEY` | LangGraph Server license / tracing key (pass-through) |
 | `ANTHROPIC_API_KEY` | model key for live runs |
 | `POSTGRES_PASSWORD` | Postgres superuser password |
@@ -57,11 +58,19 @@ docker compose -f docker-compose.yml config -q     # validate (no pull)
 docker compose -f docker-compose.yml up -d
 curl -sf http://localhost:8123/healthz             # liveness passes Caddy unauthenticated
 curl -s -H "Authorization: Bearer $GATEWAY_TOKEN" http://localhost:8123/assistants/search -X POST -d '{}'
+# Open http://localhost:8123/dashboard and sign in with DASHBOARD_TOKEN.
 ```
 
 The API is reachable only through Caddy on `:8123` (matching `config.yaml server.url`); the server
 container publishes no host port. Upgrade path for auth: front Caddy with oauth2-proxy (OIDC/SSO) —
 see `ops/caddy/Caddyfile`.
+
+The dashboard routes bypass Caddy's API bearer and enforce authentication in the application.
+Login exchanges `DASHBOARD_TOKEN` for an HMAC-signed, time-limited `HttpOnly`,
+`SameSite=Strict` cookie scoped to `/dashboard`; missing secret configuration returns 503. The
+shipped `dashboard_cookie_secure: false` supports this local HTTP smoke test only. Set
+`server.dashboard_cookie_secure: true` whenever TLS is enabled, and add OIDC/SSO plus network
+restriction for a shared production installation.
 
 **Two URLs, one server (in-container loopback vs external Caddy).** `config.yaml server.url`
 (`:8123`) is the *external* URL — the address a human/CLI/second machine driving `ServerGateway`
@@ -124,3 +133,8 @@ Grafana (`:3000`) is provisioned with the Prometheus datasource and the `opendev
 dashboard (runs, denials, daily spend, shipper lag). Alert rules live in `ops/prometheus/alerts.yml`
 Some series are **pre-provisioned** for the scheduler service / a spend exporter and simply do
 not fire until those components run — see the header comment in `alerts.yml`.
+
+The application dashboard at `:8123/dashboard` complements Grafana with a run-level,
+audit-derived view: recent outcomes and cost, integrity state, policy decisions, sanitized event
+timeline, and integration posture. It scans a bounded audit window and does not return command
+arguments, subprocess output, or credential values.

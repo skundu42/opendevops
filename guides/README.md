@@ -12,6 +12,6 @@ demands:
 | [Security model](security-model.md) | the layered boundaries, what holds when policy fails, executor split, known limits |
 | [Budgets](budgets.md) | every cost/step/time ceiling, who enforces it, and who counts the money |
 | [Audit](audit.md) | per-run hash chains, event types, verification, shipping |
-| [Interfaces](interfaces.md) | CLI REPL, HTTP + webhooks, Slack chat-ops, scheduler, escalation flows |
-| [Deployment](deployment.md) | service-mode stack, monitoring, the experimental executor service, go-live gates |
+| [Interfaces](interfaces.md) | CLI REPL, authenticated dashboard, HTTP + webhooks, Slack chat-ops, scheduler, escalation flows |
+| [Deployment](deployment.md) | service-mode stack, dashboard, monitoring, the experimental executor service, go-live gates |
 | [Development](development.md) | test tiers, enforced conventions, the pinned-trio upgrade gate, how to extend |

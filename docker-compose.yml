@@ -61,6 +61,7 @@ services:
       OPENDEVOPS_SELF_URL: http://localhost:8000
       # Webhook-app + server-client secrets (names are configured in config.yaml; values live here).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DASHBOARD_TOKEN: ${DASHBOARD_TOKEN:?set DASHBOARD_TOKEN}
     volumes:
       - ./config:/deploy/config:ro     # config.yaml + models.yaml + budgets.yaml + policy/
       - agent-audit:/deploy/audit      # per-run audit chains (shared read-only with vector)

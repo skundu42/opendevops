@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Agent operations · opendevops</title>
+  <link rel="icon" href="/dashboard/assets/logo.png">
+  <link rel="stylesheet" href="/dashboard/assets/dashboard.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to dashboard</a>
+
+  <header class="app-header">
+    <div class="header-inner">
+      <a class="brand" href="/dashboard" aria-label="opendevops dashboard">
+        <img src="/dashboard/assets/logo.png" alt="" width="34" height="34">
+        <span>opendevops</span>
+      </a>
+
+      <nav class="primary-nav" aria-label="Dashboard sections">
+        <a href="#overview">Overview</a>
+        <a href="#runs">Runs</a>
+        <a href="#integrations">Integrations</a>
+      </nav>
+
+      <div class="header-actions">
+        <div class="connection-status" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>
+            <strong id="connection-state">Connecting</strong>
+            <small id="last-refresh">Waiting for data</small>
+          </span>
+        </div>
+        <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh dashboard">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M16.2 6.3A7 7 0 1 0 17 11h-1.8a5.2 5.2 0 1 1-.5-2.2l-2.4.1V7.2l4.7-.1.1 4.6h-1.8l-.1-2.1a7 7 0 0 0 1-3.3Z"/>
+          </svg>
+        </button>
+        <form method="post" action="/dashboard/logout">
+          <button class="sign-out-button" type="submit">Sign out</button>
+        </form>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content" class="dashboard-main">
+    <section class="page-heading" aria-labelledby="page-title">
+      <div>
+        <p class="breadcrumb">Operations / Agent telemetry</p>
+        <h1 id="page-title">Agent operations</h1>
+        <p class="page-description">
+          A read-only view of execution, policy decisions, spend, and audit integrity.
+        </p>
+      </div>
+      <dl class="runtime-summary" aria-label="Agent runtime">
+        <div><dt>Executor</dt><dd id="runtime-executor">—</dd></div>
+        <div><dt>Model</dt><dd id="runtime-model">—</dd></div>
+        <div><dt>Policy</dt><dd id="runtime-policy">—</dd></div>
+      </dl>
+    </section>
+
+    <section class="execution-path" aria-label="Agent execution path">
+      <div class="path-label">
+        <span>Execution path</span>
+        <small>Persisted from the latest audit window</small>
+      </div>
+      <ol>
+        <li>
+          <span class="path-icon path-intent" aria-hidden="true">01</span>
+          <span><strong>Intent</strong><small id="path-intent">— runs observed</small></span>
+        </li>
+        <li>
+          <span class="path-icon path-policy" aria-hidden="true">02</span>
+          <span><strong>Policy</strong><small id="path-policy">— decisions</small></span>
+        </li>
+        <li>
+          <span class="path-icon path-execution" aria-hidden="true">03</span>
+          <span><strong>Execution</strong><small id="path-executions">— commands</small></span>
+        </li>
+        <li>
+          <span class="path-icon path-audit" aria-hidden="true">04</span>
+          <span><strong>Audit</strong><small id="path-audit">— chains verified</small></span>
+        </li>
+      </ol>
+    </section>
+
+    <section id="overview" class="overview-section" aria-labelledby="overview-title">
+      <div class="section-heading">
+        <div>
+          <h2 id="overview-title">Today</h2>
+          <p>Current UTC reporting window</p>
+        </div>
+        <span class="read-only-label">Read-only</span>
+      </div>
+
+      <dl class="metric-row">
+        <div>
+          <dt>Runs</dt>
+          <dd id="runs-today">—</dd>
+          <p><span id="active-runs">—</span> active or awaiting approval</p>
+        </div>
+        <div>
+          <dt>Successful</dt>
+          <dd id="success-rate">—</dd>
+          <p>of completed runs</p>
+        </div>
+        <div>
+          <dt>Recorded spend</dt>
+          <dd id="cost-today">—</dd>
+          <div class="budget-line">
+            <span class="budget-track" aria-label="Daily budget used"><i id="budget-used"></i></span>
+            <small id="budget-caption">—</small>
+          </div>
+        </div>
+        <div>
+          <dt>Audit chains</dt>
+          <dd id="audit-health">—</dd>
+          <p><span id="audit-failed">—</span> failed verification</p>
+        </div>
+      </dl>
+    </section>
+
+    <section class="signal-grid">
+      <article class="panel activity-panel" aria-labelledby="activity-title">
+        <div class="panel-header">
+          <div>
+            <h2 id="activity-title">Run activity</h2>
+            <p>Completed and active runs over the last seven days</p>
+          </div>
+          <div class="chart-legend" aria-label="Chart legend">
+            <span><i class="legend-runs"></i>Runs</span>
+            <span><i class="legend-cost"></i>Spend</span>
+          </div>
+        </div>
+        <div id="activity-chart" class="activity-chart" aria-label="Run and cost activity over seven days"></div>
+      </article>
+
+      <article id="policy" class="panel activity-feed" aria-labelledby="policy-title">
+        <div class="panel-header">
+          <div>
+            <h2 id="policy-title">Latest activity</h2>
+            <p>Sanitized events from the newest run</p>
+          </div>
+        </div>
+        <div class="policy-stats" aria-label="Policy totals">
+          <div><span>Decisions</span><strong id="policy-decisions">—</strong></div>
+          <div><span>Executed</span><strong id="policy-executions">—</strong></div>
+          <div><span>Denied</span><strong id="policy-denials">—</strong></div>
+          <div><span>Escalated</span><strong id="policy-escalations">—</strong></div>
+        </div>
+        <ol id="event-rail" class="event-list">
+          <li class="empty-state">No audit events have landed yet.</li>
+        </ol>
+      </article>
+    </section>
+
+    <section id="runs" class="panel run-ledger" aria-labelledby="runs-title">
+      <div class="panel-header">
+        <div>
+          <h2 id="runs-title">Recent runs</h2>
+          <p>Newest persisted audit chains, ordered by last activity</p>
+        </div>
+        <div class="status-summary" aria-label="Run status summary" id="status-summary"></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Run</th>
+              <th>Status</th>
+              <th>Principal</th>
+              <th>Environment</th>
+              <th>Policy</th>
+              <th>Execution</th>
+              <th>Cost</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody id="run-rows">
+            <tr><td colspan="8" class="empty-state">Loading persisted runs…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="integrations" class="panel integrations-panel" aria-labelledby="integrations-title">
+      <div class="panel-header">
+        <div>
+          <h2 id="integrations-title">Integration posture</h2>
+          <p>Configured access boundaries; credential values are never returned</p>
+        </div>
+      </div>
+      <div id="integration-grid" class="integration-grid"></div>
+    </section>
+
+    <footer class="dashboard-footer">
+      <span>Audit-derived telemetry · refreshes every 15 seconds</span>
+      <span id="snapshot-id">Snapshot —</span>
+    </footer>
+  </main>
+  <script src="/dashboard/assets/dashboard.js" defer></script>
+</body>
+</html>

@@ -314,6 +314,14 @@ class ServerConfig(BaseModel):
     * ``github_webhook_secret_env`` — name of the env var holding the GitHub webhook HMAC secret
       (``X-Hub-Signature-256`` is verified over the raw body). ``None`` → ``/webhooks/github``
       fails closed (503).
+    * ``dashboard_token_env`` — name of the env var holding the dashboard login token. The token
+      is exchanged for a short-lived HMAC-authenticated HttpOnly cookie and is never stored in
+      browser storage or returned by an API. ``None`` or an unset variable makes dashboard login
+      fail closed (503).
+    * ``dashboard_session_ttl_s`` — dashboard session lifetime in seconds (default one hour,
+      bounded to one day).
+    * ``dashboard_cookie_secure`` — emit the dashboard cookie with ``Secure``. Keep ``false`` only
+      for the shipped local HTTP listener; set ``true`` when production TLS termination is active.
     * ``source_allowlist`` — client IPs permitted to reach ``/webhooks/alertmanager`` (empty =
       allow all). Compared against the *direct* peer IP (``request.client.host``); proxy headers
       are deliberately ignored because Caddy fronts this app on a trusted network.
@@ -328,6 +336,9 @@ class ServerConfig(BaseModel):
     api_key_env: str | None = None
     alertmanager_token_env: str | None = None
     github_webhook_secret_env: str | None = None
+    dashboard_token_env: str | None = None
+    dashboard_session_ttl_s: int = Field(default=3600, gt=0, le=86400)
+    dashboard_cookie_secure: bool = False
     source_allowlist: list[str] = []
     webhook_environment: str = "staging"
 

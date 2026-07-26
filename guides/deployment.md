@@ -21,7 +21,7 @@ The stack (`docker-compose.yml`):
 | `langgraph-server` | the agent graph + webhook app, built **from this repo**; durable run queue, exactly-once, SSE streaming |
 | `postgres` | the server's queue + checkpoint store |
 | `redis` | the server's task queue **and** the shared `RedisDailyCounter` |
-| `caddy` | the only ingress — HTTP static bearer-token gate on `:8123`; terminate TLS upstream in production |
+| `caddy` | the only ingress — API bearer gate plus pass-through to application-authenticated dashboard routes on `:8123`; terminate TLS upstream in production |
 | `vector` | tails per-run audit chains, merges them into the durable spool |
 | `prometheus` + `grafana` | metrics, alert rules, the provisioned ops dashboard |
 
@@ -32,7 +32,7 @@ The stack (`docker-compose.yml`):
 uv run langgraph build -t opendevops-langgraph:latest
 
 # 2. secrets — in the environment or a .env next to docker-compose.yml:
-#    GATEWAY_TOKEN, ANTHROPIC_API_KEY, LANGSMITH_API_KEY,
+#    GATEWAY_TOKEN, DASHBOARD_TOKEN, ANTHROPIC_API_KEY, LANGSMITH_API_KEY,
 #    POSTGRES_PASSWORD, GRAFANA_ADMIN_PASSWORD
 
 # 3. switch the daily counter to the shared backend (config/budgets.yaml):
@@ -44,6 +44,7 @@ docker compose up -d
 curl -sf http://localhost:8123/healthz
 curl -s -H "Authorization: Bearer $GATEWAY_TOKEN" \
   http://localhost:8123/assistants/search -X POST -d '{}'
+# Then open http://localhost:8123/dashboard and sign in with DASHBOARD_TOKEN.
 ```
 
 The server container publishes no host port — Caddy on `:8123` is the sole ingress. Auth upgrade
@@ -51,7 +52,24 @@ path: front Caddy with oauth2-proxy (OIDC/SSO); see `ops/caddy/Caddyfile`.
 
 The three `/webhooks/*` application routes bypass Caddy's gateway bearer because external senders
 cannot supply it; the app still requires its configured HMAC or route-specific bearer credential.
-All server API and metrics routes remain gateway-token protected.
+The `/dashboard*` routes also bypass the API bearer at Caddy because the application performs its
+own token-to-signed-session exchange. All remaining server API and metrics routes stay
+gateway-token protected.
+
+### Operator dashboard
+
+`/dashboard` provides a read-only, audit-derived view of runs, spend, policy decisions, the event
+timeline and integration posture. `DASHBOARD_TOKEN` is required by Compose; the application
+returns 503 rather than silently disabling authentication if its configured environment variable
+is absent.
+
+The shipped configuration supports local HTTP and therefore uses
+`server.dashboard_cookie_secure: false`. For every TLS deployment, set it to `true`. The cookie is
+otherwise `HttpOnly`, `SameSite=Strict`, signed and time-limited. For shared or internet-reachable
+installations, put Caddy behind OIDC/SSO (for example oauth2-proxy), restrict the network path, and
+rotate both the dashboard and gateway tokens. The application dashboard complements Grafana:
+Grafana answers fleet/alerting questions from metrics; `/dashboard` answers run-level,
+audit-integrity and policy questions.
 
 ### Two URLs, one server
 
@@ -106,6 +124,10 @@ rules (`ops/prometheus/alerts.yml`) cover policy-denial spikes (bypass probing),
 >80%, scheduler silence >1.5× period, and audit-shipper lag. Some series are pre-provisioned for
 components that ship later and simply don't fire until then (see the header comment in
 `alerts.yml`).
+
+The authenticated application dashboard at `:8123/dashboard` is the run-level companion. It reads
+the bounded local audit window, exposes no command output or credential values, and requires
+`DASHBOARD_TOKEN` as described above.
 
 ## Executor service (remote mode)
 

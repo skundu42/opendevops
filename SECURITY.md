@@ -19,6 +19,8 @@ In scope, particularly:
   executor injects.
 - **Audit-integrity issues**: any way an agent-controlled input can forge, drop, or reorder audit
   chain events without `opendevops audit verify` failing.
+- **Dashboard authorization or disclosure issues**: session forgery/bypass, token leakage, or any
+  route that reveals command arguments, subprocess output, or credential values.
 - **Scrubber escapes** with realistic secret formats, and **budget-enforcement escapes**.
 - Weaknesses in the executor service's decision-token verification.
 

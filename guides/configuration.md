@@ -23,6 +23,7 @@ Every secret in every config file is the **name of an environment variable**, ne
 
 ```sh
 ANTHROPIC_API_KEY=...        # required for live runs; never passed to subprocesses
+# DASHBOARD_TOKEN=...         # required to sign in to the service-mode dashboard
 # LANGSMITH_TRACING=true     # optional tracing
 # LANGSMITH_API_KEY=...
 ```
@@ -113,11 +114,21 @@ server:
   github_webhook_secret_env: null      # HMAC secret env var name for /webhooks/github; null ⇒ 503
   source_allowlist: []                 # client IPs allowed on the Alertmanager route (empty ⇒ all)
   webhook_environment: staging         # policy environment for webhook-initiated runs
+  dashboard_token_env: DASHBOARD_TOKEN # env var holding the dashboard sign-in token; unset value ⇒ 503
+  dashboard_session_ttl_s: 3600        # signed browser-session lifetime (1–86400 seconds)
+  dashboard_cookie_secure: false       # set true whenever the public endpoint uses HTTPS
 ```
 
 Inside the server container, `OPENDEVOPS_SELF_URL` (default `http://localhost:8000`) overrides
 `server.url` for the webhook app's *own* gateway only — see
 [deployment](deployment.md#two-urls-one-server).
+
+The dashboard uses the same name-not-value convention as every other secret. A successful login
+exchanges the configured token for a short-lived, HMAC-signed `HttpOnly`, `SameSite=Strict`
+cookie scoped to `/dashboard`; the raw token is not persisted in browser storage. Assets and the
+login form remain public, while the dashboard page and snapshot API require a valid session.
+Production deployments should set `dashboard_cookie_secure: true`, terminate TLS before Caddy,
+and preferably place the dashboard behind an identity-aware proxy as an additional control.
 
 ### `slack`, `scheduler`, `principals`
 

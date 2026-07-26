@@ -36,7 +36,8 @@ Extras, and when you need them:
 cp .env.example .env
 ```
 
-Set `ANTHROPIC_API_KEY` in `.env`. The key is used by the agent process only — it is **never**
+For the local CLI, only `ANTHROPIC_API_KEY` is required. The other entries in `.env.example`
+belong to service mode. The model key is used by the agent process only — it is **never**
 passed into the environment of any subprocess the agent runs (the executor constructs child
 environments from scratch; see the [security model](security-model.md)).
 
@@ -133,4 +134,5 @@ The process **refuses to start** rather than run in a degraded state. The common
 - [Architecture](architecture.md) — how the one-graph, many-frontends design fits together
 - [Policy](policy.md) — read `config/policy/` and write your first pack
 - [Configuration](configuration.md) — every knob in the three YAML files
-- [Deployment](deployment.md) — service mode (HTTP API, webhooks, monitoring)
+- [Deployment](deployment.md) — service mode (HTTP API, webhooks, authenticated dashboard,
+  monitoring)

@@ -56,6 +56,9 @@ server:                                      # service mode: self-hosted LangGra
   # never a value; a route whose named env var is unset fails CLOSED (503), never "auth disabled".
   alertmanager_token_env: null               # env var holding the Alertmanager bearer token (also auths run-complete); null => 503
   github_webhook_secret_env: null            # env var holding the GitHub webhook HMAC secret; null => 503
+  dashboard_token_env: DASHBOARD_TOKEN       # env var holding the dashboard login token; unset => login fails closed (503)
+  dashboard_session_ttl_s: 3600              # short-lived signed HttpOnly session, maximum 86400
+  dashboard_cookie_secure: false             # set true when production TLS termination is active
   source_allowlist: []                       # client IPs allowed to POST /webhooks/alertmanager (empty => allow all); direct peer only, proxy headers ignored (Caddy fronts this)
   webhook_environment: staging               # policy-environment overlay for webhook-initiated runs (staging|prod)
 slack:                                        # Slack Socket-Mode chat-ops adapter (opt-in; interfaces/slack_app.py)

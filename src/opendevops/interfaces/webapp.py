@@ -15,6 +15,9 @@ Turns infrastructure events into agent runs, and exposes operational endpoints:
   authenticated with the same Alertmanager token, logs + counts the completion, ``204``.
 * ``GET /healthz`` — unauthenticated liveness, ``200 {"status": "ok"}``.
 * ``GET /metrics`` — Prometheus exposition off a per-app :class:`CollectorRegistry`.
+* ``GET /dashboard`` — authenticated, read-only operations dashboard backed by the persisted audit
+  chains. A configured token is exchanged for a short-lived signed HttpOnly cookie; assets and
+  snapshot APIs live under the same ``/dashboard`` prefix.
 
 Firewall: this module depends ONLY on the :class:`~opendevops.gateway.base.AgentGateway`
 protocol — it never imports ``langgraph_sdk``. All route logic runs against the injected gateway,
@@ -46,6 +49,8 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, generate_latest
+
+from opendevops.interfaces.dashboard import register_dashboard
 
 if TYPE_CHECKING:
     from opendevops.config import AppConfig
@@ -263,6 +268,7 @@ def create_app(
     # Strong refs to in-flight background runs so the event loop does not GC a pending task; each
     # removes itself on completion (add_done_callback below).
     app.state.background_tasks = set()
+    register_dashboard(app, cfg)
 
     def _spawn_run(
         thread_id: str, user_input: str, *, principal: str, interface: str

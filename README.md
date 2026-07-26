@@ -1,132 +1,253 @@
-# opendevops
+<p align="center">
+  <img src="docs/assets/opendevops-mark.png" width="148" alt="opendevops logo">
+</p>
 
-[![CI](https://github.com/skundu42/opendevops/actions/workflows/ci.yml/badge.svg)](https://github.com/skundu42/opendevops/actions/workflows/ci.yml)
+<h1 align="center">opendevops</h1>
 
-An **autonomous DevOps agent** built on LangChain [deepagents](https://github.com/langchain-ai/deepagents):
-it investigates and operates Kubernetes, GitHub, cloud CLIs, and remote hosts **fully
-autonomously** — no human in the loop as the normal path — under a fail-closed policy engine,
-budget stop-losses, and a hash-chained audit trail.
+<p align="center">
+  <strong>An autonomous DevOps agent with a smaller blast radius than its prompt.</strong>
+</p>
+
+<p align="center">
+  Investigate infrastructure, diagnose incidents, and perform tightly scoped operations through
+  argv-only execution, least-privilege credentials, fail-closed policy, budget stop-losses, and
+  structurally verifiable audit chains.
+</p>
+
+<p align="center">
+  <a href="https://github.com/skundu42/opendevops/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/skundu42/opendevops/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-28516b.svg"></a>
+  <img alt="Python 3.11 and 3.12" src="https://img.shields.io/badge/python-3.11%20%7C%203.12-28a6a1.svg">
+  <img alt="Project status: beta" src="https://img.shields.io/badge/status-beta-f0643b.svg">
+</p>
+
+---
+
+## What is opendevops?
+
+opendevops is an open-source operations agent built on LangGraph and LangChain deepagents. It can
+trace a CrashLoop, analyze CI failures, inspect cloud resources, verify drift, summarize noisy
+logs, and execute a deliberately narrow set of staging remediations.
+
+The model never receives a shell. Every command is an `argv: list[str]` request that passes through
+budget controls, a default-deny policy engine, a credential-selection boundary, output scrubbing,
+and a per-run audit chain.
 
 ```text
 you › why is pod api-0 in namespace web crash-looping?
 → run_command kubectl -n web describe pod api-0
 → run_command kubectl -n web logs api-0 --previous --tail 200
-The container exits with OOMKilled (exit 137): the JVM heap is configured above the
-container memory limit. …
+
+The container was OOMKilled (exit 137). Its JVM heap is configured above the
+container memory limit. Reduce the heap or raise the workload limit.
+
 spent $0.0841 (run) / $0.34 (today)
 ```
 
-## Why it's safe to let it run
+### Capabilities
 
-- **There is no shell.** The one execution tool takes `argv: list[str]`, runs with `shell=False`,
-  and interpreters (`bash`, `python`, `xargs`, `awk`, …) are hard-denied. The entire
-  command-injection bypass taxonomy has no surface to exist on.
-- **Credentials are the boundary, not the policy.** Every allowed action maps to a
-  per-(tool-family, environment, read/write) credential, minimally scoped server-side. The design
-  invariant: *even a total policy bypass is read-only and cannot read secrets*.
-- **Default-deny, fail-closed policy.** Layered YAML rules + code hooks decide
-  allow / deny / rewrite / escalate per call; no matching rule — or any pipeline exception — is a
-  deny. Residual risky calls suspend for human approve / edit / reject.
-- **Budget guardrails.** Model/tool/step limits and wall clocks are hard controls; USD limits are
-  post-usage stop-losses and can overshoot by in-flight model calls. Counter outages fail closed,
-  and an unpriced model refuses to boot.
-- **Verifiable audit structure.** Every decision and execution lands in a per-run sha256 hash
-  chain the agent cannot reach. Strict verification catches corruption and missing completion;
-  authenticity comes from shipping the chain to an independently protected WORM/SIEM sink.
+| Area | Supported today | Boundary |
+|---|---|---|
+| Kubernetes | diagnostics, logs, events, Helm inspection | staging mutations only; server dry-run enforced before apply |
+| GitHub | CI diagnosis, run inspection, PR-based remediation | repository and API method/path allowlists |
+| AWS | curated EC2, ECS, RDS, CloudFormation, S3, Lambda, CloudWatch and related reads | no cloud-resource deployment or IAM access |
+| Google Cloud | curated Compute, GKE, Cloud SQL, Pub/Sub, Logging, Storage, Run and Functions reads | mutations and secret access denied |
+| Azure | curated VM, AKS, ACR, networking, SQL, Cosmos DB, Monitor and resource reads | mutations and secret material denied |
+| Remote hosts | structured, read-only SSH checks | pinned user, key, hosts and `known_hosts` |
+| Interfaces | CLI, HTTP, Slack, scheduler, Alertmanager and GitHub webhooks | one shared gateway and safety core |
+| Operations UI | authenticated run, policy, cost, integration and audit monitoring | read-only; secret values and command output are never exposed |
 
-The full reasoning lives in the [security model](guides/security-model.md).
+> [!IMPORTANT]
+> This is not a general AWS, Google Cloud, or Azure deployment engine. Terraform, Pulumi,
+> CloudFormation updates, Google Cloud Deploy, ARM/Bicep deployment, and unrestricted provider CLI
+> mutations are not enabled.
 
-## What it can do
+## Operations dashboard
 
-| Capability | How |
-|---|---|
-| Kubernetes diagnostics (crashloops, OOM, pending pods, log RCA) | read-only kubectl pack against a `view`-role ServiceAccount |
-| Staged mutations (deploy / scale / rollback, staging) | kubectl-mutate pack with **enforced** server-dry-run-before-apply |
-| GitHub CI diagnosis + PR-based remediation | gh-read / gh-write packs, method+path-allowlisted `gh api` |
-| Cloud read-only investigation (AWS / GCP / Azure) | aws/gcloud/az packs over secret-denied read-only roles |
-| Remote host checks over SSH | structured `ssh_run` tool: host allowlist, pinned user/key/known_hosts |
-| Chat-ops | Slack Socket Mode: threads map to agent threads, approvals as buttons |
-| Scheduled operations | APScheduler service: drift detection, cert expiry, backup verification |
-| Alert-driven RCA | Alertmanager/GitHub webhooks → runs on stable incident threads |
+The service-mode dashboard is a read-only view derived directly from persisted audit chains. It
+shows run lifecycle, principals, environments, policy decisions, executions, denials, escalations,
+spend, structural integrity, and integration configuration.
 
-## Quickstart
+<p align="center">
+  <img src="docs/assets/dashboard.png" alt="Authenticated opendevops operations dashboard showing run activity, policy events, costs, audit integrity, and recent runs">
+</p>
+
+Browser authentication uses a dedicated token exchanged for a short-lived, HMAC-authenticated
+HttpOnly cookie. The raw token is never stored in browser storage or returned by an API.
 
 ```sh
-git clone https://github.com/skundu42/opendevops.git && cd opendevops
+# service-mode secrets
+export POSTGRES_PASSWORD='...'
+export GATEWAY_TOKEN='...'
+export GRAFANA_ADMIN_PASSWORD='...'
+export DASHBOARD_TOKEN='...'
+
+docker compose up -d
+open http://localhost:8123/dashboard
+```
+
+For production, terminate TLS before Caddy and set
+`server.dashboard_cookie_secure: true`. See [deployment](guides/deployment.md#operator-dashboard).
+
+## Why the execution model is different
+
+```mermaid
+flowchart LR
+    I["CLI · API · Slack · Scheduler · Webhooks"] --> G["AgentGateway"]
+    G --> B["Budgets and call limits"]
+    B --> P["Fail-closed policy"]
+    P -->|allow / rewrite| E["argv-only executor"]
+    P -->|escalate| H["Human decision"]
+    P -->|deny| D["Refusal"]
+    E --> C["One scoped credential"]
+    C --> T["Kubernetes · GitHub · Cloud CLIs · SSH"]
+    P --> A["Audit chain"]
+    E --> A
+    B --> A
+    A --> U["Authenticated dashboard"]
+    A --> W["WORM / SIEM sink"]
+```
+
+- **No shell surface.** Commands execute with `shell=False`; interpreters and command-building
+  utilities are denied.
+- **Credentials are the hard boundary.** The executor constructs a fresh environment and injects
+  exactly one credential family for the winning rule and channel.
+- **Policy fails closed.** Unknown tools, commands, flags, contexts, identities, and policy errors
+  deny execution.
+- **Secrets stay out of argv.** Standalone `{{secret:NAME}}` declarations inject environment
+  variables for env-aware programs and are removed before execution; embedded expansion is denied.
+- **Outputs are scrubbed first.** Known token forms and high-entropy strings are redacted before
+  model context, virtual files, or audit excerpts.
+- **USD limits are stop-losses.** Call, tool, recursion, and wall-clock limits are hard controls;
+  cost is known after model calls and can overshoot by in-flight work.
+- **Audit claims are precise.** Local SHA-256 chains prove structural consistency. Authenticity
+  requires the independently protected WORM or INSERT-only sink used in production.
+
+Read the full [security model](guides/security-model.md) before connecting real infrastructure.
+
+## Quick start
+
+### Prerequisites
+
+- Python 3.11 or 3.12
+- [`uv`](https://docs.astral.sh/uv/)
+- `kubectl` and access to a cluster where you can create the agent ServiceAccount
+- an Anthropic API key
+- optional provider CLIs only for integrations you enable
+
+### Install and configure
+
+```sh
+git clone https://github.com/skundu42/opendevops.git
+cd opendevops
+
 uv sync --extra checkpoint --extra server --extra dev
-cp .env.example .env                        # set ANTHROPIC_API_KEY
+cp .env.example .env
+# Set ANTHROPIC_API_KEY in .env.
 
-# give the agent its own read-only, secrets-denied credential:
+# Provision a read-only, secrets-denied Kubernetes identity.
 kubectl apply -f ops/k8s/agent-view-rbac.yaml
-ops/k8s/gen-kubeconfig.sh <your-context>    # → ~/.kube/agent-view.yaml, allowed contexts only
-#   then list <your-context> under targets.kubernetes.allowed_contexts in config/config.yaml
+ops/k8s/gen-kubeconfig.sh <your-context>
 
+# Add <your-context> to targets.kubernetes.allowed_contexts in config/config.yaml.
 uv run opendevops config check
 uv run opendevops chat
 ```
 
-Step-by-step, including the fail-closed boot gates you'll meet:
-**[guides/getting-started.md](guides/getting-started.md)**.
+The repository deliberately ships with an empty Kubernetes context allowlist. `config check` and
+every runtime entry point refuse to proceed until you make that deployment choice explicitly.
 
-## Architecture in one paragraph
+Continue with the [step-by-step getting-started guide](guides/getting-started.md).
 
-One deepagents graph carries the entire safety core as middleware (cost caps → daily budgets →
-call limits → policy+audit, innermost); every frontend — CLI REPL, LangGraph Server HTTP API,
-Slack, scheduler — talks to it through a single `AgentGateway` protocol, so moving from
-in-process to service mode is configuration, not a rewrite. Execution is argv-only into a
-constructed environment holding exactly one credential; outputs are secret-scrubbed before the
-model sees them; large outputs spill into the agent's virtual filesystem for grepping. An
-experimental **executor service** mode moves execution (and all credentials) into a gVisor
-sandbox authorized per-call by ed25519-signed policy decisions.
-Details: **[guides/architecture.md](guides/architecture.md)**.
+## Configuration
 
-## Documentation
+Configuration is strict Pydantic over three files:
 
-| | |
+| File | Purpose |
 |---|---|
-| [Getting started](guides/getting-started.md) | clone → configured → first live session |
-| [Architecture](guides/architecture.md) | the one-graph design, middleware, tools, seams |
-| [Configuration](guides/configuration.md) | every knob in the three YAML files |
-| [Policy](guides/policy.md) | the engine, rule schema, packs, writing your own |
-| [Security model](guides/security-model.md) | layered boundaries; what holds when policy fails |
-| [Budgets](guides/budgets.md) | cost/step/time ceilings and their enforcement |
-| [Audit](guides/audit.md) | hash-chained trails and verification |
-| [Interfaces](guides/interfaces.md) | CLI, HTTP + webhooks, Slack, scheduler |
-| [Deployment](guides/deployment.md) | service mode, monitoring, executor service, go-live gates |
-| [Development](guides/development.md) | tests, conventions, extending the agent |
+| [`config/config.yaml`](config/config.yaml) | targets, credential variable names, execution, interfaces and service settings |
+| [`config/models.yaml`](config/models.yaml) | agent model aliases and cache-aware pricing |
+| [`config/budgets.yaml`](config/budgets.yaml) | per-run profiles, daily stop-losses and counter backend |
+| [`config/policy/`](config/policy) | base denies, environment overlays and capability packs |
+
+Unknown keys fail validation. Missing credentials for an enabled policy family fail agent
+construction. Secret values belong in the process environment, never YAML.
+
+See the complete [configuration reference](guides/configuration.md).
+
+## Service mode
+
+The included Compose stack runs the LangGraph Server, Postgres, Redis, Caddy, Vector, Prometheus,
+Grafana, and the authenticated dashboard:
+
+```sh
+uv run langgraph build -t opendevops-langgraph:latest
+docker compose config -q
+docker compose up -d
+```
+
+Security-sensitive Compose credentials have no default values. Caddy is the only ingress; server
+APIs and metrics require `GATEWAY_TOKEN`, native webhook routes retain their HMAC/bearer
+authentication, and `/dashboard/*` uses the application session described above.
+
+> [!WARNING]
+> Never run the service stack on a Kubernetes cluster the agent itself manages. Use a dedicated
+> operations VM or a separate operations cluster.
+
+See [deployment](guides/deployment.md) for TLS, shared counters, audit shipping, alerts, backups,
+quota planning, and go-live gates.
 
 ## CLI
 
-| Command | Does |
+| Command | Purpose |
 |---|---|
-| `opendevops chat` | streaming REPL (`--environment`, `--profile`, `--principal`; `/cost`, Ctrl-C cancels) |
-| `opendevops config check` | validate all config; prints counts or the exact error |
-| `opendevops audit verify --dir <dir>` | verify every audit hash chain; exit 1 on any tamper |
-| `opendevops version` | version |
+| `opendevops chat` | streaming REPL with environment, profile and principal selection |
+| `opendevops config check` | validate runtime-critical configuration |
+| `opendevops audit verify --dir <dir>` | strictly verify audit structure and completion |
+| `opendevops audit verify --allow-incomplete` | diagnose structurally valid crashed/in-progress runs |
+| `opendevops version` | print the installed version |
 
-## Status
+## Documentation
 
-Feature-complete and extensively tested: read-only K8s diagnostics, staged mutations with
-escalation, service mode, Slack + scheduler, cloud/ssh/gh-write packs, and the executor split.
-Before pointing it at real infrastructure, work through the standing
-[pre-go-live gates](guides/deployment.md#standing-pre-go-live-gates-all-tiers) — most notably:
-`executor.mode=remote` is **experimental** (keep the default `local`), and the service stack must
-never run on a cluster the agent manages.
+| Guide | Contents |
+|---|---|
+| [Getting started](guides/getting-started.md) | first installation and live session |
+| [Architecture](guides/architecture.md) | graph, middleware, gateways, execution and data flow |
+| [Configuration](guides/configuration.md) | every supported setting |
+| [Policy](guides/policy.md) | rule schema, packs, precedence and extension |
+| [Security model](guides/security-model.md) | trust boundaries, failure modes and residual risk |
+| [Budgets](guides/budgets.md) | call limits, timeouts, pricing and USD stop-losses |
+| [Audit](guides/audit.md) | event schema, verification, shipping and authenticity |
+| [Interfaces](guides/interfaces.md) | CLI, dashboard, HTTP, webhooks, Slack and scheduler |
+| [Deployment](guides/deployment.md) | service stack, monitoring and production gates |
+| [Development](guides/development.md) | tests, conventions and extension points |
+| [Upgrade notes](docs/UPGRADE.md) | dependency and migration guidance |
 
-## Contributing and development
+## Project status
+
+opendevops is **beta software**. The core safety paths are covered by a deterministic suite of more
+than 2,300 tests with no live-model cost, but production readiness still depends on your
+credentials, policy extensions, audit sink, network boundary, TLS termination, and failure drills.
+
+The remote executor split is experimental and must not be used for production until every gate in
+[`ops/executor/README.md`](ops/executor/README.md) is closed. The default local executor is the
+reviewed path.
+
+## Development
 
 ```sh
 uv sync --extra checkpoint --extra server --extra slack --extra ssh --extra dev
-uv run pytest -q          # deterministic full suite, $0 LLM cost
+
+uv run pytest -q
 uv run ruff check .
 uv run mypy src ops
+uv lock --check
 ```
 
-Contributions are welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**, and
-**[guides/development.md](guides/development.md)** for test tiers, enforced conventions
-(fail-closed, SDK firewall, argv-only), and the pinned-dependency upgrade gate. Security reports:
-**[SECURITY.md](SECURITY.md)**.
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[development guide](guides/development.md). Please report vulnerabilities privately according to
+[SECURITY.md](SECURITY.md).
 
 ## License
 
-[Apache-2.0](LICENSE)
+Licensed under the [Apache License 2.0](LICENSE).

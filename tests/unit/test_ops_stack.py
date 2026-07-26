@@ -60,6 +60,7 @@ def test_docker_compose_config_validates() -> None:
             "POSTGRES_PASSWORD": "test-only-postgres-password",
             "GATEWAY_TOKEN": "test-only-gateway-token",
             "GRAFANA_ADMIN_PASSWORD": "test-only-grafana-password",
+            "DASHBOARD_TOKEN": "test-only-dashboard-token",
         },
     )
     assert result.returncode == 0, f"`docker compose config` failed:\n{result.stderr}"
@@ -111,7 +112,9 @@ def test_caddyfile_gates_on_bearer_token() -> None:
     assert "/webhooks/alertmanager" in text
     assert "/webhooks/github" in text
     assert "/webhooks/run-complete" in text
+    assert "@dashboard path /dashboard /dashboard/*" in text
     assert text.index("@native_webhooks") < text.index("@authorized")
+    assert text.index("@dashboard") < text.index("@authorized")
 
 
 def test_compose_has_no_known_default_service_credentials() -> None:
@@ -119,6 +122,7 @@ def test_compose_has_no_known_default_service_credentials() -> None:
     assert "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}" in text
     assert "${GATEWAY_TOKEN:?set GATEWAY_TOKEN}" in text
     assert "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}" in text
+    assert "${DASHBOARD_TOKEN:?set DASHBOARD_TOKEN}" in text
     assert "change-me-before-deploy" not in text
     assert "POSTGRES_PASSWORD:-postgres" not in text
     assert "GRAFANA_ADMIN_PASSWORD:-admin" not in text

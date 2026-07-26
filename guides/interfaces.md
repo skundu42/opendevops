@@ -1,6 +1,7 @@
 # Interfaces
 
-Four frontends, one agent. Each depends only on the `AgentGateway` protocol
+Four run frontends, one agent, plus one read-only operations dashboard. Each run frontend depends
+only on the `AgentGateway` protocol
 ([architecture](architecture.md#the-gateway-seam)), so they behave identically whether the graph
 runs in-process (CLI) or behind the LangGraph Server (everything else).
 
@@ -49,12 +50,40 @@ Custom routes (mounted by the server from `interfaces/webapp.py`):
 | `POST /webhooks/alertmanager` | static bearer token (+ optional source-IP allowlist) | alert → RCA run on a **stable incident thread** (thread id derived from the alert fingerprint; duplicate alerts join the same thread) |
 | `POST /webhooks/github` | HMAC (`X-Hub-Signature-256`) | CI-failure diagnosis runs |
 | `POST /webhooks/run-complete` | bearer token | target of server-side run-completion webhooks; posts final answers back to Slack |
+| `GET /dashboard` | signed dashboard session | operational dashboard shell |
+| `GET /dashboard/api/snapshot` | signed dashboard session | bounded, redacted audit-derived telemetry |
+| `GET`, `POST /dashboard/login` | sign-in token on POST | exchange the configured token for a signed session |
+| `POST /dashboard/logout` | signed dashboard session | clear the browser session |
 | `GET /healthz` | none | liveness |
 | `GET /metrics` | none (network-internal) | Prometheus |
 
 A route whose configured secret env var is unset returns **503** — fail-closed, never
 "auth disabled". Webhook-initiated runs use the `server.webhook_environment` policy overlay and
 the `incident` budget profile pattern.
+
+## Operations dashboard
+
+The service-mode dashboard at `/dashboard` is an audit-led control room for answering: what ran,
+where, under whose authority, what it cost, and which policy decisions shaped the result. It
+shows:
+
+- run counts and success rate, audit-recorded spend, denials and escalations;
+- seven-day run and spend activity;
+- recent run status, principal, environment, model/tool counts and cost;
+- a policy-decision breakdown and a sanitized event timeline;
+- runtime mode plus integration-configuration posture.
+
+Its data source is the hash-chained JSONL audit directory, not an additional analytics database.
+Reads are bounded to the newest 200 files and 16 MiB per file. Corrupt or incomplete chains are
+surfaced as operational state rather than hidden. The API deliberately excludes command argv,
+stdout/stderr and credential values; integration posture reports only configured/unconfigured
+counts.
+
+Set `server.dashboard_token_env` to the **name** of a strong token environment variable. Login
+compares the submitted value in constant time and returns a short-lived, signed `HttpOnly`,
+`SameSite=Strict` cookie. Missing configuration fails closed. Set
+`server.dashboard_cookie_secure: true` behind HTTPS, rotate the token like any operator
+credential, and add OIDC/SSO at the ingress for multi-user production installations.
 
 ## Slack chat-ops
 

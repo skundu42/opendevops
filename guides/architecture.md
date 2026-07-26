@@ -2,7 +2,9 @@
 
 opendevops is **one agent graph, many frontends**. A single LangChain
 [deepagents](https://github.com/langchain-ai/deepagents) graph carries the entire safety core as
-middleware; every interface (CLI, HTTP, Slack, scheduler) talks to it through one narrow protocol.
+middleware; every run interface (CLI, HTTP, Slack, scheduler) talks to it through one narrow
+protocol. The operations dashboard is deliberately off that command path: it derives a read-only
+projection from the audit ledger.
 
 ```
  Local tier (zero infra)                  Service tier (docker-compose)
@@ -24,6 +26,10 @@ middleware; every interface (CLI, HTTP, Slack, scheduler) talks to it through on
         Credentials = THE boundary: per-(tool-family, environment, ro|rw) kubeconfigs /
         tokens / roles. Audit: hash-chained per-run JSONL the agent has no write path to.
 ```
+
+The authenticated `/dashboard` surface reads a bounded window of those audit chains and emits a
+sanitized operational projection. It never calls tools, resumes runs, or exposes argv/output. That
+separation keeps monitoring from becoming a second control plane.
 
 ## The three load-bearing decisions
 
@@ -150,7 +156,7 @@ pre-deployment conditions — see [deployment](deployment.md#executor-service-re
 | `src/opendevops/tools/` | `run_command`, `ssh_run`, executor, scrubber, staging bridge, signing |
 | `src/opendevops/executor_service/` | the standalone remote executor service (FastAPI) |
 | `src/opendevops/gateway/` | the protocol + Local/Server implementations |
-| `src/opendevops/interfaces/` | CLI is `cli.py` at package root; webapp, Slack, scheduler here ([interfaces](interfaces.md)) |
+| `src/opendevops/interfaces/` | CLI is `cli.py` at package root; webapp, authenticated dashboard, Slack, scheduler here ([interfaces](interfaces.md)) |
 | `src/opendevops/models/` | alias→model resolution, price table |
 | `config/` | `config.yaml`, `models.yaml`, `budgets.yaml`, `policy/` ([configuration](configuration.md)) |
 | `ops/` | RBAC, kubeconfig generator, compose-stack configs, executor manifests, maintenance CLIs |

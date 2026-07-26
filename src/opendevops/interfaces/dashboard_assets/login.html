@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Sign in · opendevops</title>
+  <link rel="icon" href="/dashboard/assets/logo.png">
+  <link rel="stylesheet" href="/dashboard/assets/dashboard.css">
+</head>
+<body class="login-page">
+  <header class="login-header">
+    <a class="brand" href="/dashboard/login" aria-label="opendevops">
+      <img src="/dashboard/assets/logo.png" alt="" width="36" height="36">
+      <span>opendevops</span>
+    </a>
+    <span>Operations dashboard</span>
+  </header>
+
+  <main class="login-main">
+    <section class="login-context" aria-labelledby="login-title">
+      <p class="breadcrumb">Authenticated telemetry</p>
+      <h1 id="login-title">Monitor the agent from intent to audit.</h1>
+      <p>
+        Review runs, decisions, execution outcomes, costs, and chain integrity without exposing
+        infrastructure credentials or command output.
+      </p>
+      <ol class="login-path" aria-label="Observed execution path">
+        <li><span>01</span><strong>Intent</strong><small>Run and principal</small></li>
+        <li><span>02</span><strong>Policy</strong><small>Decision and rule</small></li>
+        <li><span>03</span><strong>Execution</strong><small>Outcome and timing</small></li>
+        <li><span>04</span><strong>Audit</strong><small>Hash-chain integrity</small></li>
+      </ol>
+    </section>
+
+    <section class="login-card" aria-label="Dashboard authentication">
+      <div class="login-card-header">
+        <img src="/dashboard/assets/logo.png" alt="" width="42" height="42">
+        <div>
+          <h2>Sign in to dashboard</h2>
+          <p>Use the operator token configured for this deployment.</p>
+        </div>
+      </div>
+
+      <p class="auth-error" role="alert">{{AUTH_ERROR}}</p>
+      <form method="post" action="/dashboard/login">
+        <label class="visually-hidden" for="dashboard-user">Account</label>
+        <input
+          class="visually-hidden"
+          id="dashboard-user"
+          name="username"
+          type="text"
+          value="dashboard"
+          autocomplete="username"
+          tabindex="-1"
+        >
+        <label for="token">Dashboard token</label>
+        <div class="secret-input">
+          <input
+            id="token"
+            name="token"
+            type="password"
+            required
+            autofocus
+            autocomplete="current-password"
+            spellcheck="false"
+          >
+          <button type="button" id="reveal-token" aria-label="Show token">Show</button>
+        </div>
+        <button class="primary-action" type="submit">Continue</button>
+      </form>
+
+      <div class="session-note">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M10 1.8 17 4.6v4.7c0 4.4-2.9 7.5-7 8.9-4.1-1.4-7-4.5-7-8.9V4.6l7-2.8Zm0 2L4.8 5.9v3.4c0 3.3 2 5.7 5.2 7 3.2-1.3 5.2-3.7 5.2-7V5.9L10 3.8Zm-.8 3.1h1.6v3.9H9.2V6.9Zm0 5.2h1.6v1.6H9.2v-1.6Z"/>
+        </svg>
+        <p>
+          The token is exchanged for a short-lived, signed HttpOnly session and is not stored in
+          browser storage.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="login-footer">
+    Authentication fails closed when <code>server.dashboard_token_env</code> is not configured.
+  </footer>
+  <script src="/dashboard/assets/login.js" defer></script>
+</body>
+</html>
