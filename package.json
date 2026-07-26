@@ -1,0 +1,13 @@
+{
+  "name": "opendevops-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Strict TypeScript sources for the opendevops operations dashboard",
+  "scripts": {
+    "frontend:build": "tsc --project tsconfig.json",
+    "frontend:check": "tsc --project tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

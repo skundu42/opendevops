@@ -55,7 +55,7 @@ spent $0.0841 (run) / $0.34 (today)
 | Azure | curated VM, AKS, ACR, networking, SQL, Cosmos DB, Monitor and resource reads | mutations and secret material denied |
 | Remote hosts | structured, read-only SSH checks | pinned user, key, hosts and `known_hosts` |
 | Interfaces | CLI, HTTP, Slack, scheduler, Alertmanager and GitHub webhooks | one shared gateway and safety core |
-| Operations UI | live runs, queues, approvals, cancellation, policy/cost/audit detail and capability grants | OIDC RBAC + CSRF; secret values, prompts, responses and command output are never exposed |
+| Operations UI | identity-scoped agent chat, live runs, approvals, policy/cost/audit detail and capability grants | OIDC RBAC + CSRF; chat never exposes raw tool arguments, output, or credential values |
 
 > [!IMPORTANT]
 > This is not a general AWS, Google Cloud, or Azure deployment engine. Terraform, Pulumi,
@@ -64,10 +64,16 @@ spent $0.0841 (run) / $0.34 (today)
 
 ## Operations dashboard
 
-The service-mode dashboard merges verified audit chains with live gateway telemetry. It shows
-active runs, queues, workers, pending approvals, per-model timing and cost progression, policy
-decisions, tool timing, correlation IDs, spend, SLIs, and audit integrity. Operators can cancel
-runs; approvers can resolve interruptions; admins can activate or revoke typed capability grants.
+The service-mode dashboard includes an authenticated command channel for asking the agent directly
+about connected infrastructure. Conversations are private to the exact OIDC issuer and subject;
+operator/admin turns stream over SSE, retain a bounded transcript, and use the same gateway,
+budgets, policy, capability grants, and approval path as every other interface. The chat shows
+assistant responses and sanitized lifecycle activity, never raw command arguments or tool output.
+
+The rest of the dashboard merges verified audit chains with live gateway telemetry. It shows active
+runs, queues, workers, pending approvals, per-model timing and cost progression, policy decisions,
+tool timing, correlation IDs, spend, SLIs, and audit integrity. Operators can cancel runs;
+approvers can resolve interruptions; admins can activate or revoke typed capability grants.
 
 <p align="center">
   <img src="docs/assets/dashboard.png" alt="Authenticated opendevops operations dashboard showing run activity, policy events, costs, audit integrity, and recent runs">
@@ -86,6 +92,9 @@ server:
   dashboard_session_backend: redis
   dashboard_session_redis_url: redis://redis:6379/2
   dashboard_cookie_secure: true
+  dashboard_chat_enabled: true
+  dashboard_chat_retention_days: 30
+  dashboard_chat_max_message_chars: 8000
   oidc:
     issuer: https://id.example.com/realms/operations
     client_id_env: OIDC_CLIENT_ID
@@ -138,7 +147,7 @@ execution also requires `targets.kubernetes.kubeconfig_rw_by_environment.prod`; 
 
 ```mermaid
 flowchart LR
-    I["CLI · API · Slack · Scheduler · Webhooks · OIDC dashboard"] --> G["AgentGateway"]
+    I["CLI · API · Slack · Scheduler · Webhooks · OIDC dashboard chat"] --> G["AgentGateway"]
     O["OIDC session + RBAC"] --> I
     G --> B["Budgets and call limits"]
     B --> P["Fail-closed policy"]
@@ -179,6 +188,7 @@ Read the full [security model](guides/security-model.md) before connecting real 
 
 - Python 3.11 or 3.12
 - [`uv`](https://docs.astral.sh/uv/)
+- Node.js 22+ with npm (compiles the dashboard's TypeScript sources)
 - `kubectl` and access to a cluster where you can create the agent ServiceAccount
 - an Anthropic API key
 - optional provider CLIs only for integrations you enable
@@ -189,6 +199,8 @@ Read the full [security model](guides/security-model.md) before connecting real 
 git clone https://github.com/skundu42/opendevops.git
 cd opendevops
 
+npm ci
+npm run frontend:build
 uv sync --extra checkpoint --extra server --extra dev
 cp .env.example .env
 # Set ANTHROPIC_API_KEY in .env.
@@ -229,6 +241,10 @@ The included Compose stack runs the LangGraph Server, Postgres, Redis, Caddy, Ve
 Grafana, and the authenticated dashboard:
 
 ```sh
+npm ci
+npm run frontend:check
+npm run frontend:build
+
 uv run langgraph build -t opendevops-langgraph:latest
 docker compose config -q
 docker compose up -d
@@ -278,6 +294,10 @@ quota planning, and go-live gates.
 ## Development
 
 ```sh
+npm ci
+npm run frontend:check
+npm run frontend:build
+
 uv sync --extra checkpoint --extra server --extra slack --extra ssh --extra dev
 
 uv run pytest -q

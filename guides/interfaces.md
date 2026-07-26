@@ -51,6 +51,10 @@ Custom routes (mounted by the server from `interfaces/webapp.py`):
 | `POST /webhooks/github` | HMAC (`X-Hub-Signature-256`) | CI-failure diagnosis runs |
 | `POST /webhooks/run-complete` | bearer token | target of server-side run-completion webhooks; posts final answers back to Slack |
 | `GET /dashboard` | opaque server-side session | operational dashboard shell |
+| `GET`, `POST /dashboard/api/chat/threads` | operator/admin; POST uses CSRF | list or create identity-scoped investigations |
+| `GET /dashboard/api/chat/threads/{thread_id}` | owning operator/admin | bounded private transcript |
+| `POST /dashboard/api/chat/threads/{thread_id}/messages` | owning operator/admin + CSRF | stream an agent turn over SSE |
+| `POST /dashboard/api/chat/threads/{thread_id}/cancel` | owning operator/admin + CSRF | cancel the active chat run |
 | `GET /dashboard/api/snapshot` | viewer+ | bounded audit + live control-plane snapshot |
 | `GET /dashboard/api/events` | viewer+ | SSE audit changes and live run/queue/worker/approval state |
 | `GET /dashboard/api/runs/{run_id}` | viewer+ | correlated run, trace, model, policy, tool and integrity detail |
@@ -72,9 +76,23 @@ the `incident` budget profile pattern.
 
 ## Operations dashboard
 
-The service-mode dashboard at `/dashboard` is an audit-led control room for answering: what is
-running, what is queued, which approvals are waiting, where an action ran, under whose authority,
-what it cost, and which policy decisions shaped the result. It shows:
+The service-mode dashboard at `/dashboard` includes an agent command channel plus an audit-led
+control room. An operator or admin can ask about connected infrastructure in a durable LangGraph
+thread. Each turn uses `principal=oidc:{issuer}#{subject}`, `interface=http`, the selected
+`staging`/`prod` policy environment, and the normal gateway budget and safety core. Concurrent turns
+on one thread are refused. An interrupted turn becomes read-only until an approver resolves it in
+Live control; production requester/approver separation is unchanged.
+
+Chat threads and their bounded transcripts are private to an exact issuer/subject pair and expire
+after the configured retention period. The browser receives assistant text plus sanitized tool
+lifecycle and policy-denial labels over the POST response's SSE stream. Raw tool arguments,
+stdout/stderr, escalation arguments, and credentials are neither sent to the chat UI nor stored in
+its transcript. The content-free control ledger records thread/run lifecycle attribution without
+copying prompts or responses.
+
+The control room answers what is running, what is queued, which approvals are waiting, where an
+action ran, under whose authority, what it cost, and which policy decisions shaped the result. It
+shows:
 
 - active LangGraph/gateway runs, queue and worker state, retries/errors and pending approvals;
 - run counts and success rate, audit-recorded spend, denials and escalations;
@@ -88,18 +106,20 @@ what it cost, and which policy decisions shaped the result. It shows:
 Persisted truth comes from the hash-chained JSONL audit directory; live state comes from the
 gateway/LangGraph SDK and the web control projection. The browser receives changes over SSE
 instead of polling the entire audit window. Reads are bounded to the newest 200 files and 16 MiB
-per file. Corrupt or incomplete chains are surfaced, not hidden. The API deliberately excludes
-command argv, prompt/response content, stdout/stderr and credential values.
+per file. Corrupt or incomplete chains are surfaced, not hidden. Audit and run-detail APIs
+deliberately exclude command argv, prompt/response content, stdout/stderr and credential values;
+chat content is returned only through the identity-owned chat routes described above.
 
 Production uses `server.dashboard_auth_mode: oidc` with an exact issuer, registered redirect URI,
 client env names and explicit role mappings. Sessions are opaque, server-side, short-lived and
 revocable; state-changing calls require CSRF. Static-token mode gives the local developer all four
 roles and must not be used as a deployed authentication system.
 
-RBAC is intentionally non-hierarchical around approval: `operator` can cancel and propose but
-cannot approve; `approver` can approve but cannot operate; `admin` is the emergency/full-control
-role. Every login, approval, cancellation, session revocation, dashboard detail view and
-configuration transition is written to the hash-linked control-event ledger with issuer + subject.
+RBAC is intentionally non-hierarchical around approval: `operator` can chat, cancel and propose but
+cannot approve; `approver` can approve but cannot initiate agent turns; `admin` is the
+emergency/full-control role. Every login, chat run, approval, cancellation, session revocation,
+dashboard detail view and configuration transition is written to the hash-linked control-event
+ledger with issuer + subject.
 
 ## Slack chat-ops
 

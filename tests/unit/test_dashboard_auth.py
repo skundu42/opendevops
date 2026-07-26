@@ -46,8 +46,17 @@ async def test_opaque_session_can_be_revoked_by_issuer_and_subject() -> None:
 def test_rbac_does_not_treat_operator_as_approver() -> None:
     session = _session(roles=["operator"])
     require_permission(session, "run.cancel")
+    require_permission(session, "chat.use")
     with pytest.raises(DashboardAuthError, match="approval.resolve"):
         require_permission(session, "approval.resolve")
+
+
+def test_chat_requires_an_operator_or_admin_role() -> None:
+    with pytest.raises(DashboardAuthError, match="chat.use"):
+        require_permission(_session(roles=["viewer"]), "chat.use")
+    with pytest.raises(DashboardAuthError, match="chat.use"):
+        require_permission(_session(roles=["approver"]), "chat.use")
+    require_permission(_session(roles=["admin"]), "chat.use")
 
 
 def test_oidc_role_claims_map_to_explicit_dashboard_roles(tmp_path: Path) -> None:

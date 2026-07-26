@@ -63,6 +63,9 @@ server:                                      # service mode: self-hosted LangGra
   dashboard_session_redis_url: null           # e.g. redis://redis:6379/2 (DB 1 belongs to LangGraph)
   dashboard_session_ttl_s: 3600              # short-lived opaque server-side session (max 8h)
   dashboard_cookie_secure: false             # set true when production TLS termination is active
+  dashboard_chat_enabled: true               # authenticated operator/admin command channel
+  dashboard_chat_retention_days: 30          # bounded identity-scoped transcript retention (1-365)
+  dashboard_chat_max_message_chars: 8000     # per-message limit (256-24000)
   oidc:
     issuer: null                              # https://login.microsoftonline.com/<tenant>/v2.0, Okta, Keycloak, etc.
     client_id_env: null                       # NAME of the env var holding the OIDC client id

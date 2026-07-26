@@ -121,10 +121,17 @@ It maps provider claims to non-hierarchical `viewer`, `operator`, `approver` and
 Sessions and login transactions are server-side; the browser has only an opaque, revocable,
 short-lived cookie and every state-changing route requires CSRF.
 
-Every control event records the stable OIDC issuer + subject. The gateways also refuse production
-approve/edit decisions when that identity matches the run requester; the grant ledger refuses
-requester self-approval before a separate administrator activation. Static-token dashboard auth is
-an explicit local-development mode, not a deployed identity system.
+Dashboard chat is limited to `operator` and `admin`. Every thread read, turn and cancellation
+requires exact issuer/subject ownership; the gateway receives that same stable principal for audit
+and budget attribution. The transcript store contains user prompts, assistant responses and only
+sanitized lifecycle labels. It never receives raw tool arguments, tool output or escalation
+payloads. This store is operational data—not a hash-chain authenticity record—so retention,
+backup access and deletion policy must treat it as potentially sensitive.
+
+Every content-free control event records the stable OIDC issuer + subject. The gateways also refuse
+production approve/edit decisions when that identity matches the run requester; the grant ledger
+refuses requester self-approval before a separate administrator activation. Static-token dashboard
+auth is an explicit local-development mode, not a deployed identity system.
 
 ## Detection
 
@@ -140,8 +147,8 @@ policy-denial-spike rule — repeated denials are a bypass-probing signal, not n
   server-side denial of secret reads.
 - `mode=remote` is experimental (gates above); production currently uses the local executor with
   carefully scoped credentials.
-- The control ledger is SQLite. Multi-replica service mode needs a shared single-writer durable
-  volume until a Postgres backend lands.
+- The control ledger and dashboard chat transcript are SQLite. Multi-replica service mode needs a
+  shared single-writer durable volume until a Postgres backend lands.
 - AWS, GCP and Azure packs remain read-only. A deploy capability type exists in change control,
   but no grant can override the absent/denied mutation rules or create cloud `rw` credentials.
 - Grant target strings record the reviewed change scope; executable target enforcement remains in

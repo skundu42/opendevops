@@ -204,6 +204,7 @@ class DashboardAuthError(RuntimeError):
 
 _PERMISSIONS: dict[str, set[DashboardRole]] = {
     "dashboard.read": {"viewer", "operator", "approver", "admin"},
+    "chat.use": {"operator", "admin"},
     "run.cancel": {"operator", "admin"},
     "approval.resolve": {"approver", "admin"},
     "config.propose": {"operator", "admin"},

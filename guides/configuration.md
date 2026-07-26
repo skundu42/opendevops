@@ -126,6 +126,9 @@ server:
   dashboard_session_redis_url: redis://redis:6379/2
   dashboard_session_ttl_s: 3600        # opaque server-side session lifetime (maximum eight hours)
   dashboard_cookie_secure: false       # set true whenever the public endpoint uses HTTPS
+  dashboard_chat_enabled: true         # operator/admin agent command channel
+  dashboard_chat_retention_days: 30    # idle transcript retention, 1-365 days
+  dashboard_chat_max_message_chars: 8000 # per-message bound, 256-24000
   oidc:
     issuer: https://id.example.com/realms/operations
     client_id_env: OIDC_CLIENT_ID
@@ -152,6 +155,13 @@ to `/dashboard`; the cookie contains no token or claims. Session revocation dele
 immediately. Every state-changing API also requires a session-bound CSRF header. Set
 `dashboard_cookie_secure: true` behind HTTPS.
 
+Dashboard chat reuses the `control_plane.database` SQLite volume. Threads and transcripts are
+scoped to the exact authenticated issuer/subject, limited to 50 threads per identity and the newest
+500 transcript events per thread, and idle threads expire after
+`dashboard_chat_retention_days`. Set `dashboard_chat_enabled: false` to remove all chat routes.
+The message limit applies after whitespace normalization; the request body has an additional
+32 KiB hard ceiling.
+
 ### `control_plane` — capability grants and loop controls
 
 ```yaml
@@ -168,11 +178,12 @@ control_plane:
   minimum_cooldown_s: 5
 ```
 
-The SQLite ledger is shared by the dashboard, CLI and policy middleware. In a multi-replica
-deployment, place it on a single-writer durable volume until the control ledger gains a Postgres
-backend. `grant_required_environments` identifies the environments where every rw execution needs
-an active grant. Production Kubernetes apply/rollout/scale/delete reaches this gate; real apply is
-still blocked until the same manifest passed a server-side dry-run in the current run.
+The SQLite database is shared by the dashboard chat transcript, control ledger, CLI and policy
+middleware. In a multi-replica deployment, place it on a single-writer durable volume until these
+stores gain a Postgres backend. `grant_required_environments` identifies the environments where
+every rw execution needs an active grant. Production Kubernetes apply/rollout/scale/delete reaches
+this gate; real apply is still blocked until the same manifest passed a server-side dry-run in the
+current run.
 
 A grant is deliberately narrower than arbitrary configuration: capability, reviewed target set,
 reason, expiry, operation ceilings, repeat ceiling, failure threshold, cooldown, and dry-run

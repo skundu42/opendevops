@@ -395,10 +395,10 @@ class ServerConfig(BaseModel):
     * ``github_webhook_secret_env`` — name of the env var holding the GitHub webhook HMAC secret
       (``X-Hub-Signature-256`` is verified over the raw body). ``None`` → ``/webhooks/github``
       fails closed (503).
-    * ``dashboard_token_env`` — name of the env var holding the dashboard login token. The token
-      is exchanged for a short-lived HMAC-authenticated HttpOnly cookie and is never stored in
-      browser storage or returned by an API. ``None`` or an unset variable makes dashboard login
-      fail closed (503).
+    * ``dashboard_token_env`` — name of the env var holding the local-development dashboard login
+      token. The token is exchanged for an opaque, short-lived server-side session in an HttpOnly
+      cookie and is never stored in browser storage or returned by an API. ``None`` or an unset
+      variable makes dashboard login fail closed (503).
     * ``dashboard_session_ttl_s`` — dashboard session lifetime in seconds (default one hour,
       bounded to one day).
     * ``dashboard_cookie_secure`` — emit the dashboard cookie with ``Secure``. Keep ``false`` only
@@ -423,6 +423,9 @@ class ServerConfig(BaseModel):
     dashboard_session_redis_url: str | None = None
     dashboard_session_ttl_s: int = Field(default=3600, gt=0, le=86400)
     dashboard_cookie_secure: bool = False
+    dashboard_chat_enabled: bool = True
+    dashboard_chat_retention_days: int = Field(default=30, ge=1, le=365)
+    dashboard_chat_max_message_chars: int = Field(default=8000, ge=256, le=24000)
     oidc: OIDCConfig = Field(default_factory=OIDCConfig)
     source_allowlist: list[str] = []
     webhook_environment: Literal["staging", "prod"] = "staging"

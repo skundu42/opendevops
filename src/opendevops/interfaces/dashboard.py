@@ -11,7 +11,7 @@ import re
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qs
 
 import httpx
@@ -27,7 +27,14 @@ from opendevops.control_plane import (
     ChangeControlError,
     ChangeControlService,
 )
-from opendevops.gateway.base import GatewayError
+from opendevops.gateway.base import (
+    AssistantText,
+    EscalationEvent,
+    GatewayError,
+    RunEnd,
+    ToolCall,
+    ToolResult,
+)
 from opendevops.interfaces.dashboard_auth import (
     DashboardAuth,
     DashboardAuthError,
@@ -36,6 +43,7 @@ from opendevops.interfaces.dashboard_auth import (
     require_permission,
     validate_csrf,
 )
+from opendevops.interfaces.dashboard_chat import DashboardChatError, DashboardChatStore
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +53,7 @@ if TYPE_CHECKING:
     from opendevops.observability.live import LiveTelemetry
 
 _ASSET_DIR = Path(__file__).with_name("dashboard_assets")
+_GENERATED_ASSET_DIR = _ASSET_DIR / "generated"
 _ASSETS = {
     "dashboard.css": "text/css; charset=utf-8",
     "dashboard.js": "application/javascript; charset=utf-8",
@@ -57,6 +66,7 @@ _MAX_API_BODY = 32 * 1024
 _MAX_AUDIT_FILES = 200
 _MAX_AUDIT_FILE_BYTES = 16 * 1024 * 1024
 _RECENT_RUNS = 24
+_MAX_CHAT_RESPONSE_CHARS = 100_000
 
 _CSP = (
     "default-src 'self'; "
@@ -89,6 +99,8 @@ def _html(
     error: str = "",
     session: DashboardSession | None = None,
     auth_mode: str = "static",
+    chat_enabled: bool = True,
+    chat_max_message_chars: int = 8000,
 ) -> HTMLResponse:
     template = (_ASSET_DIR / name).read_text(encoding="utf-8")
     replacements = {
@@ -100,6 +112,9 @@ def _html(
         "{{IDENTITY_ROLES}}": html.escape(", ".join(session.roles) if session else ""),
         "{{STATIC_FORM_CLASS}}": "" if auth_mode == "static" else "is-hidden",
         "{{OIDC_FORM_CLASS}}": "" if auth_mode == "oidc" else "is-hidden",
+        "{{CHAT_ENABLED}}": "true" if chat_enabled else "false",
+        "{{CHAT_SECTION_CLASS}}": "" if chat_enabled else "is-hidden",
+        "{{CHAT_MAX_MESSAGE_CHARS}}": str(chat_max_message_chars),
     }
     body = template
     for marker, value in replacements.items():
@@ -120,6 +135,18 @@ class SessionRevokeRequest(BaseModel):
     subject: str = Field(min_length=1, max_length=500)
 
 
+class ChatThreadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    environment: Literal["staging", "prod"] = "staging"
+
+
+class ChatMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = Field(min_length=1, max_length=24_000)
+
+
 async def _json_model(request: Request, model: type[BaseModel]) -> BaseModel:
     raw = await request.body()
     if len(raw) > _MAX_API_BODY:
@@ -136,6 +163,17 @@ async def _json_model(request: Request, model: type[BaseModel]) -> BaseModel:
 
 def _error(detail: str, status: int) -> JSONResponse:
     return JSONResponse({"detail": detail}, status_code=status, headers=_security_headers())
+
+
+def _bounded_chat_text(value: str, limit: int = _MAX_CHAT_RESPONSE_CHARS) -> str:
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit].rstrip()}\n\n[Response truncated by dashboard transcript limit.]"
+
+
+def _chat_error(exc: DashboardChatError) -> JSONResponse:
+    detail = str(exc)
+    return _error(detail, 404 if detail == "chat thread not found" else 409)
 
 
 def _set_session_cookie(response: Response, token: str, cfg: AppConfig) -> None:
@@ -181,11 +219,23 @@ def register_dashboard(
     gateway: AgentGateway,
     live_telemetry: LiveTelemetry,
 ) -> None:
-    """Register OIDC/RBAC UI, live SSE, run control, and configuration routes."""
+    """Register OIDC/RBAC UI, chat, live SSE, run control, and configuration routes."""
+    missing_browser_assets = [
+        name for name in ("dashboard.js", "login.js") if not (_GENERATED_ASSET_DIR / name).is_file()
+    ]
+    if missing_browser_assets:
+        raise RuntimeError(
+            "compiled dashboard assets are missing; run `npm ci && npm run frontend:build`"
+        )
     auth = DashboardAuth(cfg=cfg, store=build_session_store(cfg))
     change_control = ChangeControlService(cfg.control_plane)
+    chat_store = DashboardChatStore(
+        cfg.control_plane.database,
+        retention_days=cfg.server.dashboard_chat_retention_days,
+    )
     app.state.dashboard_auth = auth
     app.state.change_control = change_control
+    app.state.dashboard_chat = chat_store
 
     async def _session(request: Request) -> DashboardSession | None:
         return await auth.current(request.cookies.get(_COOKIE_NAME))
@@ -207,8 +257,9 @@ def register_dashboard(
         media_type = _ASSETS.get(asset_name)
         if media_type is None:
             return Response(status_code=404, headers=_security_headers())
+        asset_dir = _GENERATED_ASSET_DIR if asset_name.endswith(".js") else _ASSET_DIR
         return FileResponse(
-            _ASSET_DIR / asset_name,
+            asset_dir / asset_name,
             media_type=media_type,
             headers=_security_headers(cache="public, max-age=3600"),
         )
@@ -318,7 +369,335 @@ def register_dashboard(
             "index.html",
             session=session,
             auth_mode=cfg.server.dashboard_auth_mode,
+            chat_enabled=cfg.server.dashboard_chat_enabled,
+            chat_max_message_chars=cfg.server.dashboard_chat_max_message_chars,
         )
+
+    @app.get("/dashboard/api/chat/threads")
+    async def dashboard_chat_threads(request: Request) -> Response:
+        if not cfg.server.dashboard_chat_enabled:
+            return _error("dashboard chat is disabled", 404)
+        session, denied = await _api_session(request, "chat.use")
+        if denied is not None:
+            return denied
+        assert session is not None
+        return JSONResponse(
+            {
+                "items": [
+                    item.model_dump(mode="json")
+                    for item in chat_store.list_threads(session.identity)
+                ]
+            },
+            headers=_security_headers(),
+        )
+
+    @app.post("/dashboard/api/chat/threads")
+    async def dashboard_create_chat_thread(request: Request) -> Response:
+        if not cfg.server.dashboard_chat_enabled:
+            return _error("dashboard chat is disabled", 404)
+        session, denied = await _api_session(request, "chat.use")
+        if denied is not None:
+            return denied
+        assert session is not None
+        try:
+            validate_csrf(session, request.headers.get("x-csrf-token"))
+            body = await _json_model(request, ChatThreadRequest)
+            assert isinstance(body, ChatThreadRequest)
+            thread_id = await gateway.create_thread()
+            thread = chat_store.create(thread_id, session.identity, body.environment)
+        except DashboardAuthError as exc:
+            return _error(str(exc), 403)
+        except DashboardChatError as exc:
+            return _chat_error(exc)
+        except GatewayError:
+            logger.exception("Dashboard chat thread allocation failed")
+            return _error("agent gateway is temporarily unavailable", 503)
+        change_control.record_action(
+            "chat.thread_created",
+            session.identity,
+            {"thread_id": thread_id, "environment": body.environment},
+        )
+        return JSONResponse(
+            thread.model_dump(mode="json"),
+            status_code=201,
+            headers=_security_headers(),
+        )
+
+    @app.get("/dashboard/api/chat/threads/{thread_id}")
+    async def dashboard_chat_thread(thread_id: str, request: Request) -> Response:
+        if not cfg.server.dashboard_chat_enabled:
+            return _error("dashboard chat is disabled", 404)
+        session, denied = await _api_session(request, "chat.use")
+        if denied is not None:
+            return denied
+        assert session is not None
+        try:
+            thread = chat_store.get(thread_id, session.identity)
+            messages = chat_store.messages(thread_id, session.identity)
+        except DashboardChatError as exc:
+            return _chat_error(exc)
+        return JSONResponse(
+            {
+                "thread": thread.model_dump(mode="json"),
+                "messages": [item.model_dump(mode="json") for item in messages],
+            },
+            headers=_security_headers(),
+        )
+
+    @app.post("/dashboard/api/chat/threads/{thread_id}/messages")
+    async def dashboard_chat_message(thread_id: str, request: Request) -> Response:
+        if not cfg.server.dashboard_chat_enabled:
+            return _error("dashboard chat is disabled", 404)
+        session, denied = await _api_session(request, "chat.use")
+        if denied is not None:
+            return denied
+        assert session is not None
+        try:
+            validate_csrf(session, request.headers.get("x-csrf-token"))
+            body = await _json_model(request, ChatMessageRequest)
+            assert isinstance(body, ChatMessageRequest)
+            message = body.message.strip()
+            if not message:
+                raise DashboardAuthError("message must not be blank")
+            if len(message) > cfg.server.dashboard_chat_max_message_chars:
+                raise DashboardAuthError("message exceeds the configured dashboard limit")
+            thread = chat_store.begin_turn(thread_id, session.identity, message)
+        except DashboardAuthError as exc:
+            return _error(str(exc), 400 if "message" in str(exc) else 403)
+        except DashboardChatError as exc:
+            return _chat_error(exc)
+
+        await live_telemetry.queued(thread_id, session.principal, "http")
+        change_control.record_action(
+            "chat.message_submitted",
+            session.identity,
+            {"thread_id": thread_id, "environment": thread.environment},
+        )
+
+        async def _chat_events() -> Any:
+            terminal = False
+            run_id: str | None = None
+            latest_assistant_text = ""
+            try:
+                await live_telemetry.running(thread_id)
+                async for event in gateway.stream(
+                    thread_id,
+                    message,
+                    profile="default",
+                    principal=session.principal,
+                    interface="http",
+                    environment=thread.environment,
+                ):
+                    if await request.is_disconnected():
+                        raise asyncio.CancelledError
+                    if isinstance(event, AssistantText):
+                        latest_assistant_text = _bounded_chat_text(event.text)
+                        yield {
+                            "event": "assistant",
+                            "data": json.dumps(
+                                {"text": latest_assistant_text},
+                                separators=(",", ":"),
+                            ),
+                        }
+                    elif isinstance(event, ToolCall):
+                        tool_name = _bounded_chat_text(event.name, 120)
+                        yield {
+                            "event": "activity",
+                            "data": json.dumps(
+                                {
+                                    "kind": "tool",
+                                    "text": f"Invoking {tool_name}",
+                                },
+                                separators=(",", ":"),
+                            ),
+                        }
+                    elif isinstance(event, ToolResult):
+                        if event.denied:
+                            rule = _bounded_chat_text(event.rule_id or "policy", 120)
+                            detail = f"Policy denied the request · {rule}"
+                            chat_store.append(
+                                thread_id,
+                                role="activity",
+                                kind="policy_denial",
+                                content=detail,
+                            )
+                        else:
+                            detail = "Tool completed"
+                        yield {
+                            "event": "activity",
+                            "data": json.dumps(
+                                {
+                                    "kind": "policy_denial" if event.denied else "tool_result",
+                                    "text": detail,
+                                },
+                                separators=(",", ":"),
+                            ),
+                        }
+                    elif isinstance(event, EscalationEvent):
+                        run_id = event.escalation.run_id
+                        yield {
+                            "event": "approval",
+                            "data": json.dumps(
+                                {
+                                    "run_id": run_id,
+                                    "text": (
+                                        "Independent approval is required before execution "
+                                        "can continue."
+                                    ),
+                                },
+                                separators=(",", ":"),
+                            ),
+                        }
+                    elif isinstance(event, RunEnd):
+                        result = event.result
+                        run_id = result.run_id
+                        final_text = _bounded_chat_text(
+                            result.final_text or latest_assistant_text
+                        )
+                        if final_text:
+                            chat_store.append(
+                                thread_id,
+                                role="assistant",
+                                kind="message",
+                                content=final_text,
+                                run_id=run_id,
+                            )
+                        elif result.error:
+                            chat_store.append(
+                                thread_id,
+                                role="system",
+                                kind="run_error",
+                                content="The agent run ended before it produced a response.",
+                                run_id=run_id,
+                            )
+                        awaiting_approval = result.interrupted is not None
+                        if awaiting_approval:
+                            chat_store.append(
+                                thread_id,
+                                role="activity",
+                                kind="approval_required",
+                                content=(
+                                    "Waiting for an independent approver in Live control."
+                                ),
+                                run_id=run_id,
+                            )
+                        chat_store.finish_turn(
+                            thread_id,
+                            awaiting_approval=awaiting_approval,
+                            run_id=run_id,
+                        )
+                        await live_telemetry.completed(
+                            thread_id,
+                            run_id,
+                            "agent run failed" if result.error else None,
+                        )
+                        status = (
+                            "awaiting_approval"
+                            if awaiting_approval
+                            else "error"
+                            if result.error
+                            else "completed"
+                        )
+                        change_control.record_action(
+                            "chat.run_finished",
+                            session.identity,
+                            {
+                                "thread_id": thread_id,
+                                "run_id": run_id,
+                                "status": status,
+                            },
+                        )
+                        yield {
+                            "event": "done",
+                            "data": json.dumps(
+                                {
+                                    "run_id": run_id,
+                                    "status": status,
+                                    "final_text": final_text,
+                                    "cost_usd": result.cost_usd_authoritative,
+                                },
+                                separators=(",", ":"),
+                            ),
+                        }
+                        terminal = True
+                        return
+            except asyncio.CancelledError:
+                await gateway.cancel(thread_id)
+                chat_store.cancel(thread_id)
+                await live_telemetry.cancelled(thread_id)
+                change_control.record_action(
+                    "chat.run_cancelled",
+                    session.identity,
+                    {"thread_id": thread_id, "run_id": run_id},
+                )
+                terminal = True
+                raise
+            except Exception as exc:  # noqa: BLE001 - stream fails closed without internals
+                logger.exception("Dashboard chat run failed (%s)", type(exc).__name__)
+                chat_store.append(
+                    thread_id,
+                    role="system",
+                    kind="run_error",
+                    content="The agent run failed. Retry the turn or inspect the run ledger.",
+                    run_id=run_id,
+                )
+                chat_store.finish_turn(
+                    thread_id,
+                    awaiting_approval=False,
+                    run_id=run_id,
+                )
+                await live_telemetry.completed(thread_id, run_id, "agent run failed")
+                change_control.record_action(
+                    "chat.run_finished",
+                    session.identity,
+                    {"thread_id": thread_id, "run_id": run_id, "status": "error"},
+                )
+                yield {
+                    "event": "error",
+                    "data": json.dumps(
+                        {"detail": "The agent run failed. Please retry."},
+                        separators=(",", ":"),
+                    ),
+                }
+                terminal = True
+            finally:
+                if not terminal:
+                    try:
+                        await gateway.cancel(thread_id)
+                    finally:
+                        chat_store.cancel(thread_id)
+                        await live_telemetry.cancelled(thread_id)
+
+        return EventSourceResponse(
+            _chat_events(),
+            ping=15,
+            headers={**_security_headers(), "X-Accel-Buffering": "no"},
+        )
+
+    @app.post("/dashboard/api/chat/threads/{thread_id}/cancel")
+    async def dashboard_cancel_chat(thread_id: str, request: Request) -> Response:
+        if not cfg.server.dashboard_chat_enabled:
+            return _error("dashboard chat is disabled", 404)
+        session, denied = await _api_session(request, "chat.use")
+        if denied is not None:
+            return denied
+        assert session is not None
+        try:
+            validate_csrf(session, request.headers.get("x-csrf-token"))
+            thread = chat_store.get(thread_id, session.identity)
+            await gateway.cancel(thread_id)
+            chat_store.cancel(thread_id, session.identity)
+        except DashboardAuthError as exc:
+            return _error(str(exc), 403)
+        except DashboardChatError as exc:
+            return _chat_error(exc)
+        await live_telemetry.cancelled(thread_id)
+        change_control.record_action(
+            "chat.run_cancelled",
+            session.identity,
+            {"thread_id": thread.thread_id, "run_id": thread.last_run_id},
+        )
+        return JSONResponse({"status": "cancelled"}, headers=_security_headers())
 
     @app.get("/dashboard/api/snapshot")
     async def dashboard_snapshot(request: Request) -> Response:
@@ -441,6 +820,39 @@ def register_dashboard(
             session.identity,
             {"thread_id": thread_id, "run_id": result.run_id},
         )
+        if chat_store.get_internal(thread_id) is not None:
+            final_text = _bounded_chat_text(result.final_text)
+            if final_text:
+                chat_store.append(
+                    thread_id,
+                    role="assistant",
+                    kind="message",
+                    content=final_text,
+                    run_id=result.run_id,
+                )
+            elif result.error:
+                chat_store.append(
+                    thread_id,
+                    role="system",
+                    kind="run_error",
+                    content="The resumed agent run ended before it produced a response.",
+                    run_id=result.run_id,
+                )
+            if result.interrupted is not None:
+                chat_store.append(
+                    thread_id,
+                    role="activity",
+                    kind="approval_required",
+                    content=(
+                        "Another independent approval is required before execution can continue."
+                    ),
+                    run_id=result.run_id,
+                )
+            chat_store.finish_turn(
+                thread_id,
+                awaiting_approval=result.interrupted is not None,
+                run_id=result.run_id,
+            )
         return JSONResponse(
             {
                 "run_id": result.run_id,

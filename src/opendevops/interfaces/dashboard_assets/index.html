@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <meta name="csrf-token" content="{{CSRF_TOKEN}}">
+  <meta name="chat-enabled" content="{{CHAT_ENABLED}}">
   <title>Agent operations · opendevops</title>
   <link rel="icon" href="/dashboard/assets/logo.png">
   <link rel="stylesheet" href="/dashboard/assets/dashboard.css">
@@ -20,6 +21,7 @@
       </a>
 
       <nav class="primary-nav" aria-label="Dashboard sections">
+        <a class="{{CHAT_SECTION_CLASS}}" href="#chat">Chat</a>
         <a href="#overview">Overview</a>
         <a href="#live-control">Live</a>
         <a href="#runs">Runs</a>
@@ -55,7 +57,8 @@
         <p class="breadcrumb">Operations / Agent telemetry</p>
         <h1 id="page-title">Agent operations</h1>
         <p class="page-description">
-          Live execution, approvals, spend, policy decisions, and verifiable audit history.
+          Investigate infrastructure with the agent, then follow execution, approvals, spend,
+          policy decisions, and verifiable audit history.
         </p>
       </div>
       <dl class="runtime-summary" aria-label="Agent runtime">
@@ -88,6 +91,108 @@
           <span><strong>Audit</strong><small id="path-audit">— chains verified</small></span>
         </li>
       </ol>
+    </section>
+
+    <section
+      id="chat"
+      class="panel chat-panel {{CHAT_SECTION_CLASS}}"
+      aria-labelledby="chat-title"
+    >
+      <div class="panel-header chat-panel-header">
+        <div>
+          <p class="channel-kicker"><i aria-hidden="true"></i>Authenticated command channel</p>
+          <h2 id="chat-title">Investigate with the agent</h2>
+          <p>Ask about connected infrastructure. Mutations still require policy and approval.</p>
+        </div>
+        <span id="chat-access-note" class="read-only-label">Checking access</span>
+      </div>
+      <div class="chat-layout">
+        <aside class="chat-sidebar" aria-label="Chat investigations">
+          <div class="chat-new-controls">
+            <label for="chat-environment">New investigation target</label>
+            <div>
+              <select id="chat-environment" aria-label="Chat environment">
+                <option value="staging">Staging</option>
+                <option value="prod">Production</option>
+              </select>
+              <button id="new-chat-button" class="new-chat-button" type="button" disabled>
+                <span aria-hidden="true">+</span> New
+              </button>
+            </div>
+          </div>
+          <div class="chat-history-heading">
+            <span>Investigations</span>
+            <small>Private to your identity</small>
+          </div>
+          <div id="chat-thread-list" class="chat-thread-list">
+            <p class="chat-list-empty">Loading investigations…</p>
+          </div>
+        </aside>
+
+        <div class="chat-workspace">
+          <header class="chat-workspace-header">
+            <div>
+              <h3 id="chat-thread-title">New investigation</h3>
+              <p id="chat-thread-meta">Choose an environment and send a question.</p>
+            </div>
+            <span id="chat-thread-status" class="status-pill">idle</span>
+          </header>
+
+          <div
+            id="chat-transcript"
+            class="chat-transcript"
+            role="log"
+            aria-live="polite"
+            aria-label="Agent conversation"
+          >
+            <div id="chat-empty-state" class="chat-empty-state">
+              <span class="chat-signal-mark" aria-hidden="true">OD</span>
+              <div>
+                <h3>Start with an operational question</h3>
+                <p>
+                  The agent can inspect configured AWS, Google Cloud, Azure, Kubernetes,
+                  GitHub, and SSH targets. Tool arguments and raw output stay out of this view.
+                </p>
+              </div>
+              <div class="starter-prompts" aria-label="Suggested prompts">
+                <button type="button" data-chat-prompt="Summarize the health of my infrastructure and highlight anything requiring attention.">
+                  Summarize infrastructure health
+                </button>
+                <button type="button" data-chat-prompt="What changed recently in production, and are there related failures?">
+                  Trace recent production changes
+                </button>
+                <button type="button" data-chat-prompt="Find the likely cause of the highest-impact active incident.">
+                  Investigate the top incident
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <form id="chat-form" class="chat-composer">
+            <label class="visually-hidden" for="chat-input">Message the infrastructure agent</label>
+            <textarea
+              id="chat-input"
+              rows="3"
+              maxlength="{{CHAT_MAX_MESSAGE_CHARS}}"
+              placeholder="Ask what is happening across your infrastructure…"
+              disabled
+            ></textarea>
+            <div class="chat-composer-footer">
+              <p id="chat-feedback" aria-live="polite">
+                Every turn is attributed to your authenticated identity.
+              </p>
+              <div>
+                <button id="stop-chat-button" class="chat-stop-button is-hidden" type="button">
+                  Stop
+                </button>
+                <button id="send-chat-button" class="chat-send-button" type="submit" disabled>
+                  Send <span aria-hidden="true">↗</span>
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
     </section>
 
     <section id="overview" class="overview-section" aria-labelledby="overview-title">
@@ -304,6 +409,6 @@
     </div>
     <div id="run-detail-body"><p class="empty-state">Select a run to inspect it.</p></div>
   </aside>
-  <script src="/dashboard/assets/dashboard.js" defer></script>
+  <script src="/dashboard/assets/dashboard.js" type="module"></script>
 </body>
 </html>

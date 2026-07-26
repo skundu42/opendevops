@@ -17,6 +17,9 @@ The `langgraph-server` service runs an image built from this repo (it bakes the 
 `langgraph.json`); everything else pulls upstream images.
 
 ```sh
+npm ci
+npm run frontend:check
+npm run frontend:build
 uv run langgraph build -t opendevops-langgraph:latest
 ```
 
@@ -116,9 +119,10 @@ the spool preserves every line verbatim and never reorders lines *within* a run 
 file is single-writer and Vector ships in append order). A tampered, reordered, or dropped line in
 any run's subsequence fails the file, naming the offending `run_id` and line.
 
-The Compose `agent-state` volume holds the capability-grant and control-event ledger. Back it up
-alongside the audit store. It is SQLite and therefore requires a shared single-writer durable
-volume when the application has multiple replicas.
+The Compose `agent-state` volume holds the capability-grant/control-event ledger and private
+dashboard chat transcripts. Encrypt it, restrict backup access, and back it up alongside the audit
+store. Chat defaults to 30-day idle retention. The database is SQLite and therefore requires a
+shared single-writer durable volume when the application has multiple replicas.
 
 ## 6. Licensing quota probe
 
@@ -150,11 +154,13 @@ dashboard (runs, denials, daily spend, shipper lag). Alert rules live in `ops/pr
 Some series are **pre-provisioned** for the scheduler service / a spend exporter and simply do
 not fire until those components run — see the header comment in `alerts.yml`.
 
-The application dashboard at `:8123/dashboard` complements Grafana with live run, queue, worker,
-retry/cancellation and pending-approval state plus verified audit truth. Run detail correlates
-`run_id`, `thread_id`, `tool_call_id`, model-call and trace identifiers and shows content-free
-timing/cost progression. It scans a bounded audit window and does not return prompts, responses,
-command arguments, subprocess output, or credential values.
+The application dashboard at `:8123/dashboard` adds identity-scoped operator chat and complements
+Grafana with live run, queue, worker, retry/cancellation and pending-approval state plus verified
+audit truth. Chat returns user/assistant content only to the owning issuer/subject and never sends
+raw tool arguments or output. The separate run detail correlates `run_id`, `thread_id`,
+`tool_call_id`, model-call and trace identifiers and shows content-free timing/cost progression.
+It scans a bounded audit window and does not return prompts, responses, command arguments,
+subprocess output, or credential values.
 
 Set `OTEL_EXPORTER_OTLP_ENDPOINT` to export OTLP/HTTP traces and metrics for gateway, webhook,
 scheduler, model, policy and executor operations. The dashboard projects the run-success,

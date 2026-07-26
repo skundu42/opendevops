@@ -3,19 +3,37 @@
 ## Setup
 
 ```sh
+npm ci
+npm run frontend:build
 uv sync --extra checkpoint --extra server --extra slack --extra ssh --extra dev
 ```
 
 Everyday commands:
 
 ```sh
+npm run frontend:check         # strict TypeScript, no emit
+npm run frontend:build         # compile ignored browser artifacts
 uv run pytest -q               # full suite (deterministic, $0 LLM cost)
 uv run ruff check .            # lint (line length 100, isort, bugbear, …)
 uv run mypy src ops            # strict-ish typing (disallow_untyped_defs)
 uv run opendevops --help
 ```
 
-CI (`.github/workflows/ci.yml`) runs exactly ruff → mypy → pytest on every push and PR.
+CI (`.github/workflows/ci.yml`) runs the pinned TypeScript check/build before
+ruff → mypy → pytest on every push and PR.
+
+## Dashboard TypeScript
+
+`frontend/dashboard.ts` and `frontend/login.ts` are the only authored browser sources. The
+compiler runs with strict DOM types, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and
+`noEmitOnError`. It writes browser-required JavaScript to
+`src/opendevops/interfaces/dashboard_assets/generated/`; that directory is ignored and must never
+be edited or committed.
+
+The Python wheel build hook checks whether those generated assets are current. If they are stale,
+it runs the pinned compiler from `package-lock.json`; source builds therefore require Node.js/npm.
+Published wheels contain the compiled assets and do not require Node at runtime. Tests enforce that
+no handwritten `.js` files exist in `frontend/` or the dashboard asset source directory.
 
 ## Test tiers
 
@@ -51,6 +69,8 @@ Two testing ideas worth knowing before you change anything:
   by the same middleware. Don't split them.
 - **Async end-to-end.** Sync `invoke` cannot be cancelled mid-node; wall-clock enforcement
   depends on cancellability.
+- **TypeScript-only browser source.** Frontend behavior belongs in `frontend/*.ts`. Generated
+  JavaScript is a build artifact, not an authored or reviewable source file.
 
 ## The pinned trio
 

@@ -17,6 +17,8 @@ CLI REPL. The local CLI tier needs **zero infrastructure** — no server, no dat
 ```sh
 git clone https://github.com/skundu42/opendevops.git
 cd opendevops
+npm ci
+npm run frontend:build
 uv sync --extra checkpoint --extra server --extra dev
 ```
 

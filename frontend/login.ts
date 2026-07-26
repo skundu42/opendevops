@@ -1,7 +1,7 @@
 "use strict";
 
-const revealButton = document.getElementById("reveal-token");
-const tokenInput = document.getElementById("token");
+const revealButton = document.getElementById("reveal-token") as HTMLButtonElement | null;
+const tokenInput = document.getElementById("token") as HTMLInputElement | null;
 
 if (revealButton && tokenInput) {
   revealButton.addEventListener("click", () => {

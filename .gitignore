@@ -9,5 +9,7 @@ __pycache__/
 /state/*.sqlite3*
 *.egg-info/
 dist/
+node_modules/
+src/opendevops/interfaces/dashboard_assets/generated/
 .superpowers/
 .coverage

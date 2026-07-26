@@ -18,6 +18,18 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Compile strict TypeScript dashboard
+        run: |
+          npm ci
+          npm run frontend:check
+          npm run frontend:build
+
       - name: Sync dependencies
         # All extras: the suite imports from every one — checkpoint (AsyncSqliteSaver), server
         # (langgraph-sdk, redis, fastapi), slack (slack-bolt, apscheduler → scheduler tests),

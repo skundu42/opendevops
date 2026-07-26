@@ -24,12 +24,15 @@ The stack (`docker-compose.yml`):
 | `caddy` | the only ingress — API bearer gate plus pass-through to application-authenticated dashboard routes on `:8123`; terminate TLS upstream in production |
 | `vector` | tails per-run audit chains, merges them into the durable spool |
 | `prometheus` + `grafana` | metrics, alert rules, the provisioned ops dashboard |
-| `agent-state` volume | capability-grant/control-event ledger; back it up with the audit store |
+| `agent-state` volume | capability/control ledger plus private chat transcripts; encrypt and back it up |
 
 ### Bring-up
 
 ```sh
-# 1. build the server image (bakes the graph from langgraph.json)
+# 1. compile the strict TypeScript dashboard, then build the server image
+npm ci
+npm run frontend:check
+npm run frontend:build
 uv run langgraph build -t opendevops-langgraph:latest
 
 # 2. secrets — in the environment or a .env next to docker-compose.yml:
@@ -62,10 +65,17 @@ gateway-token protected.
 
 ### Operator dashboard
 
-`/dashboard` merges verified audit chains with live run/queue/worker/approval telemetry and exposes
-RBAC-controlled cancellation, approval resolution, capability-grant configuration and session
-revocation. The run-detail API contains correlation, timing, policy and cost metadata but never
-prompts, responses, command arguments, output, or credential values. Updates use SSE.
+`/dashboard` provides identity-scoped operator chat, merges verified audit chains with live
+run/queue/worker/approval telemetry, and exposes RBAC-controlled cancellation, approval resolution,
+capability-grant configuration and session revocation. Chat turns use the same gateway and stream
+assistant/sanitized lifecycle events over SSE; raw tool arguments and output never reach the chat
+transcript. The separate run-detail API contains correlation, timing, policy and cost metadata but
+never prompts, responses, command arguments, output, or credential values.
+
+Chat transcripts live in `control_plane.database` on the `agent-state` volume, are private to the
+exact issuer/subject and default to 30-day idle retention. Treat the volume as potentially
+sensitive: encrypt it at rest, restrict backup access, align
+`server.dashboard_chat_retention_days` with policy, and restore it with the control ledger.
 
 The shipped configuration uses `static` authentication and
 `server.dashboard_cookie_secure: false` for a localhost smoke test only. A deployed configuration

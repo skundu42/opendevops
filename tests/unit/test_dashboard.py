@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -13,6 +14,13 @@ from graph.helpers import MODELS, budgets
 from opendevops.audit import AuditLogger
 from opendevops.audit.schema import EventType
 from opendevops.config import AppConfig
+from opendevops.gateway.base import (
+    AssistantText,
+    RunEnd,
+    RunResult,
+    ToolCall,
+    ToolResult,
+)
 from opendevops.interfaces.dashboard import build_dashboard_snapshot
 from opendevops.interfaces.webapp import create_app
 
@@ -223,10 +231,26 @@ async def test_dashboard_assets_are_public_but_bounded(tmp_path: Path) -> None:
     app = create_app(_cfg(tmp_path), AsyncMock())
     async with _client(app) as client:
         css = await client.get("/dashboard/assets/dashboard.css")
+        dashboard_script = await client.get("/dashboard/assets/dashboard.js")
+        login_script = await client.get("/dashboard/assets/login.js")
         missing = await client.get("/dashboard/assets/../../config.yaml")
     assert css.status_code == 200
     assert "max-age=3600" in css.headers["cache-control"]
+    assert dashboard_script.status_code == 200
+    assert dashboard_script.headers["content-type"].startswith("application/javascript")
+    assert login_script.status_code == 200
+    assert "dashboard.ts" not in dashboard_script.text
     assert missing.status_code == 404
+
+
+def test_dashboard_browser_sources_are_typescript_only() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    frontend = repo_root / "frontend"
+    asset_root = repo_root / "src" / "opendevops" / "interfaces" / "dashboard_assets"
+
+    assert sorted(path.name for path in frontend.glob("*.ts")) == ["dashboard.ts", "login.ts"]
+    assert list(frontend.rglob("*.js")) == []
+    assert list(asset_root.glob("*.js")) == []
 
 
 def test_snapshot_is_safe_and_useful_when_audit_dir_is_empty(tmp_path: Path) -> None:
@@ -302,3 +326,112 @@ async def test_dashboard_production_configuration_rejects_self_approval(
 
     assert response.status_code == 409
     assert "different from the requester" in response.json()["detail"]
+
+
+async def test_dashboard_chat_streams_safe_events_and_persists_private_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(_TOKEN_ENV, _TOKEN)
+    gateway = AsyncMock()
+    gateway.create_thread.return_value = "thread-chat"
+    observed: dict[str, object] = {}
+
+    async def stream(
+        thread_id: str,
+        user_input: str,
+        *,
+        profile: str,
+        principal: str,
+        interface: str,
+        environment: str,
+    ) -> AsyncIterator[object]:
+        observed.update(
+            {
+                "thread_id": thread_id,
+                "user_input": user_input,
+                "profile": profile,
+                "principal": principal,
+                "interface": interface,
+                "environment": environment,
+            }
+        )
+        yield AssistantText("I found a policy-blocked operation.")
+        yield ToolCall(
+            name="run_command",
+            argv=["kubectl", "delete", "secret", "do-not-leak"],
+        )
+        yield ToolResult(
+            excerpt="SENSITIVE EXECUTOR OUTPUT",
+            denied=True,
+            rule_id="prod-delete-denied",
+        )
+        yield RunEnd(
+            RunResult(
+                final_text="I found a policy-blocked operation.",
+                run_id="run-chat",
+                cost_usd_state=0.01,
+                cost_usd_authoritative=0.012,
+            )
+        )
+
+    gateway.stream = stream
+    app = create_app(_cfg(tmp_path), gateway)
+
+    async with _client(app) as client:
+        await client.post("/dashboard/login", data={"token": _TOKEN})
+        csrf = (await client.get("/dashboard/api/snapshot")).json()["identity"]["csrf_token"]
+        missing_csrf = await client.post(
+            "/dashboard/api/chat/threads",
+            json={"environment": "prod"},
+        )
+        created = await client.post(
+            "/dashboard/api/chat/threads",
+            json={"environment": "prod"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        streamed = await client.post(
+            "/dashboard/api/chat/threads/thread-chat/messages",
+            json={"message": "Investigate production safely"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        history = await client.get("/dashboard/api/chat/threads/thread-chat")
+
+    assert missing_csrf.status_code == 403
+    assert created.status_code == 201
+    assert created.json()["environment"] == "prod"
+    assert streamed.status_code == 200
+    assert streamed.headers["content-type"].startswith("text/event-stream")
+    assert "I found a policy-blocked operation." in streamed.text
+    assert "Invoking run_command" in streamed.text
+    assert "prod-delete-denied" in streamed.text
+    assert "do-not-leak" not in streamed.text
+    assert "SENSITIVE EXECUTOR OUTPUT" not in streamed.text
+    assert observed == {
+        "thread_id": "thread-chat",
+        "user_input": "Investigate production safely",
+        "profile": "default",
+        "principal": "oidc:local-development#static-token",
+        "interface": "http",
+        "environment": "prod",
+    }
+    serialized_history = history.text
+    assert history.status_code == 200
+    assert "Investigate production safely" in serialized_history
+    assert "I found a policy-blocked operation." in serialized_history
+    assert "prod-delete-denied" in serialized_history
+    assert "do-not-leak" not in serialized_history
+    assert "SENSITIVE EXECUTOR OUTPUT" not in serialized_history
+
+
+async def test_dashboard_chat_can_be_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(_TOKEN_ENV, _TOKEN)
+    app = create_app(_cfg(tmp_path, dashboard_chat_enabled=False), AsyncMock())
+    async with _client(app) as client:
+        await client.post("/dashboard/login", data={"token": _TOKEN})
+        page = await client.get("/dashboard")
+        response = await client.get("/dashboard/api/chat/threads")
+    assert '<meta name="chat-enabled" content="false">' in page.text
+    assert 'class="panel chat-panel is-hidden"' in page.text
+    assert response.status_code == 404

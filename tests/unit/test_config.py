@@ -97,6 +97,9 @@ def test_shipped_server_section() -> None:
     cfg = load_config(REPO_ROOT)
     assert cfg.server.url == "http://localhost:8123"
     assert cfg.server.api_key_env == "LANGGRAPH_API_KEY"
+    assert cfg.server.dashboard_chat_enabled is True
+    assert cfg.server.dashboard_chat_retention_days == 30
+    assert cfg.server.dashboard_chat_max_message_chars == 8000
 
 
 def test_server_section_defaults_absent() -> None:
