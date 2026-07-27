@@ -196,9 +196,8 @@ Read the full [security model](guides/security-model.md) before connecting real 
 ### Install and configure
 
 ```sh
-# Install the prebuilt universal wheel; no repository clone or frontend build is needed.
-uv tool install \
-  'opendevops[checkpoint,ssh] @ https://github.com/skundu42/opendevops/releases/download/v0.1.1/opendevops-0.1.1-py3-none-any.whl'
+# Install the published package; no repository clone or frontend build is needed.
+uv tool install "opendevops[checkpoint,ssh]==0.1.1"
 
 mkdir opendevops-workspace
 opendevops init opendevops-workspace
@@ -254,16 +253,6 @@ docker compose config -q
 docker compose pull
 docker compose up -d
 ```
-
-The release bundle is pinned to `ghcr.io/skundu42/opendevops:0.1.1`; published images support
-`linux/amd64` and `linux/arm64`. Neither Node.js nor an application source build is required. The
-image intentionally contains the application runtime rather than every cloud vendor CLI; install
-only the `kubectl`, `helm`, `gh`, `aws`, `gcloud`, or `az` binaries for policy families you enable
-in a derived runtime image or credential-isolated executor. A missing binary fails closed.
-
-Security-sensitive Compose credentials have no default values. Caddy is the only ingress; server
-APIs and metrics require `GATEWAY_TOKEN`, native webhook routes retain their HMAC/bearer
-authentication, and `/dashboard/*` uses the application session described above.
 
 > [!WARNING]
 > Never run the service stack on a Kubernetes cluster the agent itself manages. Use a dedicated
