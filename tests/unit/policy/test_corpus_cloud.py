@@ -245,12 +245,12 @@ MUTATION_WITH_READ_TOKEN_DENIED = [
     ["aws", "dynamodb", "delete-table", "--table-name", "ls"],
     ["aws", "lambda", "delete-function", "--function-name", "list-functions"],
     ["aws", "rds", "delete-db-instance", "--db-instance-identifier", "describe-db-instances"],
-    ["aws", "ec2", "stop-instances", "--instance-ids", "describe-instances"],
+    ["aws", "ec2", "terminate-instances", "--instance-ids", "describe-instances"],
     # gcloud — read token consumed by --project / trailing; mutation table (or default-deny) wins.
-    ["gcloud", "compute", "instances", "stop", "my-vm", "--project", "list"],
+    ["gcloud", "compute", "instances", "delete", "my-vm", "--project", "list"],
     ["gcloud", "projects", "add-iam-policy-binding", "p", "describe"],
     # az — read token consumed by --name; mutation table wins.
-    ["az", "vm", "update", "--name", "show", "--resource-group", "g"],
+    ["az", "vm", "create", "--name", "show", "--resource-group", "g"],
     # az — a mutation that additionally TRAILS a literal read verb is still caught by the table.
     ["az", "vm", "delete", "--name", "x", "--resource-group", "g", "list"],
     ["gcloud", "compute", "instances", "delete", "a", "b", "list"],
@@ -285,7 +285,7 @@ _AZ_MUTATION_VERBS = [
 ]
 _AWS_MUTATION_ACTIONS = [
     "run-instances", "create-stack", "delete-stack", "put-object", "delete-object",
-    "create-user", "attach-role-policy", "modify-db-instance", "reboot-instances",
+    "create-user", "attach-role-policy", "modify-db-instance",
 ]
 
 CLOUD_MUTATIONS = (
@@ -339,7 +339,7 @@ FIX_R2_RESIDUAL_DENIED = [
     (
         ["gcloud", "compute", "instances", "set-machine-type", "list", "--zone=z",
          "--machine-type=n1"],
-        "gcloud-no-compound-mutations",
+        "__default_deny__",
     ),
     (
         ["gcloud", "compute", "instances", "add-metadata", "list", "--zone=z"],

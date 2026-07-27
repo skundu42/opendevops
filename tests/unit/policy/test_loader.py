@@ -341,12 +341,25 @@ def test_check_credential_coverage_missing() -> None:
 
 
 def test_check_credential_coverage_ok() -> None:
-    # Beyond kubectl, the shipped packs add helm-read, gh-read, aws/gcloud/az-read, ssh (ssh_run),
-    # and gh-write, whose rw allows also need the "gh-rw" write pseudo-family. Coverage needs all.
+    # Beyond kubectl, the shipped packs add helm-read, gh-read, aws/gcloud/az-read+write, ssh,
+    # and gh-write. Coverage needs ro families plus rw pseudo-families for gh and cloud writes.
     loaded = load_policy(SHIPPED_POLICY_DIR)
     assert (
         check_credential_coverage(
-            loaded, {"kubectl", "helm", "gh", "gh-rw", "aws", "gcloud", "az", "ssh"}
+            loaded,
+            {
+                "kubectl",
+                "helm",
+                "gh",
+                "gh-rw",
+                "aws",
+                "aws-rw",
+                "gcloud",
+                "gcloud-rw",
+                "az",
+                "az-rw",
+                "ssh",
+            },
         )
         == []
     )
@@ -355,12 +368,15 @@ def test_check_credential_coverage_ok() -> None:
 def test_check_credential_coverage_gh_rw_write_gate() -> None:
     # The gh-write pack's rw allows require the "gh-rw" write pseudo-family. With the ro gh
     # token configured but no rw write PAT, gh-write surfaces as a "gh-rw" coverage gap while
-    # gh-read (ro) stays covered.
+    # gh-read (ro) stays covered. Cloud rw gaps appear too when write packs are shipped.
     loaded = load_policy(SHIPPED_POLICY_DIR)
     problems = check_credential_coverage(
         loaded, {"kubectl", "helm", "gh", "aws", "gcloud", "az", "ssh"}
     )
     assert any("gh-rw" in p for p in problems)
+    assert any("aws-rw" in p for p in problems)
+    assert any("gcloud-rw" in p for p in problems)
+    assert any("az-rw" in p for p in problems)
     # gh (ro) is covered, so the ONLY gh-family gap is the write pseudo-family, not gh itself.
     assert not any(p for p in problems if "'gh'" in p)
 
@@ -386,16 +402,19 @@ def test_shipped_dir_loads_p5_cloud_packs() -> None:
     loaded = load_policy(SHIPPED_POLICY_DIR)
     for rid in (
         "aws-read-actions",
+        "aws-write-safe-ops",
         "aws-no-iam",
         "aws-no-terminate-instances",
         "aws-no-secret-reads",
         "aws-no-ssm-decrypt",
         "aws-no-endpoint-override",
         "gcloud-read-compute",
+        "gcloud-write-run",
         "gcloud-no-delete",
         "gcloud-no-secret-access",
         "gcloud-no-cred-override",
         "az-read-vm",
+        "az-write-webapp",
         "az-no-delete",
         "az-no-secret-reads",
         "az-no-subscription-override",

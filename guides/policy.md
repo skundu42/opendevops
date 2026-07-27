@@ -112,7 +112,9 @@ config/policy/
 ├── packs/               # allows, one file per tool family
 │   ├── kubectl-read.yaml    kubectl-mutate.yaml    helm-read.yaml
 │   ├── gh-read.yaml         gh-write.yaml
-│   ├── aws-read.yaml        gcloud-read.yaml       az-read.yaml
+│   ├── aws-read.yaml        aws-write.yaml
+│   ├── gcloud-read.yaml     gcloud-write.yaml
+│   ├── az-read.yaml         az-write.yaml
 │   └── ssh.yaml
 └── envs/
     ├── staging.yaml     # may only ADD denies/escalations or LOWER ceilings
@@ -150,6 +152,11 @@ For decisions that need *state*, not just argv shape, packs can invoke registere
 
 The rewrite alone would be bypassable by an explicit `--dry-run=none` first attempt; the hook is
 the enforcement. Hooks run under `asyncio.wait_for(..., 2.0)`; timeout or exception ⇒ deny.
+
+Cloud write packs (`aws-write` / `gcloud-write` / `az-write`) use a hybrid: curated scale/update
+actions **allow** on `channel: rw` when `--dry-run` is present, and **escalate** when it is absent
+(escalate > allow). Production non-dry-run rw still goes through the typed capability grant
+(`aws_deploy` / `gcp_deploy` / `azure_deploy`).
 
 ## Loader lints
 

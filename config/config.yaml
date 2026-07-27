@@ -12,18 +12,19 @@ targets:
     # under (POST/PATCH/PUT to /repos/{owner/repo}/...); empty => every gh api write default-denies.
     token_env_rw: null                       # e.g. OPENDEVOPS_GH_TOKEN_RW (a scoped write PAT)
     write_repos: []                          # allowlisted owner/repo write targets, e.g. [octo-org/staging-app]
-  # Read-only cloud CLI families. credential_env lists the NAMES of the agent-process env
-  # vars whose VALUES the executor injects for that family (never the values themselves). Empty =>
-  # the family is unconfigured and its aws/gcloud/az-read pack refuses to boot (coverage gate),
-  # exactly like github above. Point these at a READ-ONLY role/SA/SP whose IAM policy Denies secret
-  # material (secretsmanager:GetSecretValue, ssm:GetParameter* decrypt, kms:Decrypt) — the policy
-  # packs are the compensating control atop that role, not a substitute for it.
+  # Cloud CLI families. credential_env = RO identity; credential_env_rw = distinct RW identity for
+  # *-write packs (mirrors github token_env / token_env_rw). Empty rw list => cloud-write packs
+  # refuse to boot (rw coverage gate). Point RO at secrets-denied roles; RW at least-privilege
+  # mutate roles (still no IAM admin / secret read).
   aws:
     credential_env: []                        # e.g. [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION]
+    credential_env_rw: []                     # e.g. [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION] for the RW role
   gcloud:
     credential_env: []                        # e.g. [GOOGLE_APPLICATION_CREDENTIALS, CLOUDSDK_CORE_PROJECT]
+    credential_env_rw: []
   azure:
     credential_env: []                        # 'az' family; e.g. [AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET]
+    credential_env_rw: []
   # Read-only remote-exec ('ssh' family / the structured ssh_run tool). The model supplies
   # only an allowlisted host + the remote argv; user/key/port/known_hosts are pinned HERE. Unset =>
   # the ssh family is unconfigured and packs/ssh.yaml refuses to boot (coverage gate), exactly like

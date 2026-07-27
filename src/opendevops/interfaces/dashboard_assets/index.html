@@ -328,12 +328,29 @@
       <div class="panel-header">
         <div>
           <h2 id="change-title">Dangerous capability grants</h2>
-          <p>Typed, expiring changes with independent production approval and bounded execution</p>
+          <p>Propose → approve → activate typed, expiring changes with bounded execution</p>
         </div>
         <code id="control-revision">revision —</code>
       </div>
+      <nav class="grant-wizard-steps" aria-label="Grant workflow steps">
+        <button type="button" class="grant-step is-active" data-step="propose" id="grant-step-propose">
+          <span class="grant-step-index">1</span>
+          <span>Propose</span>
+        </button>
+        <button type="button" class="grant-step" data-step="approve" id="grant-step-approve">
+          <span class="grant-step-index">2</span>
+          <span>Approve</span>
+        </button>
+        <button type="button" class="grant-step" data-step="activate" id="grant-step-activate">
+          <span class="grant-step-index">3</span>
+          <span>Activate</span>
+        </button>
+      </nav>
       <div class="change-layout">
         <form id="proposal-form" class="proposal-form">
+          <p class="grant-step-hint" id="grant-propose-hint">
+            Operators draft a capability grant. Approvers and admins review in the next steps.
+          </p>
           <label>Environment
             <select name="environment">
               <option value="staging">Staging</option>
@@ -370,11 +387,40 @@
               <input name="max_executions" type="number" min="1" max="100" value="10">
             </label>
           </div>
-          <button class="primary-action" type="submit">Propose grant</button>
+          <details class="grant-advanced">
+            <summary>Loop limits</summary>
+            <div class="form-pair">
+              <label>Max per run
+                <input name="max_executions_per_run" type="number" min="1" max="25" value="4">
+              </label>
+              <label>Max identical per run
+                <input name="max_identical_per_run" type="number" min="1" max="5" value="1">
+              </label>
+            </div>
+            <div class="form-pair">
+              <label>Max consecutive failures
+                <input name="max_consecutive_failures" type="number" min="1" max="5" value="2">
+              </label>
+              <label>Cooldown (seconds)
+                <input name="cooldown_s" type="number" min="0" max="3600" value="10">
+              </label>
+            </div>
+            <label class="checkbox-label">
+              <input name="require_dry_run" type="checkbox" checked>
+              Require dry-run before real mutate
+            </label>
+          </details>
+          <button class="primary-action" type="submit" id="propose-submit">Propose grant</button>
           <p id="proposal-feedback" class="form-feedback" aria-live="polite"></p>
         </form>
-        <div id="proposal-list" class="proposal-list">
-          <p class="empty-state">No capability changes have been proposed.</p>
+        <div class="proposal-board">
+          <div class="proposal-board-header">
+            <h3 id="proposal-board-title">Pending proposals</h3>
+            <p id="proposal-board-hint">Items awaiting approval</p>
+          </div>
+          <div id="proposal-list" class="proposal-list">
+            <p class="empty-state">No capability changes have been proposed.</p>
+          </div>
         </div>
       </div>
     </section>

@@ -95,6 +95,16 @@ def test_boot_refuses_when_gh_rw_token_unconfigured(built_agent: Any, cfg: Any) 
     assert "gh-rw" in str(excinfo.value)
 
 
+def test_boot_refuses_when_cloud_rw_unconfigured(built_agent: Any, cfg: Any) -> None:
+    """Cloud-write packs refuse boot when credential_env_rw is unset (coverage gate)."""
+    unconfigured = cfg.model_copy(deep=True)
+    unconfigured.targets.aws.credential_env_rw = []
+    with pytest.raises(RuntimeError) as excinfo:
+        built_agent(make_fake_model([ai_text("x")]), cfg_override=unconfigured)
+    assert "credential family is not configured" in str(excinfo.value)
+    assert "aws-rw" in str(excinfo.value)
+
+
 def test_summarizer_is_haiku_backed_marker_subclass(cfg: Any) -> None:
     """The summarizer replacement is a distinct marker subclass built on the ``summarizer`` alias.
 

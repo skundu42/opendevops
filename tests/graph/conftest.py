@@ -93,9 +93,18 @@ def make_cfg(tmp_path: Path, audit_dir: Path) -> Callable[..., AppConfig]:
                     # credential families configured (coverage gate). Naming the env vars is
                     # enough for boot; their VALUES are only read at exec time, which these
                     # fake-model graph tests never reach.
-                    "aws": {"credential_env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]},
-                    "gcloud": {"credential_env": ["GOOGLE_APPLICATION_CREDENTIALS"]},
-                    "azure": {"credential_env": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID"]},
+                    "aws": {
+                        "credential_env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+                        "credential_env_rw": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+                    },
+                    "gcloud": {
+                        "credential_env": ["GOOGLE_APPLICATION_CREDENTIALS"],
+                        "credential_env_rw": ["GOOGLE_APPLICATION_CREDENTIALS"],
+                    },
+                    "azure": {
+                        "credential_env": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID"],
+                        "credential_env_rw": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID"],
+                    },
                     # The ssh-read pack's allow rule requires the ssh credential family at
                     # boot (coverage gate). Names/paths only; asyncssh is never dialed in these
                     # fake-model tests, which don't reach an ssh_run execution.

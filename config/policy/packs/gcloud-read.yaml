@@ -254,15 +254,16 @@ rules:
   # handled by gcloud-no-delete above (kept separate for its corpus rule-id pin); everything else
   # destructive lands here. IAM-binding mutations are included (they also gate the
   # `add-iam-policy-binding ... describe` laundering case). Operator-extensible per deployment.
+  # NOTE: update/start/stop/restart/scale/resize/set are intentionally ABSENT here so curated
+  # cloud-write pack allows (gcloud-write.yaml) can win — deny > allow would otherwise override
+  # them. Unlisted updates still fall to __default_deny__; write packs are a positive allowlist.
   - id: gcloud-no-mutations
     match:
       argv0: gcloud
       resource_any:
         - create
-        - update
         - patch
         - replace
-        - set
         - add
         - remove
         - deploy
@@ -270,12 +271,7 @@ rules:
         - import
         - export
         - insert
-        - start
-        - stop
-        - restart
         - reset
-        - resize
-        - scale
         - attach
         - detach
         - enable
@@ -340,23 +336,20 @@ rules:
   # family at once (and the bare verb too, whose prefix is the whole word). It is intentionally
   # broad: a false-deny of a read whose NAME starts with a mutation prefix is the safe direction.
   # Ordered AFTER gcloud-no-delete so `delete <NAME>` keeps its `gcloud-no-delete` audit id.
+  # update/set/start/stop/restart/scale/resize prefixes omitted so gcloud-write compound ops
+  # (update-traffic, set-autoscaling, …) are not denied outright; unlisted compounds default-deny.
   - id: gcloud-no-compound-mutations
     match:
       argv0: gcloud
       positional_verb_prefix_any:
-        - set
         - add
         - remove
         - delete
         - create
-        - update
         - patch
         - replace
         - put
         - insert
-        - start
-        - stop
-        - restart
         - reset
         - suspend
         - resume
@@ -385,8 +378,6 @@ rules:
         - clear
         - expire
         - revoke
-        - resize
-        - scale
         - upgrade
         - downgrade
         - recreate

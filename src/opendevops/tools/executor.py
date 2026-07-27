@@ -22,10 +22,10 @@ key                          value
                              (``targets.github.token_env``) on the ``ro`` channel, the WRITE PAT
                              (``targets.github.token_env_rw``) on ``rw``; exactly one,
                              absent for every other family
-``AWS_*`` / ``GOOGLE_*`` /   the read-only cloud credential, injected ONLY for its own family:
-``CLOUDSDK_*`` / ``AZURE_*`` the variables named by ``targets.{aws,gcloud,azure}.credential_env``
-                             — each var's VALUE copied from the agent process (never another
-                             family's credential; a missing/empty named var fails closed)
+``AWS_*`` / ``GOOGLE_*`` /   the cloud credential for the selected channel, injected ONLY for
+``CLOUDSDK_*`` / ``AZURE_*`` its own family: ``credential_env`` on ``ro``, ``credential_env_rw``
+                             on ``rw`` — each var's VALUE copied from the agent process (never
+                             another family's credential; a missing/empty named var fails closed)
 ``NO_COLOR`` / ``PAGER`` /   fixed literals suppressing colour / pagers / interactive prompts
 ``AWS_PAGER`` / ...          (see :data:`_BASE_ENV_LITERALS`)
 ===========================  ==================================================================
@@ -136,12 +136,13 @@ def build_env(
     ``kubectl``/``helm`` call never sees ``GH_TOKEN`` — exactly one credential family per exec.
     ``GH_HOST`` / ``GH_ENTERPRISE_TOKEN`` are never present.
 
-    The read-only cloud families (``aws`` / ``gcloud`` / ``az``) inject **only** their own
-    credential — the VALUES of the agent-process variables named by
-    ``targets.{aws,gcloud,azure}.credential_env``. A missing/empty named variable, or an
-    unconfigured (empty) list, raises :class:`CredentialUnavailable` (refusal, no exec); the values
-    never appear in any log or error. Each still gets ``KUBECONFIG=/dev/null`` and never sees
-    ``GH_TOKEN`` or another cloud family's variables — one credential family per exec.
+    The cloud families (``aws`` / ``gcloud`` / ``az``) inject **only** their own credential for
+    the selected channel — the VALUES of the agent-process variables named by
+    ``targets.{aws,gcloud,azure}.credential_env`` (``ro``) or ``credential_env_rw`` (``rw``).
+    Exactly one channel's list is used (never both). A missing/empty named variable, or an
+    unconfigured (empty) list for that channel, raises :class:`CredentialUnavailable` (refusal,
+    no exec); the values never appear in any log or error. Each still gets ``KUBECONFIG=/dev/null``
+    and never sees ``GH_TOKEN`` or another cloud family's variables — one credential family per exec.
     """
     safe_base = {"PATH": cfg.execution.trusted_path, "HOME": home}
     env = {name: safe_base[name] for name in cfg.execution.env_allowlist}
@@ -168,25 +169,28 @@ def build_env(
     if tool_family == "gh":
         env["GH_TOKEN"] = _gh_token(cfg, channel)
     elif tool_family in _CLOUD_FAMILY_TARGET:
-        env.update(_cloud_env(cfg, tool_family))
+        env.update(_cloud_env(cfg, tool_family, channel))
 
     return env
 
 
-def _cloud_env(cfg: AppConfig, tool_family: str) -> dict[str, str]:
-    """Resolve a cloud family's credential: the VALUES of the vars named by ``credential_env``.
+def _cloud_env(cfg: AppConfig, tool_family: str, channel: str) -> dict[str, str]:
+    """Resolve a cloud family's credential for *channel* from ``credential_env`` / ``_rw``.
 
-    Reads ``targets.<aws|gcloud|azure>.credential_env`` (the ``az`` family maps to ``azure``) and
-    copies each named variable's value from the agent process. Raises :class:`CredentialUnavailable`
-    (never echoing a value) when the list is empty (family unconfigured) or any named variable is
-    unset/empty — the same fail-closed refusal pattern as :func:`_gh_token`.
+    Reads ``targets.<aws|gcloud|azure>`` (the ``az`` family maps to ``azure``). The ``rw`` channel
+    (cloud-write packs) uses ``credential_env_rw``; every other channel uses ``credential_env``.
+    Exactly one list is injected — rw never sees the ro variables and vice versa. Raises
+    :class:`CredentialUnavailable` (never echoing a value) when the selected list is empty
+    (channel unconfigured) or any named variable is unset/empty — the same fail-closed refusal
+    pattern as :func:`_gh_token`.
     """
     target = getattr(cfg.targets, _CLOUD_FAMILY_TARGET[tool_family])
-    names = target.credential_env
+    attr = "credential_env_rw" if channel == "rw" else "credential_env"
+    names = getattr(target, attr)
     if not names:
         raise CredentialUnavailable(
-            f"{tool_family} credential env vars not configured "
-            f"(targets.{_CLOUD_FAMILY_TARGET[tool_family]}.credential_env)"
+            f"{tool_family} {channel} credential env vars not configured "
+            f"(targets.{_CLOUD_FAMILY_TARGET[tool_family]}.{attr})"
         )
     resolved: dict[str, str] = {}
     for name in names:

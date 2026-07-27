@@ -115,6 +115,9 @@ def make_cfg(tmp_path: Path) -> Callable[..., AppConfig]:
         aws_credential_env: list[str] | None = None,
         gcloud_credential_env: list[str] | None = None,
         azure_credential_env: list[str] | None = None,
+        aws_credential_env_rw: list[str] | None = None,
+        gcloud_credential_env_rw: list[str] | None = None,
+        azure_credential_env_rw: list[str] | None = None,
     ) -> AppConfig:
         cfg = copy.deepcopy(BASE_CONFIG)
         if output_max_chars is not None:
@@ -138,12 +141,27 @@ def make_cfg(tmp_path: Path) -> Callable[..., AppConfig]:
             gh_target["write_repos"] = github_write_repos
         if gh_target:
             cfg["targets"]["github"] = gh_target
-        if aws_credential_env is not None:
-            cfg["targets"]["aws"] = {"credential_env": aws_credential_env}
-        if gcloud_credential_env is not None:
-            cfg["targets"]["gcloud"] = {"credential_env": gcloud_credential_env}
-        if azure_credential_env is not None:
-            cfg["targets"]["azure"] = {"credential_env": azure_credential_env}
+        if aws_credential_env is not None or aws_credential_env_rw is not None:
+            aws_target: dict[str, Any] = {}
+            if aws_credential_env is not None:
+                aws_target["credential_env"] = aws_credential_env
+            if aws_credential_env_rw is not None:
+                aws_target["credential_env_rw"] = aws_credential_env_rw
+            cfg["targets"]["aws"] = aws_target
+        if gcloud_credential_env is not None or gcloud_credential_env_rw is not None:
+            gcloud_target: dict[str, Any] = {}
+            if gcloud_credential_env is not None:
+                gcloud_target["credential_env"] = gcloud_credential_env
+            if gcloud_credential_env_rw is not None:
+                gcloud_target["credential_env_rw"] = gcloud_credential_env_rw
+            cfg["targets"]["gcloud"] = gcloud_target
+        if azure_credential_env is not None or azure_credential_env_rw is not None:
+            azure_target: dict[str, Any] = {}
+            if azure_credential_env is not None:
+                azure_target["credential_env"] = azure_credential_env
+            if azure_credential_env_rw is not None:
+                azure_target["credential_env_rw"] = azure_credential_env_rw
+            cfg["targets"]["azure"] = azure_target
         cdir = tmp_path / "config"
         cdir.mkdir(parents=True, exist_ok=True)
         (cdir / "config.yaml").write_text(yaml.safe_dump(cfg))
@@ -1474,6 +1492,30 @@ def test_build_env_aws_injects_only_its_vars(
         "AWS_SECRET_ACCESS_KEY",
         "AWS_REGION",
     }
+
+
+def test_build_env_aws_rw_uses_rw_credential(
+    make_cfg: Callable[..., AppConfig], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIA_ro")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret_ro")
+    monkeypatch.setenv("AWS_RW_ACCESS_KEY_ID", "AKIA_rw")
+    monkeypatch.setenv("AWS_RW_SECRET_ACCESS_KEY", "secret_rw")
+    cfg = make_cfg(
+        aws_credential_env=["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+        aws_credential_env_rw=["AWS_RW_ACCESS_KEY_ID", "AWS_RW_SECRET_ACCESS_KEY"],
+    )
+    env = build_env(cfg, "aws", "rw", _SANDBOX_HOME)
+    assert env["AWS_RW_ACCESS_KEY_ID"] == "AKIA_rw"
+    assert env["AWS_RW_SECRET_ACCESS_KEY"] == "secret_rw"
+    assert "AWS_ACCESS_KEY_ID" not in env
+    assert "AWS_SECRET_ACCESS_KEY" not in env
+
+
+def test_build_env_aws_rw_missing_raises(make_cfg: Callable[..., AppConfig]) -> None:
+    cfg = make_cfg(aws_credential_env=["AWS_ACCESS_KEY_ID"])
+    with pytest.raises(CredentialUnavailable, match="credential_env_rw"):
+        build_env(cfg, "aws", "rw", _SANDBOX_HOME)
 
 
 def test_build_env_gcloud_injects_only_its_vars(

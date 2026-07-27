@@ -250,18 +250,15 @@ rules:
   # table, for parity with the gcloud hardening. `delete`
   # is handled by az-no-delete above (kept separate for its corpus rule-id pin); everything else
   # destructive lands here. Operator-extensible per deployment.
+  # NOTE: update/start/stop/restart/scale/set are intentionally ABSENT so az-write.yaml allows
+  # can win (deny > allow). Unlisted mutations still __default_deny__.
   - id: az-no-mutations
     match:
       argv0: az
       resource_any:
         - create
-        - update
-        - set
         - add
         - remove
-        - start
-        - stop
-        - restart
         - reset
         - deallocate
         - redeploy
@@ -315,23 +312,20 @@ rules:
   # `set-*`/`add-*`/`run-*`/... family and every bare mutation verb without enumerating each. az
   # targets are flags so its residual is non-executable, but this keeps az at parity with gcloud.
   # Ordered AFTER az-no-delete so `delete` keeps its `az-no-delete` audit id.
+  # update/set/start/stop/restart/scale/resize prefixes omitted so az-write ops can allow;
+  # unlisted compounds still default-deny.
   - id: az-no-compound-mutations
     match:
       argv0: az
       positional_verb_prefix_any:
-        - set
         - add
         - remove
         - delete
         - create
-        - update
         - patch
         - replace
         - put
         - insert
-        - start
-        - stop
-        - restart
         - reset
         - suspend
         - resume
@@ -360,8 +354,6 @@ rules:
         - clear
         - expire
         - revoke
-        - resize
-        - scale
         - upgrade
         - downgrade
         - recreate

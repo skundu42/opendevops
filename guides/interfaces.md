@@ -100,8 +100,10 @@ shows:
 - recent run status, OIDC/service principal, environment, model/tool counts and cost;
 - run-detail correlation by `run_id`, `thread_id`, `tool_call_id` and `trace_id`;
 - content-free model timing/token/cost progression, policy decisions and tool timing;
-- versioned dangerous-capability proposals with approval/activation/revocation;
-- runtime mode plus integration-configuration posture.
+- versioned dangerous-capability proposals with a Propose → Approve → Activate wizard
+  (loop limits, reason, and actor metadata on each card);
+- runtime mode plus integration-configuration posture (cloud read/write credential counts;
+  values never returned).
 
 Persisted truth comes from the hash-chained JSONL audit directory; live state comes from the
 gateway/LangGraph SDK and the web control projection. The browser receives changes over SSE

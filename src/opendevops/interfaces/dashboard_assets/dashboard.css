@@ -1710,6 +1710,129 @@ td small {
   border-top: 1px solid var(--line);
 }
 
+.grant-wizard-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 88%, var(--ink) 12%);
+}
+
+.grant-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 10px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.grant-step:last-child {
+  border-right: 0;
+}
+
+.grant-step.is-active {
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: inset 0 -2px 0 var(--accent, #2f6fed);
+}
+
+.grant-step-index {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  font-size: 10px;
+}
+
+.grant-step.is-active .grant-step-index {
+  border-color: var(--accent, #2f6fed);
+  color: var(--accent, #2f6fed);
+}
+
+.grant-step-hint {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.grant-advanced {
+  display: grid;
+  gap: 10px;
+  padding: 10px 0 0;
+  border-top: 1px dashed var(--line);
+}
+
+.grant-advanced summary {
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  grid-template-columns: none !important;
+}
+
+.checkbox-label input {
+  width: auto;
+}
+
+.proposal-form.is-hidden-step {
+  display: none;
+}
+
+.change-layout:has(.proposal-form.is-hidden-step) {
+  grid-template-columns: 1fr;
+}
+
+.proposal-board {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 320px;
+}
+
+.proposal-board-header {
+  display: grid;
+  gap: 4px;
+  padding: 18px 22px 0;
+}
+
+.proposal-board-header h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.proposal-board-header p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.proposal-meta {
+  display: grid;
+  gap: 6px;
+}
+
+.proposal-reason {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .proposal-form {
   display: grid;
   gap: 13px;

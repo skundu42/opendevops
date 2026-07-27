@@ -49,11 +49,14 @@ targets:
     token_env_rw: null           # name of the env var holding a distinct WRITE PAT (gh-write pack)
     write_repos: []              # owner/repo allowlist for gh api writes; empty ⇒ all writes deny
   aws:
-    credential_env: []           # e.g. [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION]
+    credential_env: []           # RO identity env-var NAMES
+    credential_env_rw: []        # distinct RW identity for aws-write pack (boot-gated)
   gcloud:
-    credential_env: []           # e.g. [GOOGLE_APPLICATION_CREDENTIALS, CLOUDSDK_CORE_PROJECT]
+    credential_env: []
+    credential_env_rw: []
   azure:
-    credential_env: []           # e.g. [AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET]
+    credential_env: []           # 'az' family
+    credential_env_rw: []
   ssh:
     hosts: []                    # host allowlist; empty ⇒ no host reachable
     user: null                   # pinned remote login user
@@ -64,9 +67,13 @@ targets:
 ```
 
 **Coverage gates**: an unconfigured family (empty `credential_env`, null `token_env`, empty ssh
-config) makes its policy pack refuse to boot — an allow can never outrun its credentials. Cloud
-credentials must point at read-only roles whose IAM explicitly **Denies** secret-material reads;
-the policy packs are the compensating control on top of that role, not a substitute.
+config) makes its policy pack refuse to boot — an allow can never outrun its credentials. Write
+packs (`gh-write`, `aws-write`, `gcloud-write`, `az-write`) additionally require the matching
+`token_env_rw` / `credential_env_rw` at boot (the `{family}-rw` pseudo-family); RO-only
+deployments must configure the write identity or remove those pack files. Cloud RO credentials
+should point at roles whose IAM explicitly **Denies** secret-material reads; RW credentials should
+be least-privilege mutate roles (still no IAM admin / secret read). Policy packs compensate on top
+of that role — they are not a substitute.
 
 ### `execution`
 

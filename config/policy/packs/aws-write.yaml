@@ -1,0 +1,121 @@
+# aws-write.yaml — curated AWS WRITE pack (scale / update / rollout-class ops).
+#
+# tool_family binds this pack's allow rules to the "aws" credential family; the BOOT coverage
+# gate additionally requires the rw sub-credential ("aws-rw") because this pack carries
+# `channel: rw` allows — so an aws-write allow with no credential_env_rw configured REFUSES TO
+# BOOT (agent.py `_configured_credential_families` + loader `_RW_BOOT_GATED_FAMILIES`).
+#
+# RO-ONLY DEPLOYMENTS: this pack ALWAYS loads. An operator who wants aws read-only must either
+# configure credential_env_rw or physically REMOVE this pack file.
+#
+# SCOPE: staging + prod. Production non-dry-run rw allows still escalate via the runtime grant
+# middleware (`aws_deploy`). Hybrid dry-run: with `--dry-run` present → allow; without → escalate
+# (escalate > allow). IAM / secret / terminate stays denied in aws-read + base.
+#
+# MATCHING: aws action is `first_positional` (service = verb). Positive allowlist of safe ops only.
+version: 1
+metadata:
+  name: aws-write
+  owner: opendevops
+  updated: "2026-07-27"
+tool_family: aws
+
+flags_allowed:
+  aws:
+    - --region
+    - --profile
+    - --output
+    - --query
+    - --dry-run
+    - --no-cli-pager
+    - --cluster
+    - --service
+    - --services
+    - --task-definition
+    - --desired-count
+    - --force-new-deployment
+    - --auto-scaling-group-name
+    - --desired-capacity
+    - --min-size
+    - --max-size
+    - --environment-name
+    - --version-label
+    - --function-name
+    - --memory-size
+    - --timeout
+    - --environment
+    - --target-group-arn
+    - --targets
+    - --health-check-path
+    - --health-check-interval-seconds
+    - --instance-ids
+    - --stack-name
+    - --change-set-name
+    - --template-body
+    - --template-url
+    - --parameters
+    - --capabilities
+    - --resource-id
+    - --scalable-dimension
+    - --service-namespace
+    - --min-capacity
+    - --max-capacity
+    - --policy-name
+    - --policy-type
+    - --target-tracking-scaling-policy-configuration
+
+rules:
+  # Without --dry-run, curated write actions require human approval (escalate > allow).
+  - id: aws-write-require-approval-without-dry-run
+    match:
+      argv0: aws
+      first_positional:
+        in:
+          - update-service
+          - set-desired-capacity
+          - update-auto-scaling-group
+          - restart-app-server
+          - update-environment
+          - update-function-configuration
+          - modify-target-group
+          - register-targets
+          - deregister-targets
+          - start-instances
+          - stop-instances
+          - reboot-instances
+          - create-change-set
+          - execute-change-set
+          - register-scalable-target
+          - put-scaling-policy
+      flags_absent: ["--dry-run"]
+    effect: escalate
+    channel: rw
+    environments: [staging, prod]
+    escalation: {timeout_s: 1800, on_timeout: deny}
+    reason: "aws write action without --dry-run requires approval"
+
+  - id: aws-write-safe-ops
+    match:
+      argv0: aws
+      first_positional:
+        in:
+          - update-service
+          - set-desired-capacity
+          - update-auto-scaling-group
+          - restart-app-server
+          - update-environment
+          - update-function-configuration
+          - modify-target-group
+          - register-targets
+          - deregister-targets
+          - start-instances
+          - stop-instances
+          - reboot-instances
+          - create-change-set
+          - execute-change-set
+          - register-scalable-target
+          - put-scaling-policy
+    effect: allow
+    channel: rw
+    environments: [staging, prod]
+    reason: "curated aws scale/update/rollout actions are permitted (rw)"

@@ -309,6 +309,9 @@ def test_cloud_targets_default_empty_when_absent(write_config, base_config) -> N
     assert cfg.targets.aws.credential_env == []
     assert cfg.targets.gcloud.credential_env == []
     assert cfg.targets.azure.credential_env == []
+    assert cfg.targets.aws.credential_env_rw == []
+    assert cfg.targets.gcloud.credential_env_rw == []
+    assert cfg.targets.azure.credential_env_rw == []
 
 
 def test_shipped_config_cloud_targets_unconfigured() -> None:
@@ -317,17 +320,23 @@ def test_shipped_config_cloud_targets_unconfigured() -> None:
     assert cfg.targets.aws.credential_env == []
     assert cfg.targets.gcloud.credential_env == []
     assert cfg.targets.azure.credential_env == []
+    assert cfg.targets.aws.credential_env_rw == []
 
 
 def test_cloud_credential_env_round_trips_names(write_config, base_config) -> None:
     base_config["targets"]["aws"] = {
-        "credential_env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+        "credential_env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+        "credential_env_rw": ["AWS_RW_ACCESS_KEY_ID", "AWS_RW_SECRET_ACCESS_KEY"],
     }
     base_config["targets"]["gcloud"] = {"credential_env": ["GOOGLE_APPLICATION_CREDENTIALS"]}
     base_config["targets"]["azure"] = {"credential_env": ["AZURE_CLIENT_ID"]}
     root = write_config(config=base_config)
     cfg = load_config(root)
     assert cfg.targets.aws.credential_env == ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+    assert cfg.targets.aws.credential_env_rw == [
+        "AWS_RW_ACCESS_KEY_ID",
+        "AWS_RW_SECRET_ACCESS_KEY",
+    ]
     assert cfg.targets.gcloud.credential_env == ["GOOGLE_APPLICATION_CREDENTIALS"]
     assert cfg.targets.azure.credential_env == ["AZURE_CLIENT_ID"]
 

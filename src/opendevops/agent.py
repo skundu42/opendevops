@@ -327,10 +327,12 @@ def _configured_credential_families(cfg: AppConfig) -> set[str]:
       holding the write PAT. The gh-write pack's rw allows require it at boot (the rw coverage
       gate in ``check_credential_coverage`` maps a gh pack's ``channel: rw`` allows to ``"gh-rw"``),
       so a gh-write allow with no write PAT configured refuses to boot — mirroring the ro gh gate.
-    * aws / gcloud / az — iff the matching cloud target names ≥1 credential env var. The
+    * aws / gcloud / az — iff the matching cloud target names ≥1 RO credential env var. The
       ``az`` family reads ``targets.azure`` (the Azure CLI binary/family is ``az``, the config
       target is spelled ``azure``). An empty ``credential_env`` list is treated as unconfigured,
-      so a shipped cloud pack with allow rules refuses to boot until a credential is named.
+      so a shipped cloud-read pack with allow rules refuses to boot until a credential is named.
+    * aws-rw / gcloud-rw / az-rw — WRITE pseudo-families: iff ``credential_env_rw`` names ≥1
+      env var. Cloud-write packs' rw allows require them at boot (``_RW_BOOT_GATED_FAMILIES``).
     * ssh — iff ``targets.ssh.key_env`` names the env var holding the private-key path. The
       credential is the config-pinned key + known_hosts; the ssh pack's allow rule is only bootable
       once it is named (the executor refuses any ssh_run call with CredentialUnavailable meanwhile).
@@ -345,10 +347,16 @@ def _configured_credential_families(cfg: AppConfig) -> set[str]:
         families.add("gh-rw")
     if cfg.targets.aws.credential_env:
         families.add("aws")
+    if cfg.targets.aws.credential_env_rw:
+        families.add("aws-rw")
     if cfg.targets.gcloud.credential_env:
         families.add("gcloud")
+    if cfg.targets.gcloud.credential_env_rw:
+        families.add("gcloud-rw")
     if cfg.targets.azure.credential_env:
         families.add("az")
+    if cfg.targets.azure.credential_env_rw:
+        families.add("az-rw")
     if cfg.targets.ssh.key_env is not None:
         families.add("ssh")
     return families

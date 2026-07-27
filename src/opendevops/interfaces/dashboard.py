@@ -1218,17 +1218,38 @@ def _integration_snapshot(cfg: AppConfig) -> list[dict[str, Any]]:
         {
             "name": "AWS",
             "state": "configured" if cfg.targets.aws.credential_env else "not_configured",
-            "detail": _counted(len(cfg.targets.aws.credential_env), "credential variable"),
+            "detail": (
+                f"{_counted(len(cfg.targets.aws.credential_env), 'read variable')}"
+                + (
+                    f"; {_counted(len(cfg.targets.aws.credential_env_rw), 'write variable')}"
+                    if cfg.targets.aws.credential_env_rw
+                    else "; write credential unset"
+                )
+            ),
         },
         {
             "name": "Google Cloud",
             "state": "configured" if cfg.targets.gcloud.credential_env else "not_configured",
-            "detail": _counted(len(cfg.targets.gcloud.credential_env), "credential variable"),
+            "detail": (
+                f"{_counted(len(cfg.targets.gcloud.credential_env), 'read variable')}"
+                + (
+                    f"; {_counted(len(cfg.targets.gcloud.credential_env_rw), 'write variable')}"
+                    if cfg.targets.gcloud.credential_env_rw
+                    else "; write credential unset"
+                )
+            ),
         },
         {
             "name": "Azure",
             "state": "configured" if cfg.targets.azure.credential_env else "not_configured",
-            "detail": _counted(len(cfg.targets.azure.credential_env), "credential variable"),
+            "detail": (
+                f"{_counted(len(cfg.targets.azure.credential_env), 'read variable')}"
+                + (
+                    f"; {_counted(len(cfg.targets.azure.credential_env_rw), 'write variable')}"
+                    if cfg.targets.azure.credential_env_rw
+                    else "; write credential unset"
+                )
+            ),
         },
         {
             "name": "SSH",

@@ -1,0 +1,115 @@
+# gcloud-write.yaml — curated GCP WRITE pack (scale / traffic / rollout-class ops).
+#
+# BOOT: requires gcloud-rw (credential_env_rw). RO-only deployments must configure it or remove
+# this pack. Staging + prod; hybrid dry-run (allow with --dry-run; escalate without).
+# Grants: gcp_deploy. IAM/secret denies remain in base + gcloud-read.
+#
+# Positive allowlist of command PATHS via positional_seq_prefix_any (fail-closed).
+version: 1
+metadata:
+  name: gcloud-write
+  owner: opendevops
+  updated: "2026-07-27"
+tool_family: gcloud
+
+flags_allowed:
+  gcloud:
+    - --project
+    - --format
+    - --region
+    - --zone
+    - --quiet
+    - --dry-run
+    - --to-revisions
+    - --to-latest
+    - --update-labels
+    - --remove-labels
+    - --cpu
+    - --memory
+    - --concurrency
+    - --min-instances
+    - --max-instances
+    - --size
+    - --new-size
+    - --max-num-replicas
+    - --min-num-replicas
+    - --target-cpu-utilization
+    - --cool-down-period
+    - --node-pool
+    - --num-nodes
+    - --total-max-nodes
+    - --total-min-nodes
+    - --async
+    - --platform
+    - --service
+
+rules:
+  - id: gcloud-write-require-approval-without-dry-run
+    match:
+      argv0: gcloud
+      verb: {in: [run, container, compute, app]}
+      positional_seq_prefix_any:
+        - [services, update-traffic]
+        - [services, update]
+        - [clusters, resize]
+        - [clusters, update]
+        - [instance-groups, managed, resize]
+        - [instance-groups, managed, set-autoscaling]
+        - [instance-groups, managed, rolling-action, start-update]
+        - [services, set-traffic]
+        - [versions, migrate-traffic]
+      flags_absent: ["--dry-run"]
+    effect: escalate
+    channel: rw
+    environments: [staging, prod]
+    escalation: {timeout_s: 1800, on_timeout: deny}
+    reason: "gcloud write action without --dry-run requires approval"
+
+  - id: gcloud-write-run
+    match:
+      argv0: gcloud
+      verb: {eq: run}
+      positional_seq_prefix_any:
+        - [services, update-traffic]
+        - [services, update]
+    effect: allow
+    channel: rw
+    environments: [staging, prod]
+    reason: "gcloud run services update/update-traffic is permitted (rw)"
+
+  - id: gcloud-write-container
+    match:
+      argv0: gcloud
+      verb: {eq: container}
+      positional_seq_prefix_any:
+        - [clusters, resize]
+        - [clusters, update]
+    effect: allow
+    channel: rw
+    environments: [staging, prod]
+    reason: "gcloud container clusters resize/update is permitted (rw)"
+
+  - id: gcloud-write-compute-mig
+    match:
+      argv0: gcloud
+      verb: {eq: compute}
+      positional_seq_prefix_any:
+        - [instance-groups, managed, resize]
+        - [instance-groups, managed, set-autoscaling]
+        - [instance-groups, managed, rolling-action, start-update]
+    effect: allow
+    channel: rw
+    environments: [staging, prod]
+    reason: "gcloud compute managed instance-group scale/rollout is permitted (rw)"
+
+  - id: gcloud-write-app
+    match:
+      argv0: gcloud
+      verb: {eq: app}
+      positional_seq_prefix_any:
+        - [services, set-traffic]
+        - [versions, migrate-traffic]
+    effect: allow
+    channel: rw
+    environments: [staging, prod]
+    reason: "gcloud app traffic migration is permitted (rw)"

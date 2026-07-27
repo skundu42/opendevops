@@ -87,9 +87,18 @@ def _cfg_with_rw(tmp_path: Path) -> AppConfig:
                     "write_repos": ["octo-org/staging-app"],
                 },
                 # cloud read packs' coverage gate (names only; not exec'd here).
-                "aws": {"credential_env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]},
-                "gcloud": {"credential_env": ["GOOGLE_APPLICATION_CREDENTIALS"]},
-                "azure": {"credential_env": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID"]},
+                "aws": {
+                    "credential_env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+                    "credential_env_rw": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+                },
+                "gcloud": {
+                    "credential_env": ["GOOGLE_APPLICATION_CREDENTIALS"],
+                    "credential_env_rw": ["GOOGLE_APPLICATION_CREDENTIALS"],
+                },
+                "azure": {
+                    "credential_env": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID"],
+                    "credential_env_rw": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID"],
+                },
                 # ssh-read pack coverage gate (names/paths only; never dialed here).
                 "ssh": {
                     "hosts": ["allowed.host.internal"],

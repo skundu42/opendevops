@@ -198,12 +198,12 @@ def _policy_version(raw_by_path: dict[str, Any]) -> str:
 
 
 # Families whose WRITE (rw) channel is gated at BOOT on a *distinct* rw credential — not merely
-# the family's ro credential. ``gh`` is the only such family: the gh-write pack's rw allows
-# require ``targets.github.token_env_rw`` at boot (surfaced as the ``"gh-rw"`` pseudo-family in
-# ``_configured_credential_families``), mirroring the ro gh gate. kubectl/helm rw (kubectl-mutate)
-# deliberately stay ro-gated at boot and fail closed at EXEC on a missing rw kubeconfig — that
-# long-standing behavior is intentionally unchanged, so only ``gh`` is listed here.
-_RW_BOOT_GATED_FAMILIES: frozenset[str] = frozenset({"gh"})
+# the family's ro credential. ``gh`` and the cloud CLIs (``aws`` / ``gcloud`` / ``az``) ship
+# *-write packs whose rw allows require ``token_env_rw`` / ``credential_env_rw`` at boot
+# (surfaced as ``"{family}-rw"`` pseudo-families in ``_configured_credential_families``),
+# mirroring the ro gate. kubectl/helm rw (kubectl-mutate) deliberately stay ro-gated at boot and
+# fail closed at EXEC on a missing rw kubeconfig — that long-standing behavior is unchanged.
+_RW_BOOT_GATED_FAMILIES: frozenset[str] = frozenset({"gh", "aws", "gcloud", "az"})
 
 
 def check_credential_coverage(loaded: LoadedPolicy, credential_families: set[str]) -> list[str]:
@@ -213,9 +213,9 @@ def check_credential_coverage(loaded: LoadedPolicy, credential_families: set[str
     human-readable problems; an empty list means every allow pack's credential is covered.
 
     A pack with allow rules needs its ``tool_family`` configured. For a family in
-    :data:`_RW_BOOT_GATED_FAMILIES` (``gh``), a pack that carries any ``channel: rw`` allow ALSO
-    needs the ``"{family}-rw"`` pseudo-family — the rw credential — configured, so a gh-write pack
-    whose write PAT is unset refuses to boot rather than fail only at first exec.
+    :data:`_RW_BOOT_GATED_FAMILIES`, a pack that carries any ``channel: rw`` allow ALSO needs the
+    ``"{family}-rw"`` pseudo-family — the rw credential — configured, so a *-write pack whose
+    write identity is unset refuses to boot rather than fail only at first exec.
     """
     needed: set[str] = set()
     for pf in loaded.files.values():

@@ -1,0 +1,129 @@
+# az-write.yaml — curated Azure WRITE pack (scale / restart / update-class ops).
+#
+# BOOT: requires az-rw (credential_env_rw). RO-only deployments must configure it or remove
+# this pack. Staging + prod; hybrid dry-run (allow with --dry-run; escalate without).
+# Grants: azure_deploy. Secret/subscription denies remain in base + az-read.
+version: 1
+metadata:
+  name: az-write
+  owner: opendevops
+  updated: "2026-07-27"
+tool_family: az
+
+flags_allowed:
+  az:
+    - --output
+    - --query
+    - --resource-group
+    - --name
+    - --ids
+    - --dry-run
+    - --only-show-errors
+    - --no-wait
+    - --node-count
+    - --min-count
+    - --max-count
+    - --enable-cluster-autoscaler
+    - --disable-cluster-autoscaler
+    - --update-cluster-autoscaler
+    - --sku
+    - --number-of-workers
+    - --slot
+    - --set
+    - --remove
+    - --add
+    - --container-name
+    - --min-replicas
+    - --max-replicas
+    - --cpu
+    - --memory
+    - --revision-mode
+    - --target-port
+    - --ingress
+    - --location
+    - --tags
+
+rules:
+  - id: az-write-require-approval-without-dry-run
+    match:
+      argv0: az
+      verb: {in: [webapp, aks, appservice, containerapp, monitor]}
+      positional_seq_prefix_any:
+        - [restart]
+        - [start]
+        - [stop]
+        - [update]
+        - [scale]
+        - [plan, update]
+        - [revision, activate]
+        - [revision, restart]
+        - [autoscale, update]
+        - [replica, count]
+      flags_absent: ["--dry-run"]
+    effect: escalate
+    channel: rw
+    environments: [staging, prod]
+    escalation: {timeout_s: 1800, on_timeout: deny}
+    reason: "az write action without --dry-run requires approval"
+
+  - id: az-write-webapp
+    match:
+      argv0: az
+      verb: {eq: webapp}
+      positional_seq_prefix_any:
+        - [restart]
+        - [start]
+        - [stop]
+        - [update]
+    effect: allow
+    channel: rw
+    environments: [staging, prod]
+    reason: "az webapp restart/start/stop/update is permitted (rw)"
+
+  - id: az-write-aks
+    match:
+      argv0: az
+      verb: {eq: aks}
+      positional_seq_prefix_any:
+        - [update]
+        - [scale]
+    effect: allow
+    channel: rw
+    environments: [staging, prod]
+    reason: "az aks update/scale is permitted (rw)"
+
+  - id: az-write-appservice
+    match:
+      argv0: az
+      verb: {eq: appservice}
+      positional_seq_prefix_any:
+        - [plan, update]
+    effect: allow
+    channel: rw
+    environments: [staging, prod]
+    reason: "az appservice plan update is permitted (rw)"
+
+  - id: az-write-containerapp
+    match:
+      argv0: az
+      verb: {eq: containerapp}
+      positional_seq_prefix_any:
+        - [update]
+        - [revision, activate]
+        - [revision, restart]
+        - [replica, count]
+    effect: allow
+    channel: rw
+    environments: [staging, prod]
+    reason: "az containerapp update/revision ops are permitted (rw)"
+
+  - id: az-write-monitor-autoscale
+    match:
+      argv0: az
+      verb: {eq: monitor}
+      positional_seq_prefix_any:
+        - [autoscale, update]
+    effect: allow
+    channel: rw
+    environments: [staging, prod]
+    reason: "az monitor autoscale update is permitted (rw)"

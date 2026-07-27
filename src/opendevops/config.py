@@ -162,10 +162,10 @@ class GithubTarget(BaseModel):
 
 
 class CloudTarget(BaseModel):
-    """A read-only cloud-CLI execution target (the ``aws`` / ``gcloud`` / ``az`` families).
+    """A cloud-CLI execution target (the ``aws`` / ``gcloud`` / ``az`` families).
 
     ``credential_env`` names the *agent-process* environment variables whose VALUES the executor
-    copies into the child env for this family's calls — the direct analogue of
+    copies into the child env for this family's **read** (``ro``) calls — the direct analogue of
     ``GithubTarget.token_env``, except a cloud credential is usually a *set* of variables rather
     than one token:
 
@@ -178,17 +178,18 @@ class CloudTarget(BaseModel):
       * az — ``AZURE_CLIENT_ID`` / ``AZURE_TENANT_ID`` / ``AZURE_CLIENT_SECRET`` (service-principal
         env auth) or ``AZURE_FEDERATED_TOKEN_FILE``.
 
-    Empty (the default) means the family is *unconfigured*: the boot credential-coverage gate
-    (:func:`~opendevops.policy.loader.check_credential_coverage`) treats an empty list as "no
-    credential", so a shipped cloud pack with allow rules refuses to boot until the operator lists
-    the variable names here — and the executor raises ``CredentialUnavailable`` for any call in the
-    family meanwhile. Only NAMES live in config; the executor reads each variable's VALUE at exec
-    time (never logged, never stored).
+    ``credential_env_rw`` is the distinct write identity for ``channel: rw`` cloud-write packs
+    (mirrors ``GithubTarget.token_env_rw``). Empty means the write sub-credential is unconfigured:
+    a shipped ``*-write.yaml`` pack with ``channel: rw`` allows refuses to boot until the operator
+    lists the RW variable names (``_RW_BOOT_GATED_FAMILIES``). Only NAMES live in config; the
+    executor reads each variable's VALUE at exec time (never logged, never stored). RO and RW
+    lists must not be mixed in one child env — exactly one channel's variables are injected.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     credential_env: list[str] = []
+    credential_env_rw: list[str] = []
 
 
 class SshTarget(BaseModel):

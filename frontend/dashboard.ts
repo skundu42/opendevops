@@ -86,15 +86,41 @@ interface CapabilityRequest {
   capability: string;
   environment: string;
   targets: string[];
+  reason?: string;
+  ttl_s?: number | null;
   max_executions: number;
+  max_executions_per_run?: number;
+  max_identical_per_run?: number;
+  max_consecutive_failures?: number;
+  cooldown_s?: number;
+  require_dry_run?: boolean;
+}
+
+interface ActionIdentity {
+  kind?: string;
+  principal?: string;
+  issuer?: string;
+  subject?: string;
+  email?: string | null;
+  name?: string | null;
 }
 
 interface CapabilityProposal {
   proposal_id: string;
   status: string;
   expires_at: string;
+  created_at?: string;
   request: CapabilityRequest;
+  requester?: ActionIdentity;
+  approver?: ActionIdentity | null;
+  activated_by?: ActionIdentity | null;
+  executions_used?: number;
 }
+
+type GrantWizardStep = "propose" | "approve" | "activate";
+
+let grantWizardStep: GrantWizardStep = "propose";
+let cachedProposals: CapabilityProposal[] = [];
 
 interface ControlPlaneSnapshot {
   revision?: string;
@@ -475,14 +501,60 @@ function renderSlis(slis: ServiceIndicators = {}): void {
   setText("sli-budget-used", sliValue(slis.budget_utilization_percent, "%"));
 }
 
+function identityLabel(identity: ActionIdentity | null | undefined): string {
+  if (!identity) return "—";
+  return identity.email || identity.name || identity.principal || identity.subject || "—";
+}
+
+function setGrantWizardStep(step: GrantWizardStep): void {
+  grantWizardStep = step;
+  document.querySelectorAll<HTMLButtonElement>(".grant-step").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset["step"] === step);
+  });
+  const form = byId<HTMLFormElement>("proposal-form");
+  form.classList.toggle("is-hidden-step", step !== "propose");
+  const canPropose = currentRoles.has("operator") || currentRoles.has("admin");
+  byId<HTMLButtonElement>("propose-submit").disabled = !canPropose;
+  const titles: Record<GrantWizardStep, [string, string]> = {
+    propose: ["All proposals", "Newest first — draft a grant on the left"],
+    approve: ["Awaiting approval", "Pending proposals ready for an independent approver"],
+    activate: ["Ready to activate", "Approved grants waiting for admin activation, plus active ones"],
+  };
+  const [title, hint] = titles[step];
+  setText("proposal-board-title", title);
+  setText("proposal-board-hint", hint);
+  renderProposals();
+}
+
+function proposalsForStep(proposals: CapabilityProposal[]): CapabilityProposal[] {
+  if (grantWizardStep === "approve") {
+    return proposals.filter((item) => item.status === "pending");
+  }
+  if (grantWizardStep === "activate") {
+    return proposals.filter((item) => item.status === "approved" || item.status === "active");
+  }
+  return proposals;
+}
+
 function renderProposals(control: ControlPlaneSnapshot = {}): void {
-  const revision = control.revision || "—";
-  setText("control-revision", `revision ${shortId(revision.replace("sha256:", ""), 10)}`);
+  if (control.revision) {
+    const revision = control.revision;
+    setText("control-revision", `revision ${shortId(revision.replace("sha256:", ""), 10)}`);
+  }
+  if (control.proposals || control.items) {
+    cachedProposals = control.proposals || control.items || [];
+  }
   const list = byId("proposal-list");
   list.replaceChildren();
-  const proposals = control.proposals || control.items || [];
+  const proposals = proposalsForStep(cachedProposals);
   if (!proposals.length) {
-    list.append(element("p", "empty-state", "No capability changes have been proposed."));
+    const empty =
+      grantWizardStep === "approve"
+        ? "No proposals awaiting approval."
+        : grantWizardStep === "activate"
+          ? "No approved or active grants."
+          : "No capability changes have been proposed.";
+    list.append(element("p", "empty-state", empty));
     return;
   }
   proposals.forEach((proposal) => {
@@ -493,11 +565,34 @@ function renderProposals(control: ControlPlaneSnapshot = {}): void {
       element("span", `status-pill ${statusClass(proposal.status)}`, proposal.status)
     );
     const request = proposal.request;
-    card.append(
-      heading,
+    const meta = element("div", "proposal-meta");
+    meta.append(
       element("p", "", `${request.environment} · ${request.targets.join(", ")}`),
-      element("small", "", `${request.max_executions} executions · expires ${elapsed(proposal.expires_at)}`)
+      element("p", "proposal-reason", request.reason || "No reason provided"),
+      element(
+        "small",
+        "",
+        [
+          `id ${shortId(proposal.proposal_id, 10)}`,
+          `${request.max_executions} executions`,
+          request.max_executions_per_run != null
+            ? `${request.max_executions_per_run}/run`
+            : null,
+          request.require_dry_run === false ? "dry-run optional" : "dry-run required",
+          `expires ${elapsed(proposal.expires_at)}`,
+          `by ${identityLabel(proposal.requester)}`,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      )
     );
+    if (proposal.approver) {
+      meta.append(element("small", "", `approved by ${identityLabel(proposal.approver)}`));
+    }
+    if (proposal.activated_by) {
+      meta.append(element("small", "", `activated by ${identityLabel(proposal.activated_by)}`));
+    }
+    card.append(heading, meta);
     const actions = element("div", "row-actions");
     if (proposal.status === "pending" && (currentRoles.has("approver") || currentRoles.has("admin"))) {
       const approve = element("button", "small-action primary", "Approve");
@@ -557,6 +652,8 @@ function renderSnapshot(data: DashboardSnapshot): void {
   renderSlis(data.slis);
   if (data.live) renderLive(data.live);
   if (data.control_plane) renderProposals(data.control_plane);
+  else renderProposals();
+  setGrantWizardStep(grantWizardStep);
   setText("connection-state", "Connected");
   setText("last-refresh", `Updated ${elapsed(data.generated_at)}`);
   setText("snapshot-id", `Snapshot · ${data.generated_at.replace("T", " ").slice(0, 19)} UTC`);
@@ -1013,6 +1110,7 @@ async function proposalAction(proposalId: string, action: ProposalAction): Promi
     await mutation(
       `/dashboard/api/config/proposals/${encodeURIComponent(proposalId)}/${action}`
     );
+    if (action === "approve" || action === "activate") setGrantWizardStep("activate");
     await refresh();
   } catch (error: unknown) {
     window.alert(errorMessage(error));
@@ -1103,16 +1201,30 @@ byId<HTMLFormElement>("proposal-form").addEventListener("submit", async (event: 
     reason: form.get("reason"),
     ttl_s: Number(form.get("ttl_s")),
     max_executions: Number(form.get("max_executions")),
-    require_dry_run: true
+    max_executions_per_run: Number(form.get("max_executions_per_run")),
+    max_identical_per_run: Number(form.get("max_identical_per_run")),
+    max_consecutive_failures: Number(form.get("max_consecutive_failures")),
+    cooldown_s: Number(form.get("cooldown_s")),
+    require_dry_run: form.get("require_dry_run") === "on"
   };
   try {
     await mutation("/dashboard/api/config/proposals", payload);
-    feedback.textContent = "Proposal created and awaiting approval.";
+    feedback.textContent = "Proposal created — continue to Approve.";
     formElement.reset();
+    const dryRun = formElement.querySelector<HTMLInputElement>('input[name="require_dry_run"]');
+    if (dryRun) dryRun.checked = true;
+    setGrantWizardStep("approve");
     await refresh();
   } catch (error: unknown) {
     feedback.textContent = errorMessage(error);
   }
+});
+
+document.querySelectorAll<HTMLButtonElement>(".grant-step").forEach((button) => {
+  button.addEventListener("click", () => {
+    const step = button.dataset["step"] as GrantWizardStep | undefined;
+    if (step) setGrantWizardStep(step);
+  });
 });
 
 byId<HTMLButtonElement>("new-chat-button").addEventListener("click", async () => {
