@@ -8,9 +8,8 @@
 # — a blast-radius rule. Run it on a dedicated ops VM (or a separate ops cluster). See
 # docs/DEPLOY.md.
 #
-# The langgraph-server image is BUILT from this repo, not pulled:
-#     langgraph build -t opendevops-langgraph:latest
-# (bakes the graph from langgraph.json). Everything else pulls upstream images.
+# The released stack pulls a prebuilt, multi-architecture server image. Contributors can
+# override LANGGRAPH_IMAGE with a locally built tag.
 #
 # Validate this file without pulling/running anything:
 #     docker compose -f docker-compose.yml config -q
@@ -36,7 +35,7 @@ networks:
 services:
   # -- the self-hosted LangGraph Server (our graph + webhook app) ------------------------------
   langgraph-server:
-    image: ${LANGGRAPH_IMAGE:-opendevops-langgraph:latest}
+    image: ${LANGGRAPH_IMAGE:-ghcr.io/skundu42/opendevops:latest}
     working_dir: /deploy   # so config's relative ./audit and ./config/policy resolve under /deploy
     restart: unless-stopped
     expose:
@@ -52,6 +51,7 @@ services:
       REDIS_URI: redis://redis:6379/1
       # LangSmith licensing / tracing key — passed through from the environment (never baked).
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
       # Our config: OPENDEVOPS_CONFIG names the config.yaml; load_config reads its sibling
       # models.yaml / budgets.yaml + policy dir from the mounted ./config (grandparent = /deploy).
       OPENDEVOPS_CONFIG: /deploy/config/config.yaml

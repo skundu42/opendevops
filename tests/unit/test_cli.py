@@ -1,4 +1,4 @@
-"""CLI: ``version``, ``audit verify`` (good + tampered), and the ``chat`` REPL smoke test.
+"""CLI: initialization, version/audit commands, and the ``chat`` REPL smoke test.
 
 The REPL is driven with a stub gateway (a canned event stream) injected through the
 ``opendevops.cli._build_gateway`` seam, so no real model/graph is built; we assert the
@@ -45,8 +45,37 @@ def test_version_prints_version() -> None:
 def test_help_lists_chat_and_audit() -> None:
     result = runner.invoke(cli.app, ["--help"])
     assert result.exit_code == 0
+    assert "init" in result.output
     assert "chat" in result.output
     assert "audit" in result.output
+
+
+def test_init_creates_safe_source_free_workspace(tmp_path: Path) -> None:
+    destination = tmp_path / "workspace"
+
+    result = runner.invoke(cli.app, ["init", str(destination)])
+
+    assert result.exit_code == 0
+    assert (destination / "config/config.yaml").is_file()
+    assert (destination / "config/policy/base.yaml").is_file()
+    assert (destination / "ops/k8s/gen-kubeconfig.sh").is_file()
+    assert (destination / ".env.example").is_file()
+    assert not (destination / ".env").exists()
+    assert "ANTHROPIC_API_KEY" in result.output
+
+
+def test_init_refuses_to_replace_existing_config_without_force(tmp_path: Path) -> None:
+    destination = tmp_path / "workspace"
+    config_dir = destination / "config"
+    config_dir.mkdir(parents=True)
+    marker = config_dir / "config.yaml"
+    marker.write_text("user-owned: true\n")
+
+    result = runner.invoke(cli.app, ["init", str(destination)])
+
+    assert result.exit_code == 1
+    assert "init refused" in result.output
+    assert marker.read_text() == "user-owned: true\n"
 
 
 def test_config_check_rejects_empty_context_allowlist(

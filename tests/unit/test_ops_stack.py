@@ -96,6 +96,11 @@ def test_langgraph_server_env_wires_postgres_redis_and_config() -> None:
     assert env["OPENDEVOPS_CONFIG"].endswith("config.yaml")
 
 
+def test_compose_uses_the_published_image_by_default() -> None:
+    image = _compose()["services"]["langgraph-server"]["image"]
+    assert image == "${LANGGRAPH_IMAGE:-ghcr.io/skundu42/opendevops:latest}"
+
+
 def test_compose_bind_mount_sources_exist_on_disk() -> None:
     """Every host-path bind mount the stack references must exist (named volumes are skipped)."""
     for name, svc in _compose()["services"].items():

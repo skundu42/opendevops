@@ -1,6 +1,6 @@
 [project]
 name = "opendevops"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Autonomous DevOps agent: policy-gated, budget-capped, audit-chained operations on Kubernetes, GitHub, cloud CLIs, and SSH"
 readme = "README.md"
 license = "Apache-2.0"
@@ -58,10 +58,12 @@ packages = ["src/opendevops"]
 
 [tool.hatch.build.targets.sdist]
 include = [
+  "/.env.example",
   "/frontend",
   "/src",
   "/tests",
   "/config",
+  "/ops/k8s",
   "/hatch_build.py",
   "/package.json",
   "/package-lock.json",
@@ -73,6 +75,9 @@ include = [
 
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"
+
+[tool.hatch.version]
+path = "src/opendevops/__init__.py"
 
 [tool.ruff]
 line-length = 100

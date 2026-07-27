@@ -1,0 +1,233 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-artifacts:
+    name: Build and verify distributions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Validate release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          package_version="$(uvx --from hatch hatch version)"
+          if [[ "${version}" != "${package_version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package version ${package_version}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Compile strict TypeScript dashboard
+        run: |
+          npm ci
+          npm run frontend:check
+          npm run frontend:build
+
+      - name: Sync all test dependencies
+        run: uv sync --all-extras
+
+      - name: Run release gate
+        run: |
+          uv run ruff check .
+          uv run mypy src ops
+          uv run pytest
+          uv lock --check
+
+      - name: Build Python distributions
+        run: |
+          uv build
+          uvx twine check dist/*
+
+      - name: Build source-free deployment bundle
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          bundle_root="build/release/opendevops-${VERSION}"
+          mkdir -p "${bundle_root}/ops"
+          cp docker-compose.yml .env.example LICENSE "${bundle_root}/"
+          cp -R config "${bundle_root}/config"
+          cp -R ops/caddy ops/vector ops/prometheus ops/grafana "${bundle_root}/ops/"
+          sed -i \
+            "s|ghcr.io/skundu42/opendevops:latest|ghcr.io/skundu42/opendevops:${VERSION}|g" \
+            "${bundle_root}/docker-compose.yml" "${bundle_root}/.env.example"
+          sed -i \
+            -e 's/backend: sqlite.*/backend: redis/' \
+            -e 's|# redis_url: redis://redis:6379/0.*|redis_url: redis://redis:6379/0|' \
+            "${bundle_root}/config/budgets.yaml"
+          source_date_epoch="$(git show -s --format=%ct HEAD)"
+          tar --sort=name --mtime="@${source_date_epoch}" --owner=0 --group=0 --numeric-owner \
+            -czf "dist/opendevops-deploy-${VERSION}.tar.gz" \
+            -C build/release "opendevops-${VERSION}"
+          (
+            cd dist
+            sha256sum ./* > SHA256SUMS
+          )
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: "dist/*"
+
+      - name: Upload verified release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-artifacts
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-image:
+    name: Publish multi-architecture image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Validate image version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          runtime_version="$(sed -nE 's/^__version__ = "([^"]+)"$/\1/p' src/opendevops/__init__.py)"
+          if [[ "${version}" != "${runtime_version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match runtime version ${runtime_version}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image tags and labels
+        id: metadata
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Build and publish image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            VCS_REF=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+  publish-pypi:
+    name: Publish Python package to PyPI
+    if: vars.PYPI_PUBLISH_ENABLED == 'true'
+    needs: build-artifacts
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/opendevops/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: release-artifacts
+          path: release-artifacts
+
+      - name: Stage only Python distributions
+        shell: bash
+        run: |
+          mkdir dist
+          cp release-artifacts/*.whl dist/
+          cp release-artifacts/opendevops-*.tar.gz dist/
+          rm -f dist/opendevops-deploy-*.tar.gz
+
+      - name: Publish with PyPI Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@106e0b0b7c337fa67ed433972f777c6357f78598 # v1.13.0
+
+  publish-release:
+    name: Publish GitHub release
+    needs:
+      - build-artifacts
+      - publish-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: Create or update GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/* \
+              --repo "${GITHUB_REPOSITORY}" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --verify-tag \
+              --generate-notes \
+              --title "opendevops ${GITHUB_REF_NAME}"
+          fi

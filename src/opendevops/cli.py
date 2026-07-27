@@ -1,4 +1,4 @@
-"""Typer CLI: ``version``, ``config check``, ``audit verify``, and the ``chat`` REPL.
+"""Typer CLI: project initialization, config/audit commands, and the ``chat`` REPL.
 
 ``chat`` is the human entry point: it builds a :class:`LocalGateway` over the on-disk config
 and drives a streaming REPL against it — assistant text as it arrives, tool calls as
@@ -14,6 +14,8 @@ import asyncio
 import getpass
 import os
 import sys
+from importlib import resources
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -70,6 +72,70 @@ _PROMPT = "[bold green]you[/bold green] › "
 def version() -> None:
     """Print the opendevops version."""
     console.print(f"opendevops {__version__}")
+
+
+def _workspace_templates() -> Traversable:
+    """Return wheel-embedded templates, falling back to the source checkout for contributors."""
+    packaged = resources.files("opendevops").joinpath("templates")
+    if packaged.joinpath("config").is_dir():
+        return packaged
+    return Path(__file__).resolve().parents[2]
+
+
+def _resource_at(root: Traversable, relative: Path) -> Traversable:
+    current = root
+    for part in relative.parts:
+        current = current.joinpath(part)
+    return current
+
+
+def _copy_resource_tree(source: Traversable, destination: Path) -> None:
+    if source.is_dir():
+        destination.mkdir(parents=True, exist_ok=True)
+        for child in source.iterdir():
+            _copy_resource_tree(child, destination / child.name)
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(source.read_bytes())
+    if destination.suffix == ".sh":
+        destination.chmod(0o755)
+
+
+@app.command("init")
+def init_workspace(
+    directory: Path = typer.Argument(  # noqa: B008
+        Path("."), help="Directory in which to create the opendevops workspace."
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Replace existing generated files. Extra user files are preserved.",
+    ),
+) -> None:
+    """Create starter config, environment template, and Kubernetes bootstrap files."""
+    destination = directory.expanduser().resolve()
+    templates = _workspace_templates()
+    paths = (Path("config"), Path("ops/k8s"), Path(".env.example"))
+    conflicts = [relative for relative in paths if (destination / relative).exists()]
+    if conflicts and not force:
+        rendered = ", ".join(str(path) for path in conflicts)
+        err_console.print(
+            f"[red]init refused:[/red] {rendered} already exists under {destination}. "
+            "Choose an empty directory or pass --force."
+        )
+        raise typer.Exit(code=1)
+
+    destination.mkdir(parents=True, exist_ok=True)
+    for relative in paths:
+        _copy_resource_tree(
+            _resource_at(templates, relative),
+            destination / relative,
+        )
+    console.print(f"[green]workspace initialized[/green] at {destination}")
+    console.print(
+        "Next: copy .env.example to .env, set ANTHROPIC_API_KEY, scope your credentials, "
+        "then run `opendevops config check`."
+    )
 
 
 @config_app.command("check")

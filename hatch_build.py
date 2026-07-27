@@ -1,4 +1,4 @@
-"""Build the strict TypeScript dashboard before assembling Python wheels."""
+"""Assemble browser assets and safe workspace templates into Python wheels."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 
 class CustomBuildHook(BuildHookInterface):
-    """Ensure browser assets are compiled from TypeScript and current."""
+    """Ensure generated and non-package runtime assets are present in wheels."""
 
     PLUGIN_NAME = "custom"
 
@@ -56,3 +56,14 @@ class CustomBuildHook(BuildHookInterface):
             force_include[str(output)] = (
                 f"opendevops/interfaces/dashboard_assets/generated/{output.name}"
             )
+
+        template_sources = [
+            (root / "config", Path("config")),
+            (root / "ops" / "k8s", Path("ops/k8s")),
+        ]
+        for source_root, destination_root in template_sources:
+            for source in source_root.rglob("*"):
+                if source.is_file():
+                    destination = destination_root / source.relative_to(source_root)
+                    force_include[str(source)] = f"opendevops/templates/{destination.as_posix()}"
+        force_include[str(root / ".env.example")] = "opendevops/templates/.env.example"

@@ -16,6 +16,7 @@
 
 <p align="center">
   <a href="https://github.com/skundu42/opendevops/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/skundu42/opendevops/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/skundu42/opendevops/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/skundu42/opendevops?display_name=tag&sort=semver"></a>
   <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-28516b.svg"></a>
   <img alt="Python 3.11 and 3.12" src="https://img.shields.io/badge/python-3.11%20%7C%203.12-28a6a1.svg">
   <img alt="Project status: beta" src="https://img.shields.io/badge/status-beta-f0643b.svg">
@@ -126,15 +127,15 @@ an admin activates it. Production rejects requester self-approval, and the execu
 consumes the grant before each rw action.
 
 ```sh
-uv run opendevops config propose-grant \
+opendevops config propose-grant \
   --environment prod \
   --capability kubernetes_deploy \
   --target kind-prod/web \
   --reason "Deploy reviewed release 2026.07.26"
 
-uv run opendevops config approve-grant <proposal-id> --actor change-approver
-uv run opendevops config activate-grant <proposal-id> --actor platform-admin
-uv run opendevops config grants
+opendevops config approve-grant <proposal-id> --actor change-approver
+opendevops config activate-grant <proposal-id> --actor platform-admin
+opendevops config grants
 ```
 
 The control plane is an additional gate: a grant never overrides a policy deny, credential scope,
@@ -188,7 +189,6 @@ Read the full [security model](guides/security-model.md) before connecting real 
 
 - Python 3.11 or 3.12
 - [`uv`](https://docs.astral.sh/uv/)
-- Node.js 22+ with npm (compiles the dashboard's TypeScript sources)
 - `kubectl` and access to a cluster where you can create the agent ServiceAccount
 - an Anthropic API key
 - optional provider CLIs only for integrations you enable
@@ -196,12 +196,13 @@ Read the full [security model](guides/security-model.md) before connecting real 
 ### Install and configure
 
 ```sh
-git clone https://github.com/skundu42/opendevops.git
-cd opendevops
+# Install the prebuilt universal wheel; no repository clone or frontend build is needed.
+uv tool install \
+  'opendevops[checkpoint,ssh] @ https://github.com/skundu42/opendevops/releases/download/v0.1.0/opendevops-0.1.0-py3-none-any.whl'
 
-npm ci
-npm run frontend:build
-uv sync --extra checkpoint --extra server --extra dev
+mkdir opendevops-workspace
+opendevops init opendevops-workspace
+cd opendevops-workspace
 cp .env.example .env
 # Set ANTHROPIC_API_KEY in .env.
 
@@ -210,12 +211,13 @@ kubectl apply -f ops/k8s/agent-view-rbac.yaml
 ops/k8s/gen-kubeconfig.sh <your-context>
 
 # Add <your-context> to targets.kubernetes.allowed_contexts in config/config.yaml.
-uv run opendevops config check
-uv run opendevops chat
+opendevops config check
+opendevops chat
 ```
 
-The repository deliberately ships with an empty Kubernetes context allowlist. `config check` and
-every runtime entry point refuse to proceed until you make that deployment choice explicitly.
+The generated workspace deliberately has an empty Kubernetes context allowlist. `config check`
+and every runtime entry point refuse to proceed until you make that deployment choice explicitly.
+`opendevops init` also refuses to replace an existing workspace unless `--force` is explicit.
 
 Continue with the [step-by-step getting-started guide](guides/getting-started.md).
 
@@ -241,14 +243,23 @@ The included Compose stack runs the LangGraph Server, Postgres, Redis, Caddy, Ve
 Grafana, and the authenticated dashboard:
 
 ```sh
-npm ci
-npm run frontend:check
-npm run frontend:build
+curl -fLO \
+  https://github.com/skundu42/opendevops/releases/download/v0.1.0/opendevops-deploy-0.1.0.tar.gz
+tar -xzf opendevops-deploy-0.1.0.tar.gz
+cd opendevops-0.1.0
+cp .env.example .env
+# Fill every required blank in .env.
 
-uv run langgraph build -t opendevops-langgraph:latest
 docker compose config -q
+docker compose pull
 docker compose up -d
 ```
+
+The release bundle is pinned to `ghcr.io/skundu42/opendevops:0.1.0`; published images support
+`linux/amd64` and `linux/arm64`. Neither Node.js nor an application source build is required. The
+image intentionally contains the application runtime rather than every cloud vendor CLI; install
+only the `kubectl`, `helm`, `gh`, `aws`, `gcloud`, or `az` binaries for policy families you enable
+in a derived runtime image or credential-isolated executor. A missing binary fails closed.
 
 Security-sensitive Compose credentials have no default values. Caddy is the only ingress; server
 APIs and metrics require `GATEWAY_TOKEN`, native webhook routes retain their HMAC/bearer
@@ -265,6 +276,7 @@ quota planning, and go-live gates.
 
 | Command | Purpose |
 |---|---|
+| `opendevops init [directory]` | scaffold config and Kubernetes bootstrap files from the wheel |
 | `opendevops chat` | streaming REPL with environment, profile and principal selection |
 | `opendevops config check` | validate runtime-critical configuration |
 | `opendevops config grants` | list the control-plane revision and capability proposals |
@@ -290,6 +302,7 @@ quota planning, and go-live gates.
 | [Deployment](guides/deployment.md) | service stack, monitoring and production gates |
 | [Development](guides/development.md) | tests, conventions and extension points |
 | [Upgrade notes](docs/UPGRADE.md) | dependency and migration guidance |
+| [Release process](RELEASING.md) | versioning, artifacts, signing and PyPI trusted publishing |
 
 ## Development
 

@@ -11,17 +11,25 @@ platform owners. It is not a hardened production guide.
 > manages (see `guides/security-model.md`). Run it on a dedicated ops VM or a separate ops
 > cluster. Otherwise a compromised or buggy run could reach its own control plane.
 
-## 1. Build the server image
+## 1. Download a release
 
-The `langgraph-server` service runs an image built from this repo (it bakes the graph from
-`langgraph.json`); everything else pulls upstream images.
+The `langgraph-server` service pulls the versioned image that already contains the graph,
+application, dependencies, and compiled TypeScript dashboard.
 
 ```sh
-npm ci
-npm run frontend:check
-npm run frontend:build
-uv run langgraph build -t opendevops-langgraph:latest
+curl -fLO \
+  https://github.com/skundu42/opendevops/releases/download/v0.1.0/opendevops-deploy-0.1.0.tar.gz
+tar -xzf opendevops-deploy-0.1.0.tar.gz
+cd opendevops-0.1.0
+cp .env.example .env
 ```
+
+The bundle pins `ghcr.io/skundu42/opendevops:0.1.0` and preconfigures its shared Redis daily
+counter. Check the release `SHA256SUMS` before starting it. Building from source remains available
+to contributors through the checked-in `Dockerfile`, but is not required for deployment.
+The application image deliberately omits infrastructure vendor CLIs. Add only the clients for
+enabled policy families to a derived runtime or credential-isolated executor image; the agent
+fails closed when an expected executable is absent.
 
 ## 2. Secrets (environment / .env next to docker-compose.yml)
 

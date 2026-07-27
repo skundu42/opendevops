@@ -1799,7 +1799,6 @@ wheels = [
 
 [[package]]
 name = "opendevops"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "deepagents" },
@@ -1881,7 +1880,7 @@ requires-dist = [
     { name = "sse-starlette", marker = "extra == 'server'" },
     { name = "typer", specifier = ">=0.15" },
 ]
-provides-extras = ["checkpoint", "server", "slack", "ssh", "dev"]
+provides-extras = ["checkpoint", "dev", "server", "slack", "ssh"]
 
 [[package]]
 name = "openevals"

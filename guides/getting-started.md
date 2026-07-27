@@ -1,7 +1,8 @@
 # Getting started
 
-This guide takes you from a fresh clone to a live, read-only Kubernetes diagnostics session in the
-CLI REPL. The local CLI tier needs **zero infrastructure** — no server, no database, no Slack app.
+This guide takes you from a released wheel to a live, read-only Kubernetes diagnostics session in
+the CLI REPL. The local CLI tier needs **zero infrastructure** — no server, no database, no Slack
+app.
 
 ## Prerequisites
 
@@ -15,14 +16,17 @@ CLI REPL. The local CLI tier needs **zero infrastructure** — no server, no dat
 ## 1. Install
 
 ```sh
-git clone https://github.com/skundu42/opendevops.git
-cd opendevops
-npm ci
-npm run frontend:build
-uv sync --extra checkpoint --extra server --extra dev
+uv tool install \
+  'opendevops[checkpoint,ssh] @ https://github.com/skundu42/opendevops/releases/download/v0.1.0/opendevops-0.1.0-py3-none-any.whl'
+mkdir opendevops-workspace
+opendevops init opendevops-workspace
+cd opendevops-workspace
 ```
 
-Extras, and when you need them:
+The wheel is built for Python 3.11+ and already contains the compiled TypeScript dashboard and
+starter configuration. It does not require a repository clone, Node.js, or a compiler.
+
+Package extras, and when you need them:
 
 | Extra | Brings in | Needed for |
 |---|---|---|
@@ -31,6 +35,10 @@ Extras, and when you need them:
 | `slack` | `slack-bolt`, `apscheduler` | Slack chat-ops + the scheduler service |
 | `ssh` | `asyncssh` | the `ssh_run` remote-exec tool |
 | `dev` | `pytest`, `ruff`, `mypy`, `agentevals`, … | running tests |
+
+The release command above installs `checkpoint` for CLI escalation/resume and `ssh` so the
+structured SSH tool is available when configured. Contributors installing from source should
+follow [development](development.md).
 
 ## 2. Environment
 
@@ -83,10 +91,10 @@ chat until you have made an explicit blast-radius decision.
 ## 5. Validate and run
 
 ```sh
-uv run opendevops config check
+opendevops config check
 # config OK: 1 contexts allowed, 3 budget profiles, 3 priced models
 
-uv run opendevops chat
+opendevops chat
 ```
 
 `chat` options:
@@ -113,7 +121,7 @@ Try: `why is pod api-0 in namespace web crash-looping?`
 Every run wrote a hash-chained JSONL file under `./audit/`:
 
 ```sh
-uv run opendevops audit verify --dir ./audit
+opendevops audit verify --dir ./audit
 ```
 
 This walks every per-run chain and fails loudly on any tampered, reordered, or dropped line. See

@@ -18,7 +18,7 @@ The stack (`docker-compose.yml`):
 
 | Service | Role |
 |---|---|
-| `langgraph-server` | the agent graph + webhook app, built **from this repo**; durable run queue, exactly-once, SSE streaming |
+| `langgraph-server` | the prebuilt agent graph + webhook app; durable run queue, exactly-once, SSE streaming |
 | `postgres` | the server's queue + checkpoint store |
 | `redis` | the server's task queue **and** the shared `RedisDailyCounter` |
 | `caddy` | the only ingress — API bearer gate plus pass-through to application-authenticated dashboard routes on `:8123`; terminate TLS upstream in production |
@@ -29,29 +29,36 @@ The stack (`docker-compose.yml`):
 ### Bring-up
 
 ```sh
-# 1. compile the strict TypeScript dashboard, then build the server image
-npm ci
-npm run frontend:check
-npm run frontend:build
-uv run langgraph build -t opendevops-langgraph:latest
+# 1. download the versioned, source-free deployment bundle
+curl -fLO \
+  https://github.com/skundu42/opendevops/releases/download/v0.1.0/opendevops-deploy-0.1.0.tar.gz
+tar -xzf opendevops-deploy-0.1.0.tar.gz
+cd opendevops-0.1.0
 
-# 2. secrets — in the environment or a .env next to docker-compose.yml:
+# 2. secrets — copy the template, then fill every required blank:
 #    GATEWAY_TOKEN, ANTHROPIC_API_KEY, LANGSMITH_API_KEY,
 #    POSTGRES_PASSWORD, GRAFANA_ADMIN_PASSWORD
 #    Local development: DASHBOARD_TOKEN
 #    Production OIDC: OIDC_CLIENT_ID, OIDC_CLIENT_SECRET
+cp .env.example .env
 
-# 3. switch the daily counter to the shared backend (config/budgets.yaml):
-#    daily: {backend: redis, redis_url: redis://redis:6379/0}
-
-# 4. validate, start, smoke-test
+# 3. validate, pull, start, smoke-test
 docker compose config -q
+docker compose pull
 docker compose up -d
 curl -sf http://localhost:8123/healthz
 curl -s -H "Authorization: Bearer $GATEWAY_TOKEN" \
   http://localhost:8123/assistants/search -X POST -d '{}'
 # The shipped local config signs in with DASHBOARD_TOKEN.
 ```
+
+The bundle pins `ghcr.io/skundu42/opendevops:0.1.0`, supports `linux/amd64` and `linux/arm64`, and
+preconfigures the daily counter for the Compose Redis service. Verify `SHA256SUMS` from the same
+GitHub release before running it. Contributors can build the checked-in `Dockerfile` locally and
+override `LANGGRAPH_IMAGE`; release consumers do not need Python, uv, Node.js, or the source tree.
+The image does not bundle every infrastructure vendor CLI. Add only the `kubectl`, `helm`, `gh`,
+`aws`, `gcloud`, or `az` clients for the policy families the deployment enables, preferably in the
+credential-isolated executor image. Missing executables fail closed instead of silently degrading.
 
 The server container publishes no host port — Caddy on `:8123` is the sole ingress. Keep the
 gateway bearer on the machine-to-machine LangGraph API; the dashboard has its own OIDC session
