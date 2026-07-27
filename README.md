@@ -198,7 +198,7 @@ Read the full [security model](guides/security-model.md) before connecting real 
 ```sh
 # Install the prebuilt universal wheel; no repository clone or frontend build is needed.
 uv tool install \
-  'opendevops[checkpoint,ssh] @ https://github.com/skundu42/opendevops/releases/download/v0.1.0/opendevops-0.1.0-py3-none-any.whl'
+  'opendevops[checkpoint,ssh] @ https://github.com/skundu42/opendevops/releases/download/v0.1.1/opendevops-0.1.1-py3-none-any.whl'
 
 mkdir opendevops-workspace
 opendevops init opendevops-workspace
@@ -244,9 +244,9 @@ Grafana, and the authenticated dashboard:
 
 ```sh
 curl -fLO \
-  https://github.com/skundu42/opendevops/releases/download/v0.1.0/opendevops-deploy-0.1.0.tar.gz
-tar -xzf opendevops-deploy-0.1.0.tar.gz
-cd opendevops-0.1.0
+  https://github.com/skundu42/opendevops/releases/download/v0.1.1/opendevops-deploy-0.1.1.tar.gz
+tar -xzf opendevops-deploy-0.1.1.tar.gz
+cd opendevops-0.1.1
 cp .env.example .env
 # Fill every required blank in .env.
 
@@ -255,7 +255,7 @@ docker compose pull
 docker compose up -d
 ```
 
-The release bundle is pinned to `ghcr.io/skundu42/opendevops:0.1.0`; published images support
+The release bundle is pinned to `ghcr.io/skundu42/opendevops:0.1.1`; published images support
 `linux/amd64` and `linux/arm64`. Neither Node.js nor an application source build is required. The
 image intentionally contains the application runtime rather than every cloud vendor CLI; install
 only the `kubectl`, `helm`, `gh`, `aws`, `gcloud`, or `az` binaries for policy families you enable
