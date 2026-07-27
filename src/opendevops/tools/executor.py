@@ -142,7 +142,8 @@ def build_env(
     Exactly one channel's list is used (never both). A missing/empty named variable, or an
     unconfigured (empty) list for that channel, raises :class:`CredentialUnavailable` (refusal,
     no exec); the values never appear in any log or error. Each still gets ``KUBECONFIG=/dev/null``
-    and never sees ``GH_TOKEN`` or another cloud family's variables — one credential family per exec.
+    and never sees ``GH_TOKEN`` or another cloud family's variables — one credential family per
+    exec.
     """
     safe_base = {"PATH": cfg.execution.trusted_path, "HOME": home}
     env = {name: safe_base[name] for name in cfg.execution.env_allowlist}

@@ -105,7 +105,7 @@ def test_boot_refuses_when_cloud_rw_unconfigured(built_agent: Any, cfg: Any) -> 
     assert "aws-rw" in str(excinfo.value)
 
 
-def test_summarizer_is_haiku_backed_marker_subclass(cfg: Any) -> None:
+def test_summarizer_is_haiku_backed_marker_subclass(cfg: Any, monkeypatch: Any) -> None:
     """The summarizer replacement is a distinct marker subclass built on the ``summarizer`` alias.
 
     Proves the in-place replacement mechanism: ``_build_summarizer`` returns an instance
@@ -117,6 +117,7 @@ def test_summarizer_is_haiku_backed_marker_subclass(cfg: Any) -> None:
 
     from opendevops.agent import _build_summarizer, _HaikuSummarizationMiddleware
 
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-used-at-construction")
     mw = _build_summarizer(cfg, StateBackend())
     assert isinstance(mw, _HaikuSummarizationMiddleware)
     assert mw.name == "_HaikuSummarizationMiddleware"

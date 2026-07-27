@@ -129,12 +129,12 @@ def test_log_summarizer_subagent_is_tool_less(cfg: Any, monkeypatch: Any) -> Non
     from opendevops.agent import _build_log_summarizer_subagent
     from opendevops.policy.engine import LOG_SUMMARIZER_SUBAGENT
 
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-used-at-construction")
     spec = _build_log_summarizer_subagent(cfg)
     assert spec["name"] == LOG_SUMMARIZER_SUBAGENT
     # A tool-less langchain create_agent graph has no "tools" node at all (only __start__ + model).
     assert "tools" not in spec["runnable"].nodes
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-used-at-construction")
     graph = build_agent(cfg, audit=AuditLogger(cfg.audit.dir), counter=InMemoryDailyCounter())
     sub = _subagent_graph(graph, LOG_SUMMARIZER_SUBAGENT)
     assert "tools" not in sub.nodes, "the log-summarizer subagent must expose no tools"
