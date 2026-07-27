@@ -55,9 +55,9 @@ Published versions and container tags are never replaced.
 5. Verify the release:
 
    ```sh
-   gh release verify-asset v0.2.0 opendevops-0.2.0-py3-none-any.whl
    gh attestation verify opendevops-0.2.0-py3-none-any.whl \
      --repo skundu42/opendevops
+   sha256sum -c SHA256SUMS
    docker buildx imagetools inspect ghcr.io/skundu42/opendevops:0.2.0
    ```
 
