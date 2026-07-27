@@ -36,6 +36,7 @@ ARGV = ["kubectl", "get", "pods", "-n", "default"]
 RUN_ID = "run-123"
 TCID = "call-abc"
 CHANNEL = "ro"
+ENV = "staging"
 FAMILY: str | None = "kubectl"
 
 
@@ -64,7 +65,12 @@ def _signed(now: float = 1000.0, **over):
     tcid = over.get("tool_call_id", TCID)
     channel = over.get("channel", CHANNEL)
     family = over.get("tool_family", FAMILY)
-    token = sign_decision(argv, staged, run_id, tcid, channel, family, priv, now=_at(now))
+    environment = over.get("environment", ENV)
+    host = over.get("host")
+    token = sign_decision(
+        argv, staged, run_id, tcid, channel, family, priv,
+        environment=environment, host=host, now=_at(now),
+    )
     return token, pub
 
 
@@ -75,8 +81,10 @@ def _signed(now: float = 1000.0, **over):
 
 def test_valid_token_verifies() -> None:
     token, pub = _signed(now=1000.0)
-    verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub, now=_at(1050.0))
-    assert verify_ok(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub, now=_at(1050.0))
+    verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub,
+        environment=ENV, now=_at(1050.0))
+    assert verify_ok(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub,
+        environment=ENV, now=_at(1050.0))
 
 
 def test_injectable_clock_sets_deterministic_exp() -> None:
@@ -86,9 +94,11 @@ def test_injectable_clock_sets_deterministic_exp() -> None:
 
 def test_just_before_and_at_expiry() -> None:
     token, pub = _signed(now=1000.0)  # exp == 1120
-    verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub, now=_at(1119.999))
+    verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub,
+        environment=ENV, now=_at(1119.999))
     with pytest.raises(TokenError, match="expired"):
-        verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub, now=_at(1120.0))
+        verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub,
+            environment=ENV, now=_at(1120.0))
 
 
 # --------------------------------------------------------------------------------------
@@ -99,7 +109,8 @@ def test_just_before_and_at_expiry() -> None:
 def test_expired_rejects() -> None:
     token, pub = _signed(now=1000.0)
     with pytest.raises(TokenError, match="expired"):
-        verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub, now=_at(2000.0))
+        verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub,
+            environment=ENV, now=_at(2000.0))
 
 
 def test_tampered_argv_hash_mismatch_rejects() -> None:
@@ -107,28 +118,31 @@ def test_tampered_argv_hash_mismatch_rejects() -> None:
     with pytest.raises(TokenError, match="argv hash"):
         verify_decision(
             token, ["kubectl", "delete", "pods"], [], RUN_ID, TCID, CHANNEL, FAMILY, pub,
-            now=_at(1000.0),
+            environment=ENV, now=_at(1000.0),
         )
 
 
 def test_wrong_run_id_rejects() -> None:
     token, pub = _signed(now=1000.0)
     with pytest.raises(TokenError, match="run_id"):
-        verify_decision(token, ARGV, [], "other-run", TCID, CHANNEL, FAMILY, pub, now=_at(1000.0))
+        verify_decision(token, ARGV, [], "other-run", TCID, CHANNEL, FAMILY, pub,
+            environment=ENV, now=_at(1000.0))
 
 
 def test_wrong_tool_call_id_rejects() -> None:
     token, pub = _signed(now=1000.0)
     with pytest.raises(TokenError, match="tool_call_id"):
         verify_decision(
-            token, ARGV, [], RUN_ID, "other-call", CHANNEL, FAMILY, pub, now=_at(1000.0)
+            token, ARGV, [], RUN_ID, "other-call", CHANNEL, FAMILY, pub,
+                environment=ENV, now=_at(1000.0)
         )
 
 
 def test_wrong_channel_rejects() -> None:
     token, pub = _signed(now=1000.0)
     with pytest.raises(TokenError, match="channel"):
-        verify_decision(token, ARGV, [], RUN_ID, TCID, "rw", FAMILY, pub, now=_at(1000.0))
+        verify_decision(token, ARGV, [], RUN_ID, TCID, "rw", FAMILY, pub,
+            environment=ENV, now=_at(1000.0))
 
 
 def test_forged_token_bad_signature_rejects() -> None:
@@ -141,25 +155,31 @@ def test_forged_token_bad_signature_rejects() -> None:
         tool_call_id=token.tool_call_id,
         channel=token.channel,
         tool_family=token.tool_family,
+        environment=token.environment,
+        host=token.host,
         exp=token.exp,
         sig=token.sig,
     )
     with pytest.raises(TokenError, match="signature is invalid"):
-        verify_decision(forged, ["evil"], [], RUN_ID, TCID, CHANNEL, FAMILY, pub, now=_at(1000.0))
+        verify_decision(forged, ["evil"], [], RUN_ID, TCID, CHANNEL, FAMILY, pub,
+            environment=ENV, now=_at(1000.0))
 
 
 def test_verified_under_wrong_public_key_rejects() -> None:
     priv, _ = generate_keypair()
     _, other_pub = generate_keypair()
-    token = sign_decision(ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, priv, now=_at(1000.0))
-    assert not verify_ok(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, other_pub, now=_at(1000.0))
+    token = sign_decision(ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, priv,
+        environment=ENV, now=_at(1000.0))
+    assert not verify_ok(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, other_pub,
+        environment=ENV, now=_at(1000.0))
 
 
 def test_non_hex_signature_rejects() -> None:
     token, pub = _signed(now=1000.0)
     bad = DecisionToken(**{**token.to_dict(), "sig": "not-hex!!"})
     with pytest.raises(TokenError, match="not valid hex"):
-        verify_decision(bad, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub, now=_at(1000.0))
+        verify_decision(bad, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub,
+            environment=ENV, now=_at(1000.0))
 
 
 def test_malformed_token_dict_rejects() -> None:
@@ -177,7 +197,8 @@ def test_malformed_token_dict_rejects() -> None:
 def test_faithful_staged_request_verifies() -> None:
     staged = [Staged()]
     token, pub = _signed(now=1000.0, staged_files=staged)
-    verify_decision(token, ARGV, staged, RUN_ID, TCID, CHANNEL, FAMILY, pub, now=_at(1050.0))
+    verify_decision(token, ARGV, staged, RUN_ID, TCID, CHANNEL, FAMILY, pub,
+        environment=ENV, now=_at(1050.0))
 
 
 def test_substituted_content_rejects() -> None:
@@ -186,7 +207,8 @@ def test_substituted_content_rejects() -> None:
     token, pub = _signed(now=1000.0, staged_files=signed)
     attacker = [Staged(content="apiVersion: v1\nkind: Secret\n")]  # same metadata, swapped body
     with pytest.raises(TokenError, match="staging plan"):
-        verify_decision(token, ARGV, attacker, RUN_ID, TCID, CHANNEL, FAMILY, pub, now=_at(1000.0))
+        verify_decision(token, ARGV, attacker, RUN_ID, TCID, CHANNEL, FAMILY, pub,
+            environment=ENV, now=_at(1000.0))
 
 
 def test_rewritten_argv_index_rejects() -> None:
@@ -194,7 +216,8 @@ def test_rewritten_argv_index_rejects() -> None:
     token, pub = _signed(now=1000.0, staged_files=signed)
     attacker = [Staged(argv_index=1)]  # rewrite the position the staged path lands at
     with pytest.raises(TokenError, match="staging plan"):
-        verify_decision(token, ARGV, attacker, RUN_ID, TCID, CHANNEL, FAMILY, pub, now=_at(1000.0))
+        verify_decision(token, ARGV, attacker, RUN_ID, TCID, CHANNEL, FAMILY, pub,
+            environment=ENV, now=_at(1000.0))
 
 
 def test_rewritten_inline_prefix_rejects() -> None:
@@ -202,7 +225,8 @@ def test_rewritten_inline_prefix_rejects() -> None:
     token, pub = _signed(now=1000.0, staged_files=signed)
     attacker = [Staged(inline=True, inline_prefix="--config=")]  # inject a flag via the rewrite
     with pytest.raises(TokenError, match="staging plan"):
-        verify_decision(token, ARGV, attacker, RUN_ID, TCID, CHANNEL, FAMILY, pub, now=_at(1000.0))
+        verify_decision(token, ARGV, attacker, RUN_ID, TCID, CHANNEL, FAMILY, pub,
+            environment=ENV, now=_at(1000.0))
 
 
 def test_altered_flag_or_virtual_path_rejects() -> None:
@@ -211,7 +235,8 @@ def test_altered_flag_or_virtual_path_rejects() -> None:
     for attacker in ([Staged(flag="--values")], [Staged(virtual_path="/m/evil.yaml")]):
         with pytest.raises(TokenError, match="staging plan"):
             verify_decision(
-                token, ARGV, attacker, RUN_ID, TCID, CHANNEL, FAMILY, pub, now=_at(1000.0)
+                token, ARGV, attacker, RUN_ID, TCID, CHANNEL, FAMILY, pub,
+                    environment=ENV, now=_at(1000.0)
             )
 
 
@@ -219,21 +244,25 @@ def test_injected_extra_staged_file_rejects() -> None:
     token, pub = _signed(now=1000.0, staged_files=[])  # no staging signed
     with pytest.raises(TokenError, match="staging plan"):
         verify_decision(
-            token, ARGV, [Staged()], RUN_ID, TCID, CHANNEL, FAMILY, pub, now=_at(1000.0)
+            token, ARGV, [Staged()], RUN_ID, TCID, CHANNEL, FAMILY, pub,
+                environment=ENV, now=_at(1000.0)
         )
 
 
 def test_swapped_tool_family_rejects() -> None:
     token, pub = _signed(now=1000.0, tool_family="kubectl")
     with pytest.raises(TokenError, match="tool_family"):
-        verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, "aws", pub, now=_at(1000.0))
+        verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, "aws", pub,
+            environment=ENV, now=_at(1000.0))
 
 
 def test_none_family_token_verifies_and_rejects_swap() -> None:
     token, pub = _signed(now=1000.0, tool_family=None)
-    verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, None, pub, now=_at(1000.0))
+    verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, None, pub,
+        environment=ENV, now=_at(1000.0))
     with pytest.raises(TokenError, match="tool_family"):
-        verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, "gh", pub, now=_at(1000.0))
+        verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, "gh", pub,
+            environment=ENV, now=_at(1000.0))
 
 
 def test_staging_sha256_recomputes_content_ignoring_wire_sha() -> None:
@@ -268,8 +297,10 @@ def test_key_base64_roundtrip() -> None:
     priv, pub = generate_keypair()
     priv2 = decode_private_key(encode_private_key(priv))
     pub2 = decode_public_key(encode_public_key(pub))
-    token = sign_decision(ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, priv2, now=_at(1000.0))
-    verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub2, now=_at(1000.0))
+    token = sign_decision(ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, priv2,
+        environment=ENV, now=_at(1000.0))
+    verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub2,
+        environment=ENV, now=_at(1000.0))
 
 
 def test_load_keys_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -278,8 +309,10 @@ def test_load_keys_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SVC_VERIFY_KEY", encode_public_key(pub))
     loaded_priv = load_private_key_from_env("AGENT_SIGN_KEY")
     loaded_pub = load_public_key_from_env("SVC_VERIFY_KEY")
-    token = sign_decision(ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, loaded_priv, now=_at(1000.0))
-    verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, loaded_pub, now=_at(1000.0))
+    token = sign_decision(ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, loaded_priv,
+        environment=ENV, now=_at(1000.0))
+    verify_decision(token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, loaded_pub,
+        environment=ENV, now=_at(1000.0))
 
 
 def test_load_key_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -291,3 +324,29 @@ def test_load_key_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BAD_KEY", "not-base64-ed25519")
     with pytest.raises(SigningKeyUnavailable, match="not a valid"):
         load_private_key_from_env("BAD_KEY")
+
+
+def test_wrong_environment_rejects() -> None:
+    token, pub = _signed(now=1000.0)
+    with pytest.raises(TokenError, match="environment"):
+        verify_decision(
+            token, ARGV, [], RUN_ID, TCID, CHANNEL, FAMILY, pub,
+            environment="prod", now=_at(1000.0),
+        )
+
+
+def test_wrong_host_rejects() -> None:
+    token, pub = _signed(now=1000.0, host="bastion.example", tool_family="ssh")
+    with pytest.raises(TokenError, match="host"):
+        verify_decision(
+            token, ARGV, [], RUN_ID, TCID, CHANNEL, "ssh", pub,
+            environment=ENV, host="other.example", now=_at(1000.0),
+        )
+
+
+def test_host_bound_token_verifies() -> None:
+    token, pub = _signed(now=1000.0, host="bastion.example", tool_family="ssh")
+    verify_decision(
+        token, ARGV, [], RUN_ID, TCID, CHANNEL, "ssh", pub,
+        environment=ENV, host="bastion.example", now=_at(1000.0),
+    )

@@ -22,7 +22,7 @@ ledger.
  │  tools: run_command(argv) · ssh_run · task(log-summarizer only) · deepagents virtual FS     │
  └───────────────┬─────────────────────────────────────────────────────────────────────────────┘
                  │ executor.mode=local: in-process subprocess, constructed env
-                 │ executor.mode=remote: HTTP → executor service, ed25519 decision tokens (experimental)
+                 │ executor.mode=remote: HTTP → per-(env,channel) executor service, ed25519 decision tokens
                  ▼
         Credentials = THE boundary: per-(tool-family, environment, ro|rw) kubeconfigs /
         tokens / roles. Audit: hash-chained per-run JSONL the agent has no write path to.
@@ -159,13 +159,12 @@ hygiene vars, plus exactly one credential selected by the winning rule's
 `(tool-family, environment, channel)`. The agent's own env (API keys, audit path) is physically
 absent from every child.
 
-`executor.mode=remote` (**experimental**): execution moves to a standalone credential-holding
-service (gVisor, non-root, read-only rootfs, egress-allowlisted). The agent then holds no infra
-credentials — each request carries an **ed25519-signed decision token** binding the argv,
-staged-file plan, tool family, channel, run id, tool-call id and a 120 s expiry, so no code path
-reaches execution without passing the policy engine. Remote mode is gated behind explicit
-pre-deployment conditions — see [deployment](deployment.md#executor-service-remote-mode) and
-`ops/executor/README.md`.
+`executor.mode=remote`: execution moves to standalone credential-holding service pods (gVisor,
+non-root, read-only rootfs, egress-allowlisted), one per `(environment, channel)`. The agent then
+holds no infra or SSH credentials — each request carries an **ed25519-signed decision token**
+binding the argv, staged-file plan, tool family, channel, environment, host (for `ssh_run`), run
+id, tool-call id and a 120 s expiry; each pod asserts its own identity before executing. See
+[deployment](deployment.md#executor-service-remote-mode) and `ops/executor/README.md`.
 
 ## Module map
 

@@ -6,11 +6,14 @@ NEVER reaches a subprocess (pinned by test — the executor spy proves no run ha
 
     1. VERIFY the ed25519 decision token (bad sig / expired / argv-hash mismatch / wrong bound
        field -> 403, before the executor is ever touched);
+    1a. ASSERT the token's ``environment`` / ``channel`` match this pod's configured identity
+       (``OPENDEVOPS_EXECUTOR_ENV`` / ``OPENDEVOPS_EXECUTOR_CHANNEL``) -> 403 on mismatch;
     2. resolve ``{{secret:NAME}}`` into the subprocess env (unknown secret -> 422);
-    3. build the per-family credential env IN THE SERVICE (the only credential holder; a missing
-       credential -> 422);
-    4. materialize staged files into a per-call tmpdir and rewrite argv to the on-disk paths;
-    5. run the argv ``shell=False`` with a per-call timeout;
+    3. for ``run_command`` families: build the per-family credential env IN THE SERVICE; for
+       ``tool_family=ssh``: resolve the config-pinned SSH credential and run via ``SshExecutor``;
+    4. materialize staged files into a per-call tmpdir and rewrite argv to the on-disk paths
+       (``run_command`` only);
+    5. run the argv ``shell=False`` (or shell-quoted over SSH) with a per-call timeout;
     6. full-scrub the output (literal resolved secret VALUES, then the pattern scrubber) so no
        secret value ever leaves the service — then return the ``ExecResult``.
 
@@ -27,24 +30,27 @@ RemoteExecutor client path, which the service never calls.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from opendevops.tools.executor import (
     CredentialUnavailable,
-    ExecResult,
     LocalExecutor,
+    SshConnectionError,
+    SshExecutor,
     build_env,
+    resolve_ssh_credential,
 )
 from opendevops.tools.scrub import scrub_full, strip_ansi
 from opendevops.tools.secrets import (
-    EnvSecretSource,
     SecretResolutionError,
     SecretSource,
+    build_secret_source,
     resolve_secrets,
 )
 from opendevops.tools.signing import DecisionToken, TokenError, verify_decision
@@ -57,6 +63,8 @@ if TYPE_CHECKING:
 
 # Absolute ceiling on any per-command timeout (mirrors run_command_core's clamp).
 _MAX_TIMEOUT_S = 300
+
+_SSH_FAMILY = "ssh"
 
 
 class _StagedFileWire(BaseModel):
@@ -78,7 +86,9 @@ class ExecuteRequest(BaseModel):
     run_id: str
     tool_call_id: str
     channel: str
+    environment: str
     tool_family: str | None = None
+    host: str | None = None
     timeout_s: int
     staged_files: list[_StagedFileWire] = []
     token: dict[str, Any]
@@ -99,33 +109,58 @@ def _clamp_timeout(timeout_s: int, cfg: AppConfig) -> int:
     return max(1, min(timeout_s, upper))
 
 
+def _read_pod_identity() -> tuple[Literal["staging", "prod"], Literal["ro", "rw"]]:
+    """Read and validate ``OPENDEVOPS_EXECUTOR_ENV`` / ``_CHANNEL`` — fail-closed at boot."""
+    raw_env = os.environ.get("OPENDEVOPS_EXECUTOR_ENV")
+    raw_channel = os.environ.get("OPENDEVOPS_EXECUTOR_CHANNEL")
+    if raw_env not in ("staging", "prod"):
+        raise RuntimeError(
+            "executor service requires OPENDEVOPS_EXECUTOR_ENV to be 'staging' or 'prod' "
+            f"(got {raw_env!r})"
+        )
+    if raw_channel not in ("ro", "rw"):
+        raise RuntimeError(
+            "executor service requires OPENDEVOPS_EXECUTOR_CHANNEL to be 'ro' or 'rw' "
+            f"(got {raw_channel!r})"
+        )
+    return raw_env, raw_channel  # type: ignore[return-value]
+
+
 def create_app(
     cfg: AppConfig,
     *,
     public_key: Ed25519PublicKey,
+    identity_environment: Literal["staging", "prod"],
+    identity_channel: Literal["ro", "rw"],
     secret_source: SecretSource | None = None,
     executor: Any = None,
+    ssh_executor: Any = None,
     now: Callable[[], float] = time.time,
 ) -> FastAPI:
     """Build the executor service app.
 
     Args:
-        cfg: the service's config — it holds the credential targets (``build_env`` reads them from
-            the service's own environment).
+        cfg: the service's config — it holds the credential targets (``build_env`` / SSH resolve
+            read them from the service's own environment).
         public_key: the ed25519 PUBLIC key the token is verified against (the service never holds
             the private key).
+        identity_environment: this pod's environment identity (must match the signed token).
+        identity_channel: this pod's channel identity (must match the signed token).
         secret_source: the ``{{secret:NAME}}`` backend; defaults to :class:`EnvSecretSource` over
             the service's process environment (prefixed by ``cfg.executor.secret_env_prefix``).
         executor: the subprocess runner (``.home`` + ``.execute``); defaults to a real
             :class:`LocalExecutor`. Tests inject a spy to prove a rejected request never runs.
+        ssh_executor: the SSH runner (``.execute(host, argv, timeout, cred)``); defaults to
+            :class:`SshExecutor`.
         now: injectable clock for token-expiry checks (deterministic tests).
     """
     source = (
         secret_source
         if secret_source is not None
-        else EnvSecretSource(prefix=cfg.executor.secret_env_prefix)
+        else build_secret_source(cfg)
     )
     runner: Any = executor if executor is not None else LocalExecutor()
+    ssh_runner: Any = ssh_executor if ssh_executor is not None else SshExecutor()
 
     # I1 — spent-decision (replay) cache, closure-scoped so it lives for the app's lifetime.
     # Keyed by (run_id, tool_call_id); the value is the token ``exp`` (its eviction time). A valid
@@ -150,17 +185,24 @@ def create_app(
             return True
 
     app = FastAPI(title="opendevops executor service")
+    app.state.identity_environment = identity_environment
+    app.state.identity_channel = identity_channel
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
-        return {"status": "ok"}
+        return {
+            "status": "ok",
+            "environment": identity_environment,
+            "channel": identity_channel,
+        }
 
     @app.post("/execute", response_model=ExecuteResponse)
     async def execute(req: ExecuteRequest) -> ExecuteResponse:
         # 1. VERIFY the token FIRST — before the executor is touched (a reject must not run). The
         #    verify binds the staging PLAN (content recomputed from the received bytes + rewrite
-        #    metadata) and tool_family, so substituted content / a rewritten argv_index or
-        #    inline_prefix / a swapped family fails here, 403, with no execution.
+        #    metadata), tool_family, environment, and host, so substituted content / a rewritten
+        #    argv_index or inline_prefix / a swapped family / env / host fails here, 403, with no
+        #    execution.
         try:
             token = DecisionToken.from_dict(req.token)
             verify_decision(
@@ -172,11 +214,26 @@ def create_app(
                 req.channel,
                 req.tool_family,
                 public_key,
+                environment=req.environment,
+                host=req.host,
                 now=now,
             )
         except TokenError as exc:
             # No execution, clear 4xx. The message names the reason but never any secret/argv value.
             raise HTTPException(status_code=403, detail=f"decision token rejected: {exc}") from exc
+
+        # 1a. Pod identity assert — a staging token must never execute on a prod pod (or ro on rw).
+        if (
+            token.environment != identity_environment
+            or token.channel != identity_channel
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "decision token rejected: environment/channel does not match this "
+                    f"executor identity ({identity_environment}/{identity_channel})"
+                ),
+            )
 
         # 1b. REPLAY guard (I1): mark the decision spent on first valid presentation, BEFORE any
         #     execution and regardless of outcome (a retry must re-authorize with a fresh token). A
@@ -194,37 +251,75 @@ def create_app(
                 status_code=422, detail=f"secret resolution failed: {exc}"
             ) from exc
 
-        # 3. Build the credential env HERE — the service is the only credential holder. tool_family
-        #    is trusted ONLY because the token bound it (verified above).
-        try:
-            env = build_env(cfg, req.tool_family, req.channel, runner.home)
-        except CredentialUnavailable as exc:
-            raise HTTPException(status_code=422, detail=f"credential unavailable: {exc}") from exc
-        # Secrets go into the ENV only (NAME=value); the argv carries just the $NAME marker.
-        env.update(resolved.env)
-
-        # 4. Materialize staged files into a per-call tmpdir and rewrite argv to the on-disk paths.
-        #    The staging metadata (argv_index/inline_prefix/content) is trusted ONLY because the
-        #    token bound the staging plan (verified above) — substituted content never reaches here.
-        refs = [
-            FileRef(
-                flag=f.flag,
-                virtual_path=f.virtual_path,
-                content=f.content,
-                sha256=f.sha256,
-                argv_index=f.argv_index,
-                inline=f.inline,
-                inline_prefix=f.inline_prefix,
-            )
-            for f in req.staged_files
-        ]
         timeout = _clamp_timeout(req.timeout_s, cfg)
-        if refs:
-            with staging_tmpdir() as tmpdir:
-                run_argv = stage(resolved.argv, refs, tmpdir)
-                result: ExecResult = await runner.execute(run_argv, timeout, env)
+
+        # 3a. SSH path — service holds the SSH key; agent does not.
+        if req.tool_family == _SSH_FAMILY:
+            if not req.host:
+                raise HTTPException(
+                    status_code=422, detail="ssh execution requires a host field"
+                )
+            if req.staged_files:
+                raise HTTPException(
+                    status_code=422, detail="ssh execution must not carry staged files"
+                )
+            if req.channel != "ro":
+                raise HTTPException(
+                    status_code=422, detail="ssh execution requires channel 'ro'"
+                )
+            try:
+                cred = resolve_ssh_credential(cfg)
+            except CredentialUnavailable as exc:
+                raise HTTPException(
+                    status_code=422, detail=f"credential unavailable: {exc}"
+                ) from exc
+            try:
+                result = await ssh_runner.execute(
+                    req.host, list(resolved.argv), timeout, cred
+                )
+            except SshConnectionError as exc:
+                # Generic detail — never echo key paths from asyncssh. Agent maps 502 → refusal.
+                raise HTTPException(
+                    status_code=502,
+                    detail="ssh connection or host-key verification failed",
+                ) from exc
         else:
-            result = await runner.execute(resolved.argv, timeout, env)
+            # 3b. Build the credential env HERE — the service is the only credential holder.
+            #     tool_family is trusted ONLY because the token bound it (verified above).
+            if req.host is not None:
+                raise HTTPException(
+                    status_code=422, detail="host is only valid for tool_family=ssh"
+                )
+            try:
+                env = build_env(cfg, req.tool_family, req.channel, runner.home)
+            except CredentialUnavailable as exc:
+                raise HTTPException(
+                    status_code=422, detail=f"credential unavailable: {exc}"
+                ) from exc
+            # Secrets go into the ENV only (NAME=value); the argv carries just the $NAME marker.
+            env.update(resolved.env)
+
+            # 4. Materialize staged files into a per-call tmpdir; rewrite argv to on-disk paths.
+            #    Staging metadata is trusted ONLY because the token bound the plan (verified above)
+            #    — substituted content never reaches here.
+            refs = [
+                FileRef(
+                    flag=f.flag,
+                    virtual_path=f.virtual_path,
+                    content=f.content,
+                    sha256=f.sha256,
+                    argv_index=f.argv_index,
+                    inline=f.inline,
+                    inline_prefix=f.inline_prefix,
+                )
+                for f in req.staged_files
+            ]
+            if refs:
+                with staging_tmpdir() as tmpdir:
+                    run_argv = stage(resolved.argv, refs, tmpdir)
+                    result = await runner.execute(run_argv, timeout, env)
+            else:
+                result = await runner.execute(resolved.argv, timeout, env)
 
         # 6. Full-scrub: strip ANSI, redact the exact resolved secret VALUES, then pattern-scrub.
         stripped = strip_ansi(result.output)
@@ -241,15 +336,22 @@ def create_app(
 
 
 def build_app_from_env() -> FastAPI:
-    """Deployment factory: load config + the PUBLIC verify key from the environment, build the app.
+    """Deployment factory: load config + PUBLIC verify key + pod identity, build the app.
 
     Used by the container entrypoint (``uvicorn ...service:build_app_from_env --factory``). Reads
-    config via :func:`opendevops.config.load_config` and the ed25519 public key from the env var
-    named by ``executor.verify_key_env`` — fail-closed if that is unconfigured/unset.
+    config via :func:`opendevops.config.load_config`, the ed25519 public key from the env var
+    named by ``executor.verify_key_env``, and ``OPENDEVOPS_EXECUTOR_ENV`` /
+    ``OPENDEVOPS_EXECUTOR_CHANNEL`` — fail-closed if any are unconfigured/unset.
     """
     from opendevops.config import load_config
     from opendevops.tools.signing import load_public_key_from_env
 
     cfg = load_config()
     public_key = load_public_key_from_env(cfg.executor.verify_key_env)
-    return create_app(cfg, public_key=public_key)
+    identity_environment, identity_channel = _read_pod_identity()
+    return create_app(
+        cfg,
+        public_key=public_key,
+        identity_environment=identity_environment,
+        identity_channel=identity_channel,
+    )

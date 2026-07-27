@@ -87,20 +87,31 @@ directory entries.
 
 ```yaml
 executor:
-  mode: local                # local (default, reviewed) | remote (EXPERIMENTAL — see gates)
-  url: null                  # remote: executor service base URL
+  mode: local                # local (default) | remote (requires full urls map)
+  urls: null                 # remote: {staging: {ro, rw}, prod: {ro, rw}} service base URLs
   signing_key_env: null      # remote, agent side: env var name of the ed25519 PRIVATE key (base64, 32 raw bytes)
   verify_key_env: null       # remote, service side: env var name of the ed25519 PUBLIC key
-  secret_source: env         # {{secret:NAME}} backend (env-backed; vault can plug into the same seam)
-  secret_env_prefix: ""      # optional namespace prefix for {{secret:NAME}} lookups
+  secret_source: env         # env | file (CSI/volume) | vault (HashiCorp KV v2)
+  secret_env_prefix: ""      # optional namespace prefix for env lookups
+  secret_file_dir: null      # file backend: directory of per-NAME secret files
+  vault: null                # vault: {addr_env, token_env, mount, path_prefix, value_field}
 ```
 
 A standalone `{{secret:NAME}}` argv entry declares a child environment variable and is removed
 before execution. Use it only with programs that natively read that variable (for example
 `PGPASSWORD`). Embedded references are rejected; there is no shell expansion.
 
-`mode: remote` is not production-deployable until the gates in `ops/executor/README.md` close —
-see [security model](security-model.md#the-executor-split-moderemote).
+`mode: remote` routes both `run_command` and `ssh_run` to per-(environment, channel) executor
+pods — see [security model](security-model.md#the-executor-split-moderemote).
+
+### `control_plane` — grants + chat durable store
+
+```yaml
+control_plane:
+  backend: sqlite                 # sqlite | postgres (multi-replica)
+  database: ./state/control-plane.sqlite3
+  database_url_env: null          # postgres: env var name holding the database URL
+```
 
 ### `audit`, `policy`, `state`
 

@@ -17,14 +17,18 @@ Token contract::
         "tool_call_id":   tool_call_id,                    # binds the exact tool call
         "channel":        channel,                         # ro | rw credential channel
         "tool_family":    tool_family,                     # binds the credential family (or null)
+        "environment":    environment,                     # staging | prod — pod isolation binding
+        "host":           host,                            # ssh_run host; null for run_command
         "exp":            now + 120,                       # unix seconds; short-lived
     })
 
-Binding ``staging_sha256`` + ``tool_family`` is what makes "the signed decision is EXACTLY what
-runs" hold on the remote path. Without them the executor service would materialize + rewrite argv +
-select a credential from the UNSIGNED request body, letting a MITM/replay substitute manifest
-CONTENT, inject a flag via a rewritten ``argv_index``/``inline_prefix``, or swap ``tool_family`` to
-pull a different credential. The staging plan (:func:`staging_sha256`) binds each file's
+Binding ``staging_sha256`` + ``tool_family`` + ``environment`` + ``host`` is what makes "the signed
+decision is EXACTLY what runs" hold on the remote path. Without them the executor service would
+materialize + rewrite argv + select a credential from the UNSIGNED request body, letting a
+MITM/replay substitute manifest CONTENT, inject a flag via a rewritten ``argv_index``/
+``inline_prefix``, swap ``tool_family`` to pull a different credential, route a ``staging``
+decision onto a ``prod`` pod, or swap the ssh target host. The staging plan
+(:func:`staging_sha256`) binds each file's
 ``{flag, virtual_path, content_sha256, argv_index, inline, inline_prefix}`` — the content sha
 **recomputed from the actual bytes**, so substituted content fails verification.
 
@@ -34,10 +38,11 @@ disagree on the bytes being signed (single-sourced, no second canonicalizer).
 
 Fail-closed verification (:func:`verify_decision`): any mismatch — bad signature, expired,
 argv-hash mismatch, staging-plan mismatch, or a bound field (``run_id`` / ``tool_call_id`` /
-``channel`` / ``tool_family``) that differs from the request — is a hard reject that raises
-:class:`TokenError`. There is **no** signature-stripping / algorithm-confusion path: the service
-verifies an ed25519 signature with the public key, full stop. The expiry clock is injectable
-(``now``) so tests are deterministic; product code passes the real :func:`time.time`.
+``channel`` / ``tool_family`` / ``environment`` / ``host``) that differs from the request — is a
+hard reject that raises :class:`TokenError`. There is **no** signature-stripping /
+algorithm-confusion path: the service verifies an ed25519 signature with the public key, full
+stop. The expiry clock is injectable (``now``) so tests are deterministic; product code passes the
+real :func:`time.time`.
 """
 
 from __future__ import annotations
@@ -127,6 +132,8 @@ def _canonical_payload(
     tool_call_id: str,
     channel: str,
     tool_family: str | None,
+    environment: str,
+    host: str | None,
     exp: float,
 ) -> bytes:
     """The exact bytes signed / verified: a canonical JSON object over the bound fields."""
@@ -138,6 +145,8 @@ def _canonical_payload(
             "tool_call_id": tool_call_id,
             "channel": channel,
             "tool_family": tool_family,
+            "environment": environment,
+            "host": host,
             "exp": exp,
         }
     ).encode("utf-8")
@@ -150,7 +159,7 @@ class DecisionToken:
     Carries the bound field VALUES plus the ed25519 signature (hex). The verifier re-derives the
     argv hash from the request's argv and checks every bound value against the request, then
     verifies the signature over the token's own canonical payload — so a token minted for a
-    different argv / run / call / channel, or a forged one, is rejected.
+    different argv / run / call / channel / environment / host, or a forged one, is rejected.
     """
 
     argv_sha256: str
@@ -159,6 +168,8 @@ class DecisionToken:
     tool_call_id: str
     channel: str
     tool_family: str | None
+    environment: str
+    host: str | None
     exp: float
     sig: str  # hex-encoded ed25519 signature over :func:`_canonical_payload`
 
@@ -171,6 +182,8 @@ class DecisionToken:
             "tool_call_id": self.tool_call_id,
             "channel": self.channel,
             "tool_family": self.tool_family,
+            "environment": self.environment,
+            "host": self.host,
             "exp": self.exp,
             "sig": self.sig,
         }
@@ -182,14 +195,17 @@ class DecisionToken:
             raise TokenError("decision token is missing or not an object")
         try:
             raw_family = data.get("tool_family")
+            raw_host = data.get("host")
             return cls(
                 argv_sha256=str(data["argv_sha256"]),
                 staging_sha256=str(data["staging_sha256"]),
                 run_id=str(data["run_id"]),
                 tool_call_id=str(data["tool_call_id"]),
                 channel=str(data["channel"]),
-                # tool_family is str | None — preserve None (do NOT str(None) -> "None").
+                # tool_family / host are str | None — preserve None (do NOT str(None) -> "None").
                 tool_family=None if raw_family is None else str(raw_family),
+                environment=str(data["environment"]),
+                host=None if raw_host is None else str(raw_host),
                 exp=float(data["exp"]),
                 sig=str(data["sig"]),
             )
@@ -206,6 +222,8 @@ def sign_decision(
     tool_family: str | None,
     private_key: Ed25519PrivateKey,
     *,
+    environment: str,
+    host: str | None = None,
     now: Callable[[], float] = time.time,
     ttl_s: int = TOKEN_TTL_S,
 ) -> DecisionToken:
@@ -213,14 +231,23 @@ def sign_decision(
 
     ``staged_files`` is the exact staging plan the agent's ``resolve_file_refs`` produced (its
     content + rewrite metadata is bound via :func:`staging_sha256`); ``tool_family`` is the
-    credential family the decision authorized. ``now`` is injectable so ``exp`` is deterministic in
-    tests; product code uses ``time.time``.
+    credential family the decision authorized; ``environment`` binds the policy overlay /
+    executor-pod identity; ``host`` binds an ``ssh_run`` target (``None`` for ``run_command``).
+    ``now`` is injectable so ``exp`` is deterministic in tests; product code uses ``time.time``.
     """
     argv_hash = argv_sha256(argv)
     staging_hash = staging_sha256(staged_files)
     exp = now() + ttl_s
     payload = _canonical_payload(
-        argv_hash, staging_hash, run_id, tool_call_id, channel, tool_family, exp
+        argv_hash,
+        staging_hash,
+        run_id,
+        tool_call_id,
+        channel,
+        tool_family,
+        environment,
+        host,
+        exp,
     )
     sig = private_key.sign(payload).hex()
     return DecisionToken(
@@ -230,6 +257,8 @@ def sign_decision(
         tool_call_id=tool_call_id,
         channel=channel,
         tool_family=tool_family,
+        environment=environment,
+        host=host,
         exp=exp,
         sig=sig,
     )
@@ -245,6 +274,8 @@ def verify_decision(
     tool_family: str | None,
     public_key: Ed25519PublicKey,
     *,
+    environment: str,
+    host: str | None = None,
     now: Callable[[], float] = time.time,
 ) -> None:
     """Fail-closed verification; raises :class:`TokenError` on ANY mismatch, else returns ``None``.
@@ -254,8 +285,9 @@ def verify_decision(
     (3) the request's argv hashes to the signed ``argv_sha256``; (4) the request's staging PLAN
     (content recomputed from the RECEIVED bytes + rewrite metadata) hashes to the signed
     ``staging_sha256`` — so substituted content or a rewritten ``argv_index``/``inline_prefix``
-    fails; (5) every bound field (``run_id`` / ``tool_call_id`` / ``channel`` / ``tool_family``)
-    matches the request. There is no path that skips the signature or trusts an unsigned request.
+    fails; (5) every bound field (``run_id`` / ``tool_call_id`` / ``channel`` / ``tool_family`` /
+    ``environment`` / ``host``) matches the request. There is no path that skips the signature or
+    trusts an unsigned request.
     """
     # 1. Signature over the token's OWN fields — authenticity before anything else.
     payload = _canonical_payload(
@@ -265,6 +297,8 @@ def verify_decision(
         token.tool_call_id,
         token.channel,
         token.tool_family,
+        token.environment,
+        token.host,
         token.exp,
     )
     try:
@@ -298,6 +332,10 @@ def verify_decision(
         raise TokenError("decision token channel does not match the request")
     if token.tool_family != tool_family:
         raise TokenError("decision token tool_family does not match the request")
+    if token.environment != environment:
+        raise TokenError("decision token environment does not match the request")
+    if token.host != host:
+        raise TokenError("decision token host does not match the request")
 
 
 def verify_ok(
@@ -310,13 +348,24 @@ def verify_ok(
     tool_family: str | None,
     public_key: Ed25519PublicKey,
     *,
+    environment: str,
+    host: str | None = None,
     now: Callable[[], float] = time.time,
 ) -> bool:
     """Boolean convenience wrapper around :func:`verify_decision` (True iff it verifies)."""
     try:
         verify_decision(
-            token, argv, staged_files, run_id, tool_call_id, channel, tool_family,
-            public_key, now=now,
+            token,
+            argv,
+            staged_files,
+            run_id,
+            tool_call_id,
+            channel,
+            tool_family,
+            public_key,
+            environment=environment,
+            host=host,
+            now=now,
         )
     except TokenError:
         return False

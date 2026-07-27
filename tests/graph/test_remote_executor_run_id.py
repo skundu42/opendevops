@@ -17,7 +17,7 @@ import httpx
 import pytest
 from langchain_core.messages import ToolMessage
 
-from opendevops.config import AppConfig, ExecutorConfig
+from opendevops.config import AppConfig, ExecutorChannelUrls, ExecutorConfig
 from opendevops.executor_service import create_app
 from opendevops.tools import executor as executor_mod
 from opendevops.tools.executor import LocalExecutor, RemoteExecutor, _default_run_id
@@ -40,7 +40,13 @@ async def test_remote_path_binds_run_id_via_get_runtime(
 
     # In-process executor service (verifies the token, runs the subprocess). Real time so the
     # token the agent signs (exp = now+120) is valid when the service verifies it moments later.
-    service = create_app(cfg, public_key=pub, executor=LocalExecutor())
+    service = create_app(
+        cfg,
+        public_key=pub,
+        identity_environment="staging",
+        identity_channel="ro",
+        executor=LocalExecutor(),
+    )
 
     # The RemoteExecutor's run_id provider IS the production get_runtime path; record what it
     # resolves so we can assert it equals the run's run_id.
@@ -54,7 +60,12 @@ async def test_remote_path_binds_run_id_via_get_runtime(
     remote_cfg = cfg.model_copy(
         update={
             "executor": ExecutorConfig(
-                mode="remote", url="http://svc", signing_key_env="UNUSED"
+                mode="remote",
+                urls={
+                    "staging": ExecutorChannelUrls(ro="http://svc", rw="http://svc"),
+                    "prod": ExecutorChannelUrls(ro="http://svc", rw="http://svc"),
+                },
+                signing_key_env="UNUSED",
             )
         }
     )

@@ -62,11 +62,20 @@ class OIDCConfig(BaseModel):
 
 
 class ControlPlaneConfig(BaseModel):
-    """Approval separation and guarded runtime-capability configuration."""
+    """Approval separation and guarded runtime-capability configuration.
+
+    Durable state (capability proposals + dashboard chat) lives in one store:
+
+    * ``backend: sqlite`` (default) — file at ``database``; fine for single-replica / local.
+    * ``backend: postgres`` — URL from the env var named by ``database_url_env``; required for
+      multi-replica service mode so workers share the ledger and chat transcripts.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    backend: Literal["sqlite", "postgres"] = "sqlite"
     database: Path = Path("./state/control-plane.sqlite3")
+    database_url_env: str | None = None
     production_requires_independent_approval: bool = True
     enforce_runtime_grants: bool = False
     grant_required_environments: list[Literal["staging", "prod"]] = ["prod"]
@@ -90,6 +99,10 @@ class ControlPlaneConfig(BaseModel):
             self.grant_required_environments
         ):
             raise ValueError("grant_required_environments must not contain duplicates")
+        if self.backend == "postgres" and not self.database_url_env:
+            raise ValueError(
+                "control_plane.backend='postgres' requires control_plane.database_url_env"
+            )
         return self
 
 
@@ -270,57 +283,97 @@ class Execution(BaseModel):
         return value
 
 
+class ExecutorChannelUrls(BaseModel):
+    """Base URLs for the ``ro`` and ``rw`` executor service pods of one environment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ro: str
+    rw: str
+
+
+class VaultSecretConfig(BaseModel):
+    """HashiCorp Vault KV v2 settings for ``executor.secret_source=vault``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    addr_env: str = "VAULT_ADDR"
+    token_env: str = "VAULT_TOKEN"
+    mount: str = "secret"
+    path_prefix: str = "opendevops"
+    # Optional KV field name; when null, uses key ``value`` then falls back to a single-field map.
+    value_field: str = "value"
+
+
 class ExecutorConfig(BaseModel):
     """Executor deployment selection (the executor split; defaults to in-process ``local``).
 
-    ``mode`` picks how ``run_command`` reaches a subprocess:
+    ``mode`` picks how ``run_command`` / ``ssh_run`` reach execution:
 
     * ``local`` (the DEFAULT, so a config without an ``executor:`` block still validates and every
-      existing deploy is unchanged) — the in-process ``LocalExecutor``.
+      existing deploy is unchanged) — the in-process ``LocalExecutor`` / ``SshExecutor``.
       This is the single-process deployment: it holds the infra credentials AND resolves
-      ``{{secret:NAME}}`` values in-process.
-    * ``remote`` — the agent holds no ``run_command`` credentials (kube/gh/cloud) and no secret
-      values; each exec is signed with an ed25519 decision token and POSTed to the standalone
-      executor **service**, which holds the credentials + the secret source and does the credential
-      env + secret resolution + subprocess run + full-scrub. Opt-in and additive. NOTE ``ssh_run``
-      does NOT route through the service — it connects from the agent with the config-pinned SSH
-      key, so a remote deployment with ``targets.ssh`` set still holds the SSH key agent-side.
-      **EXPERIMENTAL:** ``remote`` is not production-deployable until the ``ops/executor/README.md``
-      "Pre-deployment gates" close — the token binds ``channel`` but NOT ``environment`` and the
-      service does no (env,channel) self-check, so a mis-routed ``staging``-``rw`` decision could
-      run on the ``prod``-``rw`` pod. Keep ``local`` (the default, fully reviewed) in production.
+      ``{{secret:NAME}}`` values in-process (and holds the SSH key when ``targets.ssh`` is set).
+    * ``remote`` — the agent holds no ``run_command`` credentials (kube/gh/cloud), no secret
+      values, and no SSH key; each exec is signed with an ed25519 decision token and POSTed to the
+      matching standalone executor **service** pod, which holds the credentials + the secret source
+      (and the SSH key for ``ssh_run``) and does credential env + secret resolution + subprocess /
+      SSH run + full-scrub. Opt-in. Production-ready once ``urls`` is fully populated: the token
+      binds ``environment`` + ``channel`` (+ ``host`` for ssh), each pod asserts its own identity,
+      and the client routes per ``(environment, channel)``.
 
-    * ``url`` — the executor service base URL (remote mode); ``None`` is invalid for remote.
+    * ``urls`` — required when ``mode=remote``: a map of ``staging`` / ``prod`` → ``{ro, rw}``
+      service base URLs. Boot fails closed if either environment or either channel is missing.
     * ``signing_key_env`` — NAME of the env var holding the agent's ed25519 PRIVATE signing key
       (base64 of the raw 32 bytes); only the NAME lives in config. Required for remote.
     * ``verify_key_env`` — NAME of the env var holding the executor service's ed25519 PUBLIC verify
       key (base64 raw 32 bytes). Read by the SERVICE, which holds the public key only.
-    * ``secret_source`` — the ``{{secret:NAME}}`` backend; ``env`` (env-var-backed) to start.
-    * ``secret_env_prefix`` — optional prefix prepended to NAME for the env lookup (namespacing).
+    * ``secret_source`` — ``env`` | ``file`` (CSI/volume) | ``vault`` (HashiCorp KV v2).
+    * ``secret_env_prefix`` — optional prefix for ``env`` lookups (namespacing).
+    * ``secret_file_dir`` — directory of secret files when ``secret_source=file`` (CSI mount).
+    * ``vault`` — HashiCorp Vault settings when ``secret_source=vault``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["local", "remote"] = "local"
-    url: str | None = None
+    urls: dict[Literal["staging", "prod"], ExecutorChannelUrls] | None = None
     signing_key_env: str | None = None
     verify_key_env: str | None = None
-    secret_source: Literal["env"] = "env"
+    secret_source: Literal["env", "file", "vault"] = "env"
     secret_env_prefix: str = ""
+    secret_file_dir: Path | None = None
+    vault: VaultSecretConfig | None = None
+
+    @field_validator("secret_file_dir", mode="after")
+    @classmethod
+    def _expand_secret_dir(cls, value: Path | None) -> Path | None:
+        return value.expanduser() if value is not None else None
 
     @model_validator(mode="after")
-    def _remote_requires_url_and_signing_key(self) -> ExecutorConfig:
-        """``mode: remote`` needs the service URL + the agent signing-key env var — fail-closed."""
+    def _remote_requires_urls_and_signing_key(self) -> ExecutorConfig:
+        """``mode: remote`` needs the full URL map + signing-key env — fail-closed."""
         if self.mode == "remote":
-            if not self.url:
+            if self.urls is None or set(self.urls) != {"staging", "prod"}:
                 raise ValueError(
-                    "executor.mode='remote' requires executor.url (the executor service base URL)"
+                    "executor.mode='remote' requires executor.urls with both "
+                    "'staging' and 'prod' entries (each providing ro and rw base URLs)"
                 )
             if not self.signing_key_env:
                 raise ValueError(
                     "executor.mode='remote' requires executor.signing_key_env "
                     "(the env var naming the agent's ed25519 private signing key)"
                 )
+        if self.secret_source == "file" and self.secret_file_dir is None:
+            raise ValueError(
+                "executor.secret_source='file' requires executor.secret_file_dir "
+                "(CSI/volume mount path)"
+            )
+        if self.secret_source == "vault" and self.vault is None:
+            raise ValueError(
+                "executor.secret_source='vault' requires executor.vault "
+                "(addr_env, token_env, mount, path_prefix)"
+            )
         return self
 
 
@@ -535,6 +588,29 @@ class ModelPricing(BaseModel):
     cache_write: float
 
 
+class ProviderConfig(BaseModel):
+    """How to construct chat models for one provider id used in ``provider:model`` keys."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal[
+        "anthropic",
+        "openai",
+        "openai_compatible",
+        "azure_openai",
+        "google",
+        "bedrock",
+    ]
+    api_key_env: str | None = None
+    base_url: str | None = None
+    # Azure OpenAI
+    azure_endpoint_env: str | None = None
+    api_version: str | None = None
+    # Bedrock
+    region_name: str | None = None
+    credentials_profile_name: str | None = None
+
+
 class ModelsConfig(BaseModel):
     """Model aliases + price table with the boot invariant: every agent model is priced."""
 
@@ -544,6 +620,7 @@ class ModelsConfig(BaseModel):
     aliases: dict[str, str]
     pricing: dict[str, ModelPricing]
     fallback_pricing: Literal["error"]
+    providers: dict[str, ProviderConfig] = {}
 
     @model_validator(mode="after")
     def _every_agent_model_is_priced(self) -> ModelsConfig:
@@ -558,6 +635,16 @@ class ModelsConfig(BaseModel):
                 raise ValueError(
                     f"agent {role!r} -> alias {alias!r} -> {model_id!r} has no pricing entry "
                     f"(an unpriced model is an unmetered model)"
+                )
+            provider_id, _, _ = model_id.partition(":")
+            if not provider_id:
+                raise ValueError(
+                    f"model key {model_id!r} must be shaped as provider:model"
+                )
+            if self.providers and provider_id not in self.providers:
+                raise ValueError(
+                    f"model key {model_id!r} references provider {provider_id!r} "
+                    f"not present in models.providers"
                 )
         return self
 

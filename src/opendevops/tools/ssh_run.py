@@ -24,7 +24,10 @@ the middleware refuses:
      site cannot become an RCE; and
   3. the tool's own **re-validation** of ``host`` against the config allowlist plus the
      config-pinned credential (it can never connect to a host outside the config allowlist).
-``ssh`` has a single ``ro`` credential, so no middleware-injected channel is needed.
+``ssh`` has a single ``ro`` credential, so no middleware-injected channel is needed. On
+``executor.mode=remote``, ``ssh_run`` routes through the same signed ``POST /execute`` path as
+``run_command`` (``tool_family=ssh``, channel ``ro``); the agent keeps the host allowlist check
+but does **not** hold the SSH key — the matching ``(environment, ro)`` executor pod does.
 
 Note: like run_command, this module deliberately does **not** use ``from __future__ import
 annotations`` — the tool declares an injected ``runtime: ToolRuntime`` parameter and langchain's
@@ -45,9 +48,12 @@ from opendevops.config import AppConfig
 from opendevops.tools.executor import (
     CredentialUnavailable,
     ExecResult,
+    RemoteExecutor,
+    RemoteExecutorError,
     SshConnectionError,
     SshExecutor,
     resolve_ssh_credential,
+    select_executor,
 )
 from opendevops.tools.run_command import EXEC_META_KEY, current_decision
 from opendevops.tools.scrub import scrub, sha256_hex, strip_ansi, truncate_head_tail
@@ -165,30 +171,44 @@ async def ssh_run_core(
     if host not in cfg.targets.ssh.hosts:
         return f"ssh refused: host {host!r} is not in the configured allowlist"
 
-    # 3. Resolve the config-pinned credential (fail-closed on any missing/unset piece).
-    try:
-        cred = resolve_ssh_credential(cfg)
-    except CredentialUnavailable as exc:
-        return f"ssh refused: {exc}"
-
-    # 4. Clamp timeout to [1, min(cfg.cmd_timeout_seconds, 300)] (same bounds as run_command).
+    # 3. Clamp timeout to [1, min(cfg.cmd_timeout_seconds, 300)] (same bounds as run_command).
     upper = min(cfg.execution.cmd_timeout_seconds, 300)
     clamped_timeout = max(1, min(timeout_s, upper))
 
-    # 5. Execute over ssh (argv shell-quoted; host-key verification ON) -> ExecResult, or refuse.
-    active_executor = executor if executor is not None else _DEFAULT_SSH_EXECUTOR
+    # 4. Execute — local holds the SSH key; remote signs + POSTs to the (env, ro) executor pod.
+    remote = select_executor(cfg) if executor is None else (
+        executor if isinstance(executor, RemoteExecutor) else None
+    )
     try:
-        result: ExecResult = await active_executor.execute(
-            host, list(argv), clamped_timeout, cred
-        )
+        if remote is not None:
+            # Agent holds no SSH key on the remote path; host is bound into the decision token.
+            result = await remote.run_remote(
+                list(argv),
+                clamped_timeout,
+                decision=decision,
+                tool_call_id=tool_call_id,
+                refs=[],
+                host=host,
+            )
+        else:
+            try:
+                cred = resolve_ssh_credential(cfg)
+            except CredentialUnavailable as exc:
+                return f"ssh refused: {exc}"
+            active_executor = executor if executor is not None else _DEFAULT_SSH_EXECUTOR
+            result = await active_executor.execute(
+                host, list(argv), clamped_timeout, cred
+            )
     except SshConnectionError:
         # Minor 3: a generic literal — the raw asyncssh text can embed the pinned key-file PATH
         # (e.g. "Unable to read private key '/etc/agent/keys/id_ed25519'"). The host is
         # model-supplied (not secret), so it is kept for the model to self-correct. Still
         # fail-closed: no exec meta, so no execution-audit event fires.
         return f"ssh refused: connection or host-key verification to {host!r} failed"
+    except RemoteExecutorError as exc:
+        return f"ssh refused: {exc}"
 
-    # 6. Output pipeline + audit meta.
+    # 5. Output pipeline + audit meta.
     return _format_result(result, cfg, tool_call_id)
 
 

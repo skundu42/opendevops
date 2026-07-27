@@ -65,7 +65,6 @@ from opendevops.tools.executor import (
 )
 from opendevops.tools.scrub import scrub_full, sha256_hex, strip_ansi, truncate_head_tail
 from opendevops.tools.secrets import (
-    EnvSecretSource,
     SecretResolutionError,
     SecretSource,
     has_secret_tokens,
@@ -315,8 +314,10 @@ async def run_command_core(
 
 
 def _local_secret_source(cfg: AppConfig) -> SecretSource:
-    """The in-process ``{{secret:NAME}}`` backend for local mode (env-backed, optional prefix)."""
-    return EnvSecretSource(prefix=cfg.executor.secret_env_prefix)
+    """The in-process ``{{secret:NAME}}`` backend for local mode."""
+    from opendevops.tools.secrets import build_secret_source
+
+    return build_secret_source(cfg)
 
 
 async def _run_command_remote(

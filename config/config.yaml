@@ -40,13 +40,15 @@ execution:
   output_max_chars: 50000
   env_allowlist: [PATH, HOME]                 # exactly these constructed keys; never parent-env passthrough
   trusted_path: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-executor:                                    # Executor split. Default local = the in-process executor (holds creds+secrets); remote splits execution into a separate service.
-  mode: local                                # local | remote. remote is EXPERIMENTAL — not production-deployable until the ops/executor/README.md "Pre-deployment gates" close (token must bind environment + service (env,channel) self-check + per-(env,channel) client routing). ssh_run always stays agent-side (holds the SSH key) even on remote.
-  url: null                                  # remote: executor service base URL, e.g. http://executor:8090 (required when mode=remote)
+executor:                                    # Executor split. Default local = in-process (holds creds+secrets+SSH key); remote routes run_command AND ssh_run to per-(env,channel) service pods.
+  mode: local                                # local | remote. remote requires executor.urls for both staging and prod (ro+rw each); tokens bind environment+channel(+host for ssh); each pod asserts OPENDEVOPS_EXECUTOR_ENV/_CHANNEL.
+  urls: null                                 # remote: {staging: {ro: http://…, rw: http://…}, prod: {ro: http://…, rw: http://…}} — required when mode=remote
   signing_key_env: null                      # remote (agent): NAME of the env var holding the ed25519 PRIVATE signing key (base64 raw 32 bytes); required when mode=remote
   verify_key_env: null                       # remote (service): NAME of the env var holding the ed25519 PUBLIC verify key (base64 raw 32 bytes); the service holds the public key only
-  secret_source: env                         # {{secret:NAME}} backend (env-var-backed to start; a future vault plugs into the same SecretSource seam)
-  secret_env_prefix: ""                      # optional prefix prepended to NAME for the {{secret:NAME}} env lookup (namespacing)
+  secret_source: env                         # env | file (CSI/volume) | vault (HashiCorp KV v2)
+  secret_env_prefix: ""                      # optional prefix for env lookups
+  secret_file_dir: null                      # file backend: directory of per-NAME secret files
+  vault: null                                # vault backend: {addr_env, token_env, mount, path_prefix, value_field}
 audit: {dir: ./audit}
 policy: {dir: ./config/policy}
 state: {dir: ./state}                       # LocalGateway checkpointer sqlite db (0o700 dir)
@@ -86,7 +88,9 @@ scheduler:                                    # our own APScheduler service (int
   principal: scheduler                       # principal scheduled runs are attributed to (audit user + per-principal daily budget scope)
 principals: {}                               # slack user id -> {principal, profile}
 control_plane:
-  database: ./state/control-plane.sqlite3
+  backend: sqlite                            # sqlite (default) | postgres (multi-replica; requires database_url_env)
+  database: ./state/control-plane.sqlite3    # sqlite file path (ignored when backend=postgres)
+  database_url_env: null                     # postgres: NAME of env var holding the database URL
   production_requires_independent_approval: true
   enforce_runtime_grants: true               # rw actions in required environments need an active grant
   grant_required_environments: [prod]        # add staging for full change-window enforcement

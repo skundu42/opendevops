@@ -13,6 +13,6 @@ demands:
 | [Budgets](budgets.md) | every cost/step/time ceiling, who enforces it, and who counts the money |
 | [Audit](audit.md) | per-run hash chains, event types, verification, shipping |
 | [Interfaces](interfaces.md) | CLI REPL, authenticated dashboard, HTTP + webhooks, Slack chat-ops, scheduler, escalation flows |
-| [Deployment](deployment.md) | service-mode stack, dashboard, monitoring, the experimental executor service, go-live gates |
+| [Deployment](deployment.md) | service-mode stack, dashboard, monitoring, the remote executor service, go-live gates |
 | [Development](development.md) | test tiers, enforced conventions, the pinned-trio upgrade gate, how to extend |
 | [Release process](../RELEASING.md) | versions, prebuilt artifacts, provenance, and publishing |

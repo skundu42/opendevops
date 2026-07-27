@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import sqlite3
-import threading
 import time
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
-from pathlib import Path
 from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
+from opendevops.config import ControlPlaneConfig
 from opendevops.control_plane import ActionIdentity
+from opendevops.storage import ControlDatabase, resolve_store_config
 
 _MAX_THREADS_PER_IDENTITY = 50
 _MAX_MESSAGES_PER_THREAD = 500
@@ -64,7 +63,7 @@ def _title(message: str) -> str:
 
 
 class DashboardChatStore:
-    """SQLite transcript store sharing the control-plane durable volume.
+    """Transcript store sharing the control-plane durable volume (sqlite or postgres).
 
     Chat content is intentionally separate from the immutable audit chain: the audit records
     attribution and run lifecycle without copying prompts or responses, while this table provides
@@ -74,31 +73,48 @@ class DashboardChatStore:
 
     def __init__(
         self,
-        database: Path,
+        database: ControlPlaneConfig | ControlDatabase | Any,
         *,
         retention_days: int = 30,
         now: Any = time.time,
     ) -> None:
-        self._path = Path(database)
-        self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self._path.parent.chmod(0o700)
         self._retention_s = retention_days * 86400
         self._now = now
-        self._lock = threading.RLock()
+        if isinstance(database, ControlDatabase):
+            self._db = database
+        elif isinstance(database, ControlPlaneConfig):
+            self._db = ControlDatabase(
+                resolve_store_config(
+                    backend=database.backend,
+                    database=database.database,
+                    database_url_env=database.database_url_env,
+                )
+            )
+        else:
+            # Back-compat: Path-like sqlite file (tests / older call sites).
+            from pathlib import Path
+
+            path = Path(database)
+            self._db = ControlDatabase(
+                resolve_store_config(
+                    backend="sqlite",
+                    database=path,
+                    database_url_env=None,
+                )
+            )
+        self._lock = self._db.lock
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._path, timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA busy_timeout = 10000")
-        return connection
+    def _connect(self) -> Any:
+        return self._db.connect()
 
     def _initialize(self) -> None:
         with self._connect() as connection:
-            connection.execute("PRAGMA journal_mode = WAL")
+            if self._db.backend == "sqlite":
+                connection.execute("PRAGMA journal_mode = WAL")
+            pk = self._db.chat_messages_pk_ddl()
             connection.executescript(
-                """
+                f"""
                 CREATE TABLE IF NOT EXISTS dashboard_chat_threads (
                     thread_id TEXT PRIMARY KEY,
                     issuer TEXT NOT NULL,
@@ -113,7 +129,7 @@ class DashboardChatStore:
                 CREATE INDEX IF NOT EXISTS idx_dashboard_chat_owner
                     ON dashboard_chat_threads (issuer, subject, updated_at DESC);
                 CREATE TABLE IF NOT EXISTS dashboard_chat_messages (
-                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    {pk},
                     message_id TEXT NOT NULL UNIQUE,
                     thread_id TEXT NOT NULL
                         REFERENCES dashboard_chat_threads(thread_id) ON DELETE CASCADE,
@@ -127,14 +143,15 @@ class DashboardChatStore:
                     ON dashboard_chat_messages (thread_id, sequence);
                 """
             )
-        self._path.chmod(0o600)
+            if self._db.backend == "sqlite" and self._db.sqlite_path is not None:
+                self._db.sqlite_path.chmod(0o600)
 
     @staticmethod
     def _owned_row(
-        connection: sqlite3.Connection,
+        connection: Any,
         thread_id: str,
         actor: ActionIdentity,
-    ) -> sqlite3.Row:
+    ) -> Any:
         row = connection.execute(
             """
             SELECT * FROM dashboard_chat_threads
@@ -146,7 +163,7 @@ class DashboardChatStore:
             raise DashboardChatError("chat thread not found")
         return row
 
-    def _cleanup(self, connection: sqlite3.Connection, now: float) -> None:
+    def _cleanup(self, connection: Any, now: float) -> None:
         connection.execute(
             """
             DELETE FROM dashboard_chat_threads
@@ -163,7 +180,7 @@ class DashboardChatStore:
     ) -> ChatThread:
         now = float(self._now())
         with self._lock, self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._db.begin_immediate(connection)
             self._cleanup(connection, now)
             count = connection.execute(
                 """
@@ -262,7 +279,7 @@ class DashboardChatStore:
     ) -> ChatThread:
         now = float(self._now())
         with self._lock, self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._db.begin_immediate(connection)
             row = self._owned_row(connection, thread_id, actor)
             status = str(row["status"])
             stale = status == "running" and now - float(row["updated_at"]) > _RUN_LEASE_S
@@ -380,7 +397,7 @@ class DashboardChatStore:
 
     @staticmethod
     def _insert_message(
-        connection: sqlite3.Connection,
+        connection: Any,
         thread_id: str,
         *,
         role: str,
@@ -407,7 +424,7 @@ class DashboardChatStore:
         )
 
     @staticmethod
-    def _thread(connection: sqlite3.Connection, row: sqlite3.Row) -> ChatThread:
+    def _thread(connection: Any, row: Any) -> ChatThread:
         count = connection.execute(
             """
             SELECT COUNT(*) AS count FROM dashboard_chat_messages

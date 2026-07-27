@@ -79,12 +79,11 @@ tool family, channel, run id, tool-call id, and a 120 s expiry. The service hold
 **public** key and rejects unsigned, expired, or hash-mismatched requests — so no code path
 reaches execution without passing the policy engine.
 
-> **Status: experimental.** `mode=remote` is opt-in and **not production-deployable as shipped**:
-> the token does not yet bind the *environment*, the service performs no (env,channel)
-> self-check, and the client cannot yet route per-(env,channel). A mis-routed `staging-rw` token
-> would verify on the `prod-rw` pod. The gates are recorded in `ops/executor/README.md`
-> ("Pre-deployment gates") and must **all** close first. `mode=local` is the reviewed production
-> path. Note `ssh_run` stays agent-side even on remote — the agent holds the SSH key.
+> **Status:** production-capable with a complete `executor.urls` map. `mode=remote` is opt-in.
+> The token binds `environment` and `channel` (plus `host` for `ssh_run`); each service pod
+> asserts `OPENDEVOPS_EXECUTOR_ENV` / `OPENDEVOPS_EXECUTOR_CHANNEL` and rejects mismatches with
+> 403. The agent routes per `(env, channel)` and does not hold infra or SSH credentials. See
+> `ops/executor/README.md`. `mode=local` remains the default single-process path.
 
 ## Structural guards
 
@@ -145,10 +144,10 @@ policy-denial-spike rule — repeated denials are a bypass-probing signal, not n
 - Policy is **not** the boundary; treat every pack as bypassable when reasoning about risk.
 - The scrubber is pattern-based; an exotic secret format can slip it. The hard control is
   server-side denial of secret reads.
-- `mode=remote` is experimental (gates above); production currently uses the local executor with
-  carefully scoped credentials.
-- The control ledger and dashboard chat transcript are SQLite. Multi-replica service mode needs a
-  shared single-writer durable volume until a Postgres backend lands.
+- `mode=remote` requires a complete `executor.urls` map and pod identity env vars; production
+  currently often still uses the local executor with carefully scoped credentials.
+- The control ledger and dashboard chat transcript default to SQLite. Set
+  `control_plane.backend: postgres` (with `database_url_env`) for multi-replica service mode.
 - AWS, GCP and Azure packs remain read-only. A deploy capability type exists in change control,
   but no grant can override the absent/denied mutation rules or create cloud `rw` credentials.
 - Grant target strings record the reviewed change scope; executable target enforcement remains in

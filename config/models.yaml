@@ -3,6 +3,12 @@ aliases:
   opus: anthropic:claude-opus-4-8
   sonnet: anthropic:claude-sonnet-5
   haiku: anthropic:claude-haiku-4-5
+# Optional providers: map (when set, every alias provider id must appear here).
+# kinds: anthropic | openai | openai_compatible | azure_openai | google | bedrock
+# providers:
+#   anthropic: {kind: anthropic, api_key_env: ANTHROPIC_API_KEY}
+#   openai: {kind: openai, api_key_env: OPENAI_API_KEY}
+#   local: {kind: openai_compatible, api_key_env: LOCAL_API_KEY, base_url: http://localhost:8000/v1}
 pricing:                                   # USD per MTok
   anthropic:claude-opus-4-8:  {input: 5.00, output: 25.00, cache_read: 0.50, cache_write: 6.25}
   anthropic:claude-sonnet-5:  {input: 3.00, output: 15.00, cache_read: 0.30, cache_write: 3.75}

@@ -6,7 +6,7 @@ Three tiers, in order of infrastructure required:
 |---|---|---|
 | CLI (local) | everything in one process, sqlite state | [getting started](getting-started.md) — the default |
 | Service mode | self-hosted LangGraph Server stack via docker-compose | HTTP API, webhooks, Slack, scheduler |
-| Executor service | standalone credential-holding execution service on k8s | **experimental** — see gates below |
+| Executor service | standalone credential-holding execution service on k8s | production-capable with full `executor.urls` |
 
 > **Blast-radius rule (hard):** the service stack must **not** run on a Kubernetes cluster the
 > agent itself manages. Use a dedicated ops VM or a separate ops cluster — otherwise a
@@ -160,8 +160,8 @@ model-call and application trace identifiers are attached where available.
 
 ## Executor service (remote mode)
 
-> **Status: EXPERIMENTAL — not production-deployable as shipped.** `executor.mode=local` is the
-> reviewed production path. Read this section as the roadmap it documents.
+> **Status:** production-capable when `executor.mode=remote` and `executor.urls` covers
+> `staging`/`prod` × `ro`/`rw`. `executor.mode=local` remains the default single-process path.
 
 `ops/executor/` contains hardened manifests for the standalone execution service: an isolated
 namespace (Pod Security `restricted`), one Deployment per `(environment, channel)` — each holding
@@ -171,24 +171,20 @@ allowlisted with IMDS blocked). Every manifest property is asserted by
 `tests/unit/test_executor_manifests.py` without a live cluster.
 
 On this path the agent holds only the ed25519 **private** signing key; each request carries a
-signed decision token ([security model](security-model.md#the-executor-split-moderemote)). The
-service holds the **public** key, its family/channel credential env, and `{{secret:NAME}}`
-values — sourced from a Secret/CSI driver, never baked into images. The image installs the
-package + `fastapi` only — **never** the `server` extra (`langgraph-sdk` must not exist there;
-SDK firewall).
+signed decision token binding `environment`, `channel`, and (for `ssh_run`) `host`
+([security model](security-model.md#the-executor-split-moderemote)). The service holds the
+**public** key, asserts `OPENDEVOPS_EXECUTOR_ENV` / `OPENDEVOPS_EXECUTOR_CHANNEL`, holds its
+family/channel credential env (and the SSH key on `ro` pods when SSH is enabled), and
+`{{secret:NAME}}` values — sourced from a Secret/CSI driver, never baked into images. The image
+installs the package + `fastapi` (+ `ssh` extra when using `ssh_run`) — **never** the `server`
+extra (`langgraph-sdk` must not exist there; SDK firewall).
 
-**Pre-deployment gates** (all must close before any `mode=remote` production run — full detail in
-`ops/executor/README.md`):
+**Gates (closed):**
 
-1. the signed token must bind the **environment** alongside the channel;
-2. each service pod must assert its own `(environment, channel)` identity and 403 mismatched
-   tokens;
-3. the agent must route per-(env,channel) — a routing map, not today's single `executor.url`;
-4. `ssh_run` must route through the service too (or the deployment explicitly accepts that the
-   agent keeps holding the SSH key).
-
-Until then, a mis-routed `staging-rw` token would verify and run on the `prod-rw` pod — which is
-exactly the class of failure the split exists to prevent. Keep `mode: local`.
+1. the signed token binds **environment** (and `host` for ssh) alongside the channel;
+2. each service pod asserts its own `(environment, channel)` identity and 403s mismatched tokens;
+3. the agent routes via `executor.urls[environment][channel]`;
+4. `ssh_run` routes through the same `POST /execute` path (`tool_family=ssh`).
 
 ## Standing pre-go-live gates (all tiers)
 

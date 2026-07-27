@@ -12,19 +12,17 @@ from __future__ import annotations
 import builtins
 import hashlib
 import json
-import sqlite3
-import threading
 import time
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from opendevops.audit.schema import canonical_dumps
 from opendevops.config import ControlPlaneConfig
+from opendevops.storage import ControlDatabase, resolve_store_config
 
 
 class Capability(StrEnum):
@@ -144,26 +142,38 @@ def capability_for_family(tool_family: str | None) -> Capability | None:
 class ChangeControlService:
     """Transactional proposal ledger and runtime dangerous-action guard."""
 
-    def __init__(self, config: ControlPlaneConfig, *, now: Any = time.time) -> None:
+    def __init__(
+        self,
+        config: ControlPlaneConfig,
+        *,
+        now: Any = time.time,
+        database: ControlDatabase | None = None,
+    ) -> None:
         self._config = config
-        self._path = Path(config.database)
-        self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._now = now
-        self._lock = threading.RLock()
+        if database is not None:
+            self._db = database
+        else:
+            self._db = ControlDatabase(
+                resolve_store_config(
+                    backend=config.backend,
+                    database=config.database,
+                    database_url_env=config.database_url_env,
+                )
+            )
+        self._lock = self._db.lock
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._path, timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA busy_timeout = 10000")
-        return connection
+    def _connect(self) -> Any:
+        return self._db.connect()
 
     def _initialize(self) -> None:
         with self._connect() as connection:
-            connection.execute("PRAGMA journal_mode = WAL")
+            if self._db.backend == "sqlite":
+                connection.execute("PRAGMA journal_mode = WAL")
+            pk = self._db.events_pk_ddl()
             connection.executescript(
-                """
+                f"""
                 CREATE TABLE IF NOT EXISTS proposals (
                     proposal_id TEXT PRIMARY KEY,
                     revision INTEGER NOT NULL,
@@ -183,7 +193,7 @@ class ChangeControlService:
                     PRIMARY KEY (run_id, fingerprint)
                 );
                 CREATE TABLE IF NOT EXISTS control_events (
-                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    {pk},
                     occurred_at TEXT NOT NULL,
                     action TEXT NOT NULL,
                     issuer TEXT NOT NULL,
@@ -194,8 +204,10 @@ class ChangeControlService:
                 );
                 """
             )
+            if self._db.backend == "sqlite" and self._db.sqlite_path is not None:
+                self._db.sqlite_path.chmod(0o600)
 
-    def _write_proposal(self, connection: sqlite3.Connection, proposal: CapabilityProposal) -> None:
+    def _write_proposal(self, connection: Any, proposal: CapabilityProposal) -> None:
         payload = proposal.model_dump_json()
         connection.execute(
             """
@@ -223,12 +235,12 @@ class ChangeControlService:
         )
 
     @staticmethod
-    def _row_proposal(row: sqlite3.Row) -> CapabilityProposal:
+    def _row_proposal(row: Any) -> CapabilityProposal:
         return CapabilityProposal.model_validate_json(str(row["payload"]))
 
     def _event(
         self,
-        connection: sqlite3.Connection,
+        connection: Any,
         action: str,
         actor: ActionIdentity,
         payload: dict[str, Any],
@@ -298,7 +310,7 @@ class ChangeControlService:
             expires_at=_utc_iso(now + ttl),
         )
         with self._lock, self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._db.begin_immediate(connection)
             self._write_proposal(connection, proposal)
             self._event(
                 connection,
@@ -326,7 +338,7 @@ class ChangeControlService:
     def list(self, *, limit: int = 100) -> list[CapabilityProposal]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM proposals ORDER BY rowid DESC LIMIT ?", (min(limit, 200),)
+                "SELECT * FROM proposals ORDER BY expires_at DESC LIMIT ?", (min(limit, 200),)
             ).fetchall()
         return [self._expire_if_needed(self._row_proposal(row)) for row in rows]
 
@@ -346,7 +358,7 @@ class ChangeControlService:
 
     def approve(self, proposal_id: str, approver: ActionIdentity) -> CapabilityProposal:
         with self._lock, self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._db.begin_immediate(connection)
             row = connection.execute(
                 "SELECT * FROM proposals WHERE proposal_id = ?", (proposal_id,)
             ).fetchone()
@@ -384,7 +396,7 @@ class ChangeControlService:
 
     def activate(self, proposal_id: str, admin: ActionIdentity) -> CapabilityProposal:
         with self._lock, self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._db.begin_immediate(connection)
             row = connection.execute(
                 "SELECT * FROM proposals WHERE proposal_id = ?", (proposal_id,)
             ).fetchone()
@@ -438,7 +450,7 @@ class ChangeControlService:
         updates: dict[str, Any],
     ) -> CapabilityProposal:
         with self._lock, self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._db.begin_immediate(connection)
             row = connection.execute(
                 "SELECT * FROM proposals WHERE proposal_id = ?", (proposal_id,)
             ).fetchone()
@@ -485,7 +497,7 @@ class ChangeControlService:
         capability = capability_for_family(tool_family)
         now = float(self._now())
         with self._lock, self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._db.begin_immediate(connection)
             usage_rows = connection.execute(
                 "SELECT * FROM run_usage WHERE run_id = ?", (run_id,)
             ).fetchall()
@@ -514,12 +526,14 @@ class ChangeControlService:
                 if capability is None:
                     raise ChangeControlError("rw tool family has no controlled capability mapping")
                 candidates = connection.execute(
-                    """
+                    self._db.for_update(
+                        """
                     SELECT * FROM proposals
                     WHERE status = 'active' AND environment = ? AND capability = ?
                       AND expires_at > ? AND executions_used < 100
-                    ORDER BY rowid DESC
-                    """,
+                    ORDER BY expires_at DESC
+                    """
+                    ),
                     (environment, capability.value, now),
                 ).fetchall()
                 for candidate in candidates:
@@ -598,7 +612,7 @@ class ChangeControlService:
                 SELECT * FROM proposals
                 WHERE status = 'active' AND environment = ? AND capability = ?
                   AND expires_at > ?
-                ORDER BY rowid DESC
+                ORDER BY expires_at DESC
                 """,
                 (environment, capability.value, now),
             ).fetchall()

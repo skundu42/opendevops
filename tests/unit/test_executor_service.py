@@ -149,10 +149,21 @@ def _sign(
     tcid: str = "call-1",
     channel: str = "ro",
     family: str | None = None,
+    environment: str = "staging",
+    host: str | None = None,
     now: float = 1000.0,
 ) -> DecisionToken:
     return sign_decision(
-        argv, list(staged), run_id, tcid, channel, family, priv, now=lambda: now
+        argv,
+        list(staged),
+        run_id,
+        tcid,
+        channel,
+        family,
+        priv,
+        environment=environment,
+        host=host,
+        now=lambda: now,
     )
 
 
@@ -164,6 +175,8 @@ def _body(
     tcid: str = "call-1",
     channel: str = "ro",
     family: str | None = None,
+    environment: str = "staging",
+    host: str | None = None,
     timeout: int = 60,
     staged_wire: tuple[dict[str, Any], ...] = (),
 ) -> dict[str, Any]:
@@ -172,11 +185,22 @@ def _body(
         "run_id": run_id,
         "tool_call_id": tcid,
         "channel": channel,
+        "environment": environment,
         "tool_family": family,
+        "host": host,
         "timeout_s": timeout,
         "staged_files": list(staged_wire),
         "token": token.to_dict(),
     }
+
+
+def _app(cfg: Any, *args: Any, **kwargs: Any):
+    """create_app with default staging/ro identity for unit tests."""
+    kwargs.setdefault("identity_environment", "staging")
+    kwargs.setdefault("identity_channel", "ro")
+    if args:
+        kwargs.setdefault("public_key", args[0])
+    return create_app(cfg, **kwargs)
 
 
 # --------------------------------------------------------------------------------------
@@ -187,7 +211,7 @@ def _body(
 async def test_good_token_verifies_then_executes(tmp_path: Any) -> None:
     priv, pub = generate_keypair()
     spy = SpyExecutor(output="ran-ok")
-    app = create_app(
+    app = _app(
         make_cfg(str(tmp_path)), public_key=pub, secret_source=DictSource(), executor=spy,
         now=lambda: 1050.0,
     )
@@ -204,7 +228,7 @@ async def test_good_token_verifies_then_executes(tmp_path: Any) -> None:
 async def test_faithful_staged_request_executes_and_materializes(tmp_path: Any) -> None:
     priv, pub = generate_keypair()
     spy = SpyExecutor()
-    app = create_app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
+    app = _app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
     argv = ["kubectl", "apply", "-f", "/manifests/deploy.yaml"]
     staged = Staged(argv_index=3, content="apiVersion: apps/v1\nkind: Deployment\n")
     token = _sign(priv, argv, staged=(staged,), family="kubectl")
@@ -227,7 +251,7 @@ async def test_faithful_staged_request_executes_and_materializes(tmp_path: Any) 
 async def test_unsigned_rejected_without_executing(tmp_path: Any) -> None:
     _, pub = generate_keypair()
     spy = SpyExecutor()
-    app = create_app(make_cfg(str(tmp_path)), public_key=pub, executor=spy)
+    app = _app(make_cfg(str(tmp_path)), public_key=pub, executor=spy)
     async with _client(app) as client:
         resp = await client.post(
             "http://svc/execute",
@@ -236,6 +260,7 @@ async def test_unsigned_rejected_without_executing(tmp_path: Any) -> None:
                 "run_id": "run-1",
                 "tool_call_id": "call-1",
                 "channel": "ro",
+                "environment": "staging",
                 "timeout_s": 60,
                 "staged_files": [],
                 "token": {},  # unsigned / malformed
@@ -247,7 +272,7 @@ async def test_unsigned_rejected_without_executing(tmp_path: Any) -> None:
 async def test_expired_rejected_without_executing(tmp_path: Any) -> None:
     priv, pub = generate_keypair()
     spy = SpyExecutor()
-    app = create_app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 9999.0)
+    app = _app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 9999.0)
     argv = ["kubectl", "get", "pods"]
     token = _sign(priv, argv, family="kubectl")
     async with _client(app) as client:
@@ -258,7 +283,7 @@ async def test_expired_rejected_without_executing(tmp_path: Any) -> None:
 async def test_argv_hash_mismatch_rejected_without_executing(tmp_path: Any) -> None:
     priv, pub = generate_keypair()
     spy = SpyExecutor()
-    app = create_app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
+    app = _app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
     token = _sign(priv, ["kubectl", "get", "pods"], family="kubectl")
     async with _client(app) as client:
         resp = await client.post(
@@ -271,7 +296,7 @@ async def test_argv_hash_mismatch_rejected_without_executing(tmp_path: Any) -> N
 async def test_wrong_channel_rejected_without_executing(tmp_path: Any) -> None:
     priv, pub = generate_keypair()
     spy = SpyExecutor()
-    app = create_app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
+    app = _app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
     argv = ["kubectl", "get", "pods"]
     token = _sign(priv, argv, channel="ro", family="kubectl")
     async with _client(app) as client:
@@ -290,7 +315,7 @@ async def test_substituted_content_rejected_without_executing(tmp_path: Any) -> 
     """Token signed for content A; request carries content B (same metadata) -> 403, no run."""
     priv, pub = generate_keypair()
     spy = SpyExecutor()
-    app = create_app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
+    app = _app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
     argv = ["kubectl", "apply", "-f", "/manifests/deploy.yaml"]
     signed = Staged(argv_index=3, content="apiVersion: v1\nkind: ConfigMap\n")
     token = _sign(priv, argv, staged=(signed,), family="kubectl")
@@ -307,7 +332,7 @@ async def test_rewritten_staging_metadata_rejected_without_executing(tmp_path: A
     """Token signed for argv_index/inline_prefix X; request rewrites them -> 403, no run."""
     priv, pub = generate_keypair()
     spy = SpyExecutor()
-    app = create_app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
+    app = _app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
     argv = ["kubectl", "apply", "-f", "/manifests/deploy.yaml"]
     signed = Staged(argv_index=3, inline=False, inline_prefix=None)
     token = _sign(priv, argv, staged=(signed,), family="kubectl")
@@ -325,7 +350,7 @@ async def test_swapped_tool_family_rejected_without_executing(tmp_path: Any) -> 
     """Token signed for family kubectl; request swaps to aws for a different credential -> 403."""
     priv, pub = generate_keypair()
     spy = SpyExecutor()
-    app = create_app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
+    app = _app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
     argv = ["kubectl", "get", "pods"]
     token = _sign(priv, argv, family="kubectl")
     async with _client(app) as client:
@@ -341,7 +366,7 @@ async def test_swapped_tool_family_rejected_without_executing(tmp_path: Any) -> 
 async def test_replay_second_presentation_rejected_without_executing(tmp_path: Any) -> None:
     priv, pub = generate_keypair()
     spy = SpyExecutor(output="ran")
-    app = create_app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
+    app = _app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
     argv = ["kubectl", "get", "pods"]
     token = _sign(priv, argv, family="kubectl")
     body = _body(argv, token, family="kubectl")
@@ -356,7 +381,7 @@ async def test_replay_second_presentation_rejected_without_executing(tmp_path: A
 async def test_concurrent_duplicates_run_exactly_once(tmp_path: Any) -> None:
     priv, pub = generate_keypair()
     spy = SpyExecutor(output="ran")
-    app = create_app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
+    app = _app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
     argv = ["kubectl", "get", "pods"]
     token = _sign(priv, argv, family="kubectl")
     body = _body(argv, token, family="kubectl")
@@ -378,7 +403,7 @@ async def test_concurrent_duplicates_run_exactly_once(tmp_path: Any) -> None:
 async def test_secret_resolved_into_env_not_argv(tmp_path: Any) -> None:
     priv, pub = generate_keypair()
     spy = SpyExecutor()
-    app = create_app(
+    app = _app(
         make_cfg(str(tmp_path)),
         public_key=pub,
         secret_source=DictSource({"MYSECRET": "topsecretvalue"}),
@@ -400,7 +425,7 @@ async def test_full_scrub_redacts_secret_value_from_output(tmp_path: Any) -> Non
     priv, pub = generate_keypair()
     secret = "SUPERSECRETVALUE-abc123"
     spy = SpyExecutor(output=f"the tool leaked {secret} into stdout")
-    app = create_app(
+    app = _app(
         make_cfg(str(tmp_path)),
         public_key=pub,
         secret_source=DictSource({"LEAK": secret}),
@@ -423,7 +448,7 @@ async def test_end_to_end_secret_env_to_scrubbed_output(tmp_path: Any) -> None:
         pytest.skip("python3 not on PATH")
     priv, pub = generate_keypair()
     secret = "REALSUBPROCSECRET-xyz789"
-    app = create_app(
+    app = _app(
         make_cfg(str(tmp_path)),
         public_key=pub,
         secret_source=DictSource({"LEAK": secret}),
@@ -443,9 +468,33 @@ async def test_end_to_end_secret_env_to_scrubbed_output(tmp_path: Any) -> None:
 async def test_credential_unavailable_is_422_not_500(tmp_path: Any) -> None:
     priv, pub = generate_keypair()
     spy = SpyExecutor()
-    app = create_app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
+    app = _app(make_cfg(str(tmp_path)), public_key=pub, executor=spy, now=lambda: 1000.0)
     argv = ["gh", "pr", "list"]
     token = _sign(priv, argv, family="gh")
     async with _client(app) as client:
         resp = await client.post("http://svc/execute", json=_body(argv, token, family="gh"))
     assert resp.status_code == 422 and not spy.called
+
+
+
+async def test_identity_mismatch_rejected_without_executing(tmp_path: Any) -> None:
+    """A staging/ro token must not execute on a prod/rw pod — 403, spy untouched."""
+    priv, pub = generate_keypair()
+    spy = SpyExecutor()
+    app = _app(
+        make_cfg(str(tmp_path)),
+        pub,
+        executor=spy,
+        identity_environment="prod",
+        identity_channel="rw",
+        now=lambda: 1000.0,
+    )
+    argv = ["kubectl", "get", "pods"]
+    token = _sign(priv, argv, channel="ro", family="kubectl", environment="staging")
+    async with _client(app) as client:
+        resp = await client.post(
+            "http://svc/execute",
+            json=_body(argv, token, channel="ro", family="kubectl", environment="staging"),
+        )
+    assert resp.status_code == 403 and not spy.called
+    assert "identity" in resp.json()["detail"]

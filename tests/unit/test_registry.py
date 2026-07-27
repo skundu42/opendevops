@@ -64,10 +64,11 @@ def test_build_chat_model_unknown_agent_raises() -> None:
         build_chat_model(cfg, "does-not-exist")
 
 
-def test_build_chat_model_non_anthropic_provider_raises_not_implemented(
-    write_config, base_models
+def test_build_chat_model_openai_provider(
+    write_config, base_models, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Extension-point contract: unsupported providers fail loud, naming the extension point."""
+    """OpenAI provider constructs ChatOpenAI when the API key env is set."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
     base_models["aliases"]["opus"] = "openai:gpt-4"
     base_models["pricing"] = {
         "openai:gpt-4": {"input": 1.0, "output": 2.0, "cache_read": 0.0, "cache_write": 0.0},
@@ -80,9 +81,28 @@ def test_build_chat_model_non_anthropic_provider_raises_not_implemented(
     }
     root = write_config(models=base_models)
     cfg = load_config(root)
-    with pytest.raises(NotImplementedError) as exc:
+    model = build_chat_model(cfg, "main")
+    assert model.__class__.__name__ == "ChatOpenAI"
+
+
+def test_build_chat_model_unknown_provider_raises(write_config, base_models) -> None:
+    """Unconfigured provider ids fail loud with ProviderConfigError."""
+    from opendevops.models.registry import ProviderConfigError
+
+    base_models["aliases"]["opus"] = "acme:widget-1"
+    base_models["pricing"] = {
+        "acme:widget-1": {"input": 1.0, "output": 2.0, "cache_read": 0.0, "cache_write": 0.0},
+        "anthropic:claude-haiku-4-5": {
+            "input": 1.00,
+            "output": 5.00,
+            "cache_read": 0.10,
+            "cache_write": 1.25,
+        },
+    }
+    root = write_config(models=base_models)
+    cfg = load_config(root)
+    with pytest.raises(ProviderConfigError, match="acme"):
         build_chat_model(cfg, "main")
-    assert "openai" in str(exc.value).lower()
 
 
 def test_assert_all_agents_priced_passes_for_shipped_config() -> None:

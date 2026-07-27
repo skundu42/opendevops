@@ -566,15 +566,17 @@ def _ref_to_wire(ref: FileRef) -> dict[str, Any]:
 
 
 class RemoteExecutor:
-    """Signs each exec with an ed25519 decision token and POSTs it to the executor service.
+    """Signs each exec with an ed25519 decision token and POSTs it to the matching executor pod.
 
-    The agent process this runs in holds **no** infra credential and **no** secret value — only the
-    ed25519 *private* signing key and the service URL. The request carries the authorized argv, the
-    run/call correlation fields, the staged file CONTENT (materialization happens in the service),
-    and the signed token; the service verifies the token, builds the credential env, resolves
-    ``{{secret:NAME}}`` into the subprocess env, runs argv ``shell=False``, full-scrubs the output,
-    and returns the same :class:`ExecResult` shape :class:`LocalExecutor` would — so the caller's
-    ToolMessage / EXEC_META contract is identical on both paths.
+    The agent process this runs in holds **no** infra credential, **no** secret value, and **no**
+    SSH key — only the ed25519 *private* signing key and the per-(environment, channel) service URL
+    map. The request carries the authorized argv, the run/call/environment/host correlation
+    fields, the staged file CONTENT (materialization happens in the service), and the signed
+    token; the service verifies the token + its own pod identity, builds the credential env (or
+    resolves the SSH credential), resolves ``{{secret:NAME}}`` into the subprocess env, runs argv
+    ``shell=False`` (or shell-quoted over SSH), full-scrubs the output, and returns the same
+    :class:`ExecResult` shape :class:`LocalExecutor` would — so the caller's ToolMessage /
+    EXEC_META contract is identical on both paths.
 
     Injection seams (for the in-process round-trip test against a fake service, no real network):
     ``client`` (an ``httpx.AsyncClient``, e.g. over ``ASGITransport``), ``private_key``,
@@ -590,7 +592,11 @@ class RemoteExecutor:
         run_id_provider: Callable[[], str] | None = None,
         now: Callable[[], float] = time.time,
     ) -> None:
-        self._url = (cfg.executor.url or "").rstrip("/")
+        if cfg.executor.urls is None:
+            raise RemoteExecutorError(
+                "executor.mode='remote' requires executor.urls (per-(env,channel) service map)"
+            )
+        self._urls = cfg.executor.urls
         self._signing_key_env = cfg.executor.signing_key_env
         self._private_key = private_key
         self._client = client
@@ -611,6 +617,19 @@ class RemoteExecutor:
             self._client = httpx.AsyncClient()
         return self._client
 
+    def _base_url(self, environment: str, channel: str) -> str:
+        """Resolve the service base URL for ``(environment, channel)`` — fail-closed."""
+        env_urls = self._urls.get(environment)
+        if env_urls is None:
+            raise RemoteExecutorError(
+                f"no executor.urls entry configured for environment {environment!r}"
+            )
+        if channel == "ro":
+            return env_urls.ro.rstrip("/")
+        if channel == "rw":
+            return env_urls.rw.rstrip("/")
+        raise RemoteExecutorError(f"unknown executor channel {channel!r}")
+
     async def run_remote(
         self,
         argv: Sequence[str],
@@ -619,15 +638,17 @@ class RemoteExecutor:
         decision: Any,
         tool_call_id: str | None,
         refs: Sequence[FileRef],
+        host: str | None = None,
     ) -> ExecResult:
-        """Sign the authorized argv + staging plan + tool_family, POST, then map the service reply.
+        """Sign the authorized argv + staging plan + env/host/family, POST, map the service reply.
 
         ``decision`` is the ``current_decision`` ExecDecision (duck-typed here to avoid importing
-        ``run_command``): it supplies ``channel`` + ``tool_family``. The token binds the exact argv
-        the decision gate authorized, the staged-file PLAN (content + rewrite metadata) the agent's
-        ``resolve_file_refs`` produced, and the credential ``tool_family`` — so the service cannot
-        materialize substituted content, apply a rewritten staging plan, or select a different
-        credential than the policy engine authorized. Staging + secret resolution run in the service
+        ``run_command``): it supplies ``channel`` + ``tool_family`` + ``environment``. The token
+        binds the exact argv the decision gate authorized, the staged-file PLAN (content + rewrite
+        metadata) the agent's ``resolve_file_refs`` produced, the credential ``tool_family``, the
+        policy ``environment``, and (for ``ssh_run``) the target ``host`` — so the service cannot
+        materialize substituted content, apply a rewritten staging plan, select a different
+        credential, or run on the wrong pod / host. Staging + secret resolution run in the service
         AFTER it re-verifies all of that.
         """
         from opendevops.tools.signing import sign_decision
@@ -635,28 +656,49 @@ class RemoteExecutor:
         run_id = self._run_id_provider()
         channel = str(getattr(decision, "channel", "ro"))
         tool_family = getattr(decision, "tool_family", None)
+        environment = getattr(decision, "environment", None)
+        if not isinstance(environment, str) or not environment:
+            raise RemoteExecutorError(
+                "no environment on decision; cannot route or sign a decision token"
+            )
         tcid = tool_call_id or ""
         token = sign_decision(
-            argv, refs, run_id, tcid, channel, tool_family, self._key(), now=self._now
+            argv,
+            refs,
+            run_id,
+            tcid,
+            channel,
+            tool_family,
+            self._key(),
+            environment=environment,
+            host=host,
+            now=self._now,
         )
         body = {
             "argv": list(argv),
             "run_id": run_id,
             "tool_call_id": tcid,
             "channel": channel,
+            "environment": environment,
             "tool_family": tool_family,
+            "host": host,
             "timeout_s": timeout_s,
             "staged_files": [_ref_to_wire(r) for r in refs],
             "token": token.to_dict(),
         }
+        base = self._base_url(environment, channel)
         client = self._http()
         try:
             resp = await client.post(
-                f"{self._url}/execute", json=body, timeout=timeout_s + _REMOTE_OVERHEAD_S
+                f"{base}/execute", json=body, timeout=timeout_s + _REMOTE_OVERHEAD_S
             )
         except Exception as exc:  # noqa: BLE001 - any transport failure is a fail-closed refusal
             raise RemoteExecutorError(f"executor service unreachable: {exc}") from exc
 
+        if resp.status_code == 502 and tool_family == "ssh":
+            # Service maps SshConnectionError → 502 with a path-free detail; re-raise as the
+            # same connection-failure class the local ssh path uses so ssh_run_core stays uniform.
+            raise SshConnectionError(_safe_detail(resp))
         if resp.status_code != 200:
             raise RemoteExecutorError(
                 f"executor service refused the request ({resp.status_code}): {_safe_detail(resp)}"
@@ -692,7 +734,7 @@ def _safe_detail(resp: httpx.Response) -> str:
 
 
 def select_executor(cfg: AppConfig) -> RemoteExecutor | None:
-    """Choose the executor for ``run_command`` from ``cfg.executor.mode``.
+    """Choose the executor for ``run_command`` / remote ``ssh_run`` from ``cfg.executor.mode``.
 
     Returns a :class:`RemoteExecutor` for ``mode == "remote"``; returns ``None`` for ``local`` so
     ``run_command_core`` keeps using its in-process default :class:`LocalExecutor` UNCHANGED (the

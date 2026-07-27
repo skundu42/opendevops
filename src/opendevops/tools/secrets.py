@@ -11,9 +11,9 @@ that text literally and silently send a broken credential. Expanding the value w
 it through the OS process table, so the secure contract is intentionally env-aware programs only.
 
 Fail-closed: an unknown / unset ``NAME`` raises :class:`SecretResolutionError` (deny, no exec) —
-never an empty-string substitution. The secret **source** is config-named and env-var-backed to
-start (:class:`EnvSecretSource`); the :class:`SecretSource` protocol is the seam a future vault
-backend plugs into.
+never an empty-string substitution. Backends: :class:`EnvSecretSource` (default),
+:class:`FileSecretSource` (CSI/volume files), :class:`VaultSecretSource` (HashiCorp KV v2).
+Use :func:`build_secret_source` to construct from ``executor`` config.
 
 On the **remote** executor path this resolution runs inside the executor **service** (the only
 holder of secret values); on the **local** (single-process) path it runs in-process. The exact set
@@ -23,11 +23,15 @@ literal occurrence in the command output is redacted as a backstop.
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import urllib.error
+import urllib.request
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
 
 # ``{{secret:NAME}}`` where NAME is a conventional env-var identifier. Anchored to that grammar so a
 # stray ``{{secret:...}}`` with an illegal name is simply not matched (and thus not treated as a
@@ -61,6 +65,74 @@ class EnvSecretSource:
     def get(self, name: str) -> str | None:
         value = os.environ.get(f"{self.prefix}{name}")
         return value if value else None
+
+
+@dataclass(frozen=True)
+class FileSecretSource:
+    """CSI / volume-mounted secrets: one file per NAME under ``directory``.
+
+    Reads ``{directory}/{NAME}`` as UTF-8 text and strips a single trailing newline. Missing or
+    empty files return ``None`` (fail-closed at resolve time).
+    """
+
+    directory: Path
+
+    def get(self, name: str) -> str | None:
+        path = self.directory / name
+        if not path.is_file():
+            return None
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        if text.endswith("\n"):
+            text = text[:-1]
+        return text if text else None
+
+
+@dataclass(frozen=True)
+class VaultSecretSource:
+    """HashiCorp Vault KV v2: GET ``{addr}/v1/{mount}/data/{path_prefix}/{NAME}``.
+
+    Uses a static token from ``token_env``. The secret payload field named by ``value_field``
+    (default ``value``) is returned; if absent and ``data`` has exactly one string field, that
+    value is used. Network/auth failures return ``None`` (fail-closed).
+    """
+
+    addr: str
+    token: str
+    mount: str = "secret"
+    path_prefix: str = "opendevops"
+    value_field: str = "value"
+    timeout_s: float = 5.0
+
+    def get(self, name: str) -> str | None:
+        base = self.addr.rstrip("/")
+        prefix = self.path_prefix.strip("/")
+        path = f"{prefix}/{name}" if prefix else name
+        url = f"{base}/v1/{self.mount.strip('/')}/data/{path}"
+        request = urllib.request.Request(
+            url,
+            headers={"X-Vault-Token": self.token, "Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
+            return None
+        data = payload.get("data", {})
+        if isinstance(data, dict) and isinstance(data.get("data"), dict):
+            data = data["data"]
+        if not isinstance(data, dict):
+            return None
+        raw = data.get(self.value_field)
+        if isinstance(raw, str) and raw:
+            return raw
+        strings = [v for v in data.values() if isinstance(v, str) and v]
+        if len(strings) == 1:
+            return strings[0]
+        return None
 
 
 @dataclass(frozen=True)
@@ -121,3 +193,40 @@ def resolve_secrets(argv: Sequence[str], source: SecretSource) -> ResolvedSecret
             names.append(name)
 
     return ResolvedSecrets(argv=new_argv, env=env, values=values, names=names)
+
+
+def build_secret_source(cfg: Any) -> SecretSource:
+    """Construct the configured ``{{secret:NAME}}`` backend (env / file / vault)."""
+    from opendevops.config import AppConfig, ExecutorConfig
+
+    if isinstance(cfg, AppConfig):
+        executor = cfg.executor
+    elif isinstance(cfg, ExecutorConfig):
+        executor = cfg
+    else:
+        raise TypeError("build_secret_source expects AppConfig or ExecutorConfig")
+
+    if executor.secret_source == "env":
+        return EnvSecretSource(prefix=executor.secret_env_prefix)
+    if executor.secret_source == "file":
+        if executor.secret_file_dir is None:
+            raise SecretResolutionError("executor.secret_file_dir is required for file secrets")
+        return FileSecretSource(directory=executor.secret_file_dir)
+    if executor.secret_source == "vault":
+        if executor.vault is None:
+            raise SecretResolutionError("executor.vault is required for vault secrets")
+        addr = os.environ.get(executor.vault.addr_env)
+        token = os.environ.get(executor.vault.token_env)
+        if not addr or not token:
+            raise SecretResolutionError(
+                "vault secret source requires "
+                f"{executor.vault.addr_env} and {executor.vault.token_env} to be set"
+            )
+        return VaultSecretSource(
+            addr=addr,
+            token=token,
+            mount=executor.vault.mount,
+            path_prefix=executor.vault.path_prefix,
+            value_field=executor.vault.value_field,
+        )
+    raise SecretResolutionError(f"unknown secret_source {executor.secret_source!r}")

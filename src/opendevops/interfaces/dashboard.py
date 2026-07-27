@@ -228,9 +228,18 @@ def register_dashboard(
             "compiled dashboard assets are missing; run `npm ci && npm run frontend:build`"
         )
     auth = DashboardAuth(cfg=cfg, store=build_session_store(cfg))
-    change_control = ChangeControlService(cfg.control_plane)
+    from opendevops.storage import ControlDatabase, resolve_store_config
+
+    control_db = ControlDatabase(
+        resolve_store_config(
+            backend=cfg.control_plane.backend,
+            database=cfg.control_plane.database,
+            database_url_env=cfg.control_plane.database_url_env,
+        )
+    )
+    change_control = ChangeControlService(cfg.control_plane, database=control_db)
     chat_store = DashboardChatStore(
-        cfg.control_plane.database,
+        control_db,
         retention_days=cfg.server.dashboard_chat_retention_days,
     )
     app.state.dashboard_auth = auth

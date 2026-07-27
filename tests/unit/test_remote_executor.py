@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -22,7 +23,7 @@ from langgraph.types import Command
 from tests.unit.test_executor_service import DictSource, SpyExecutor, make_cfg
 
 from opendevops.executor_service import create_app
-from opendevops.tools.executor import ExecResult, LocalExecutor, RemoteExecutor
+from opendevops.tools.executor import ExecResult, LocalExecutor, RemoteExecutor, SshCredential
 from opendevops.tools.run_command import (
     EXEC_META_KEY,
     ExecDecision,
@@ -63,8 +64,20 @@ def _content(out: Any) -> str:
     return str(out)
 
 
+def _remote_urls(base: str = "http://svc") -> dict[str, dict[str, str]]:
+    return {
+        "staging": {"ro": base, "rw": base},
+        "prod": {"ro": base, "rw": base},
+    }
+
+
 def _remote_cfg(tmp: str):
-    return make_cfg(tmp, mode="remote", url="http://svc", signing_key_env="AGENT_SIGN_KEY")
+    return make_cfg(
+        tmp,
+        mode="remote",
+        urls=_remote_urls(),
+        signing_key_env="AGENT_SIGN_KEY",
+    )
 
 
 def _remote_executor(agent_cfg, app, priv, *, client: httpx.AsyncClient) -> RemoteExecutor:
@@ -81,6 +94,8 @@ def _service(tmp: str, pub, *, executor: Any, secrets: dict[str, str] | None = N
     return create_app(
         make_cfg(tmp),
         public_key=pub,
+        identity_environment="staging",
+        identity_channel="ro",
         secret_source=DictSource(secrets or {}),
         executor=executor,
         now=lambda: 1000.0,
@@ -94,7 +109,8 @@ async def test_remote_roundtrip_matches_local_exec_meta(tmp_path: Any) -> None:
     priv, pub = generate_keypair()
     app = _service(str(tmp_path / "svc"), pub, executor=LocalExecutor())
     agent_cfg = _remote_cfg(str(tmp_path / "agent"))
-    dec = ExecDecision(tool_call_id="call-1", channel="ro", tool_family=None, argv=("true",))
+    dec = ExecDecision(tool_call_id="call-1", channel="ro", tool_family=None, argv=("true",),
+        environment="staging")
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://svc"
@@ -127,7 +143,11 @@ async def test_remote_roundtrip_staged_files_recorded(tmp_path: Any) -> None:
     argv = ["kubectl", "apply", "-f", "/manifests/deploy.yaml"]
     files = {"/manifests/deploy.yaml": create_file_data("apiVersion: v1\nkind: ConfigMap\n")}
     dec = ExecDecision(
-        tool_call_id="call-1", channel="ro", tool_family="kubectl", argv=tuple(argv)
+        tool_call_id="call-1",
+        channel="ro",
+        tool_family="kubectl",
+        argv=tuple(argv),
+        environment="staging",
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://svc"
@@ -154,7 +174,8 @@ async def test_remote_secret_never_appears_in_toolmessage(tmp_path: Any) -> None
     app = _service(str(tmp_path / "svc"), pub, executor=leak, secrets={"TOK": secret})
     agent_cfg = _remote_cfg(str(tmp_path / "agent"))
     argv = ["myapp", "--auth", "{{secret:TOK}}"]
-    dec = ExecDecision(tool_call_id="call-1", channel="ro", tool_family=None, argv=tuple(argv))
+    dec = ExecDecision(tool_call_id="call-1", channel="ro", tool_family=None, argv=tuple(argv),
+        environment="staging")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://svc"
     ) as client:
@@ -184,7 +205,8 @@ async def test_remote_exec_meta_scrub_count_is_service_count(tmp_path: Any) -> N
     app = _service(str(tmp_path / "svc"), pub, executor=leak, secrets={"TOK": secret})
     agent_cfg = _remote_cfg(str(tmp_path / "agent"))
     argv = ["tool", "{{secret:TOK}}"]
-    dec = ExecDecision(tool_call_id="call-1", channel="ro", tool_family=None, argv=tuple(argv))
+    dec = ExecDecision(tool_call_id="call-1", channel="ro", tool_family=None, argv=tuple(argv),
+        environment="staging")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://svc"
     ) as client:
@@ -214,7 +236,8 @@ async def test_remote_path_does_not_call_build_env_on_agent(
         raise AssertionError("build_env must not run on the agent in remote mode")
 
     monkeypatch.setattr("opendevops.tools.run_command.build_env", _boom)
-    dec = ExecDecision(tool_call_id="call-1", channel="ro", tool_family=None, argv=("true",))
+    dec = ExecDecision(tool_call_id="call-1", channel="ro", tool_family=None, argv=("true",),
+        environment="staging")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://svc"
     ) as client:
@@ -235,7 +258,11 @@ async def test_remote_decision_gate_runs_before_signing(tmp_path: Any) -> None:
     agent_cfg = _remote_cfg(str(tmp_path / "agent"))
     # decision authorizes a DIFFERENT argv than what is run
     dec = ExecDecision(
-        tool_call_id="call-1", channel="ro", tool_family=None, argv=("kubectl", "get", "pods")
+        tool_call_id="call-1",
+        channel="ro",
+        tool_family=None,
+        argv=("kubectl", "get", "pods"),
+        environment="staging",
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://svc"
@@ -265,7 +292,8 @@ async def test_remote_transport_failure_fails_closed(tmp_path: Any) -> None:
         run_id_provider=lambda: "run-1",
         now=lambda: 1000.0,
     )
-    dec = ExecDecision(tool_call_id="call-1", channel="ro", tool_family=None, argv=("true",))
+    dec = ExecDecision(tool_call_id="call-1", channel="ro", tool_family=None, argv=("true",),
+        environment="staging")
     with decision(dec):
         out = await run_command_core(
             ["true"], 60, agent_cfg, tool_call_id="call-1", executor=remote, files={}
@@ -279,3 +307,87 @@ def test_service_result_maps_to_exec_result() -> None:
     """A well-formed service response maps cleanly to the shared ExecResult shape."""
     r = ExecResult(exit_code=0, output="ok", duration_ms=3, timed_out=False)
     assert (r.exit_code, r.output, r.timed_out) == (0, "ok", False)
+
+
+async def test_remote_ssh_does_not_resolve_credential_on_agent(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Remote ssh_run posts to the service; agent never resolves the SSH credential."""
+    from opendevops.executor_service import service as svc_mod
+    from opendevops.tools import ssh_run as ssh_mod
+    from opendevops.tools.ssh_run import ssh_run_core
+
+    priv, pub = generate_keypair()
+
+    @dataclass
+    class SpySsh:
+        called: bool = False
+
+        async def execute(self, host: str, argv: list[str], timeout_s: int,
+            cred: Any) -> ExecResult:
+            self.called = True
+            return ExecResult(exit_code=0, output="uptime ok", duration_ms=1, timed_out=False)
+
+    spy_ssh = SpySsh()
+    # Service holds the SSH credential; agent must not.
+    monkeypatch.setattr(
+        svc_mod,
+        "resolve_ssh_credential",
+        lambda _cfg: SshCredential(
+            user="ops", key_path="/tmp/id", known_hosts_path="/tmp/kh", port=22
+        ),
+    )
+    app = create_app(
+        make_cfg(str(tmp_path / "svc")),
+        public_key=pub,
+        identity_environment="staging",
+        identity_channel="ro",
+        ssh_executor=spy_ssh,
+        now=lambda: 1000.0,
+    )
+    agent_cfg = make_cfg(
+        str(tmp_path / "agent"),
+        mode="remote",
+        urls=_remote_urls(),
+        signing_key_env="AGENT_SIGN_KEY",
+    )
+    agent_cfg = agent_cfg.model_copy(
+        update={
+            "targets": agent_cfg.targets.model_copy(
+                update={
+                    "ssh": agent_cfg.targets.ssh.model_copy(
+                        update={"hosts": ["bastion.example"], "user": "ops", "key_env": None}
+                    )
+                }
+            )
+        }
+    )
+
+    def _boom(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("resolve_ssh_credential must not run on the agent remote path")
+
+    monkeypatch.setattr(ssh_mod, "resolve_ssh_credential", _boom)
+
+    dec = ExecDecision(
+        tool_call_id="call-1",
+        channel="ro",
+        tool_family="ssh",
+        argv=("uptime",),
+        environment="staging",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://svc"
+    ) as client:
+        remote = _remote_executor(agent_cfg, app, priv, client=client)
+        with decision(dec):
+            out = await ssh_run_core(
+                "bastion.example",
+                ["uptime"],
+                60,
+                agent_cfg,
+                tool_call_id="call-1",
+                executor=remote,
+            )
+    assert spy_ssh.called
+    meta = _exec_meta(out)
+    assert meta is not None and meta["exit_code"] == 0

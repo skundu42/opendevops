@@ -33,13 +33,22 @@ server     = [
 ]
 slack      = ["slack-bolt==1.30.0", "aiohttp", "apscheduler>=3.10,<4"]
 ssh        = ["asyncssh==2.24.0"]
+postgres   = ["psycopg[binary]>=3.2,<4"]
+models-openai = ["langchain-openai>=1.0,<2"]
+models-google = ["langchain-google-genai>=4.2.5,<5"]
+models-bedrock = ["langchain-aws>=1.0,<2"]
+models = [
+  "langchain-openai>=1.0,<2",
+  "langchain-google-genai>=4.2.5,<5",
+  "langchain-aws>=1.0,<2",
+]
 # The executor service needs cryptography (ed25519), httpx, and fastapi — all already resolved +
 # pinned in uv.lock (cryptography/httpx transitively; fastapi via the `server` extra), so a
 # dedicated `executor` extra is intentionally omitted (it would only add lockfile metadata). The
 # executor service image installs the package plus the already-pinned fastapi (ops/executor/README.md).
 dev        = ["pytest", "pytest-asyncio", "ruff", "mypy",
               "agentevals==0.0.9", "langgraph-cli[inmem]==0.4.31",
-              "fakeredis>=2.31,<3"]
+              "fakeredis>=2.31,<3", "psycopg[binary]>=3.2,<4", "langchain-openai>=1.0,<2"]
 
 [project.urls]
 Homepage = "https://github.com/skundu42/opendevops"
