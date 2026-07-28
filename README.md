@@ -54,6 +54,7 @@ spent $0.0841 (run) / $0.34 (today)
 | AWS | curated EC2, ECS, RDS, CloudFormation, S3, Lambda, CloudWatch and related reads | no cloud-resource deployment or IAM access |
 | Google Cloud | curated Compute, GKE, Cloud SQL, Pub/Sub, Logging, Storage, Run and Functions reads | mutations and secret access denied |
 | Azure | curated VM, AKS, ACR, networking, SQL, Cosmos DB, Monitor and resource reads | mutations and secret material denied |
+| Models | Anthropic (default), OpenAI, Azure OpenAI, Google, Amazon Bedrock, OpenAI-compatible endpoints | non-Anthropic providers need an optional extra; every alias needs a pricing row |
 | Remote hosts | structured, read-only SSH checks | pinned user, key, hosts and `known_hosts` |
 | Interfaces | CLI, HTTP, Slack, scheduler, Alertmanager and GitHub webhooks | one shared gateway and safety core |
 | Operations UI | identity-scoped agent chat, live runs, approvals, policy/cost/audit detail and capability grants | OIDC RBAC + CSRF; chat never exposes raw tool arguments, output, or credential values |
@@ -62,6 +63,80 @@ spent $0.0841 (run) / $0.34 (today)
 > This is not a general AWS, Google Cloud, or Azure deployment engine. Terraform, Pulumi,
 > CloudFormation updates, Google Cloud Deploy, ARM/Bicep deployment, and unrestricted provider CLI
 > mutations are not enabled.
+
+## Quick start
+
+### Prerequisites
+
+- Python 3.11 or 3.12
+- [`uv`](https://docs.astral.sh/uv/)
+- `kubectl` and access to a cluster where you can create the agent ServiceAccount
+- an API key for your configured model provider (Anthropic by default)
+- optional provider CLIs only for integrations you enable
+
+### Install and configure
+
+```sh
+# Install the published package; no repository clone or frontend build is needed.
+uv tool install "opendevops[checkpoint,ssh]==0.1.2"
+
+mkdir opendevops-workspace
+opendevops init opendevops-workspace
+cd opendevops-workspace
+cp .env.example .env
+# Set ANTHROPIC_API_KEY in .env (default models.yaml aliases).
+
+# Provision a read-only, secrets-denied Kubernetes identity.
+kubectl apply -f ops/k8s/agent-view-rbac.yaml
+ops/k8s/gen-kubeconfig.sh <your-context>
+
+# Add <your-context> to targets.kubernetes.allowed_contexts in config/config.yaml.
+opendevops config check
+opendevops chat
+```
+
+The generated workspace deliberately has an empty Kubernetes context allowlist. `config check`
+and every runtime entry point refuse to proceed until you make that deployment choice explicitly.
+`opendevops init` also refuses to replace an existing workspace unless `--force` is explicit.
+
+Default aliases use Anthropic. To point at OpenAI, Azure OpenAI, Google, Bedrock, or an
+OpenAI-compatible endpoint, edit `config/models.yaml` (`aliases`, optional `providers`, and
+`pricing`), install the matching extra (`models-openai`, `models-google`, `models-bedrock`, or
+`models` for all three), and set the credential env named by that provider.
+
+Continue with the [step-by-step getting-started guide](guides/getting-started.md).
+
+## CLI
+
+| Command | Purpose |
+|---|---|
+| `opendevops init [directory]` | scaffold config and Kubernetes bootstrap files from the wheel |
+| `opendevops chat` | streaming REPL with environment, profile and principal selection |
+| `opendevops config check` | validate runtime-critical configuration |
+| `opendevops config grants` | list the control-plane revision and capability proposals |
+| `opendevops config propose-grant` | propose a typed, expiring dangerous capability |
+| `opendevops config approve-grant` | approve a proposal (requester separation in prod) |
+| `opendevops config activate-grant` / `revoke-grant` | activate or immediately revoke a grant |
+| `opendevops audit verify --dir <dir>` | strictly verify audit structure and completion |
+| `opendevops audit verify --allow-incomplete` | diagnose structurally valid crashed/in-progress runs |
+| `opendevops version` | print the installed version |
+
+## Documentation
+
+| Guide | Contents |
+|---|---|
+| [Getting started](guides/getting-started.md) | first installation and live session |
+| [Architecture](guides/architecture.md) | graph, middleware, gateways, execution and data flow |
+| [Configuration](guides/configuration.md) | every supported setting |
+| [Policy](guides/policy.md) | rule schema, packs, precedence and extension |
+| [Security model](guides/security-model.md) | trust boundaries, failure modes and residual risk |
+| [Budgets](guides/budgets.md) | call limits, timeouts, pricing and USD stop-losses |
+| [Audit](guides/audit.md) | event schema, verification, shipping and authenticity |
+| [Interfaces](guides/interfaces.md) | CLI, dashboard, HTTP, webhooks, Slack and scheduler |
+| [Deployment](guides/deployment.md) | service stack, monitoring and production gates |
+| [Development](guides/development.md) | tests, conventions and extension points |
+| [Upgrade notes](docs/UPGRADE.md) | dependency and migration guidance |
+| [Release process](RELEASING.md) | versioning, artifacts, signing and PyPI trusted publishing |
 
 ## Operations dashboard
 
@@ -183,43 +258,6 @@ flowchart LR
 
 Read the full [security model](guides/security-model.md) before connecting real infrastructure.
 
-## Quick start
-
-### Prerequisites
-
-- Python 3.11 or 3.12
-- [`uv`](https://docs.astral.sh/uv/)
-- `kubectl` and access to a cluster where you can create the agent ServiceAccount
-- an Anthropic API key
-- optional provider CLIs only for integrations you enable
-
-### Install and configure
-
-```sh
-# Install the published package; no repository clone or frontend build is needed.
-uv tool install "opendevops[checkpoint,ssh]==0.1.2"
-
-mkdir opendevops-workspace
-opendevops init opendevops-workspace
-cd opendevops-workspace
-cp .env.example .env
-# Set ANTHROPIC_API_KEY in .env.
-
-# Provision a read-only, secrets-denied Kubernetes identity.
-kubectl apply -f ops/k8s/agent-view-rbac.yaml
-ops/k8s/gen-kubeconfig.sh <your-context>
-
-# Add <your-context> to targets.kubernetes.allowed_contexts in config/config.yaml.
-opendevops config check
-opendevops chat
-```
-
-The generated workspace deliberately has an empty Kubernetes context allowlist. `config check`
-and every runtime entry point refuse to proceed until you make that deployment choice explicitly.
-`opendevops init` also refuses to replace an existing workspace unless `--force` is explicit.
-
-Continue with the [step-by-step getting-started guide](guides/getting-started.md).
-
 ## Configuration
 
 Configuration is strict Pydantic over three files:
@@ -227,7 +265,7 @@ Configuration is strict Pydantic over three files:
 | File | Purpose |
 |---|---|
 | [`config/config.yaml`](config/config.yaml) | targets, credential variable names, execution, interfaces and service settings |
-| [`config/models.yaml`](config/models.yaml) | agent model aliases and cache-aware pricing |
+| [`config/models.yaml`](config/models.yaml) | agent model aliases, optional providers, and cache-aware pricing |
 | [`config/budgets.yaml`](config/budgets.yaml) | per-run profiles, daily stop-losses and counter backend |
 | [`config/policy/`](config/policy) | base denies, environment overlays and capability packs |
 
@@ -261,38 +299,6 @@ docker compose up -d
 See [deployment](guides/deployment.md) for TLS, shared counters, audit shipping, alerts, backups,
 quota planning, and go-live gates.
 
-## CLI
-
-| Command | Purpose |
-|---|---|
-| `opendevops init [directory]` | scaffold config and Kubernetes bootstrap files from the wheel |
-| `opendevops chat` | streaming REPL with environment, profile and principal selection |
-| `opendevops config check` | validate runtime-critical configuration |
-| `opendevops config grants` | list the control-plane revision and capability proposals |
-| `opendevops config propose-grant` | propose a typed, expiring dangerous capability |
-| `opendevops config approve-grant` | approve a proposal (requester separation in prod) |
-| `opendevops config activate-grant` / `revoke-grant` | activate or immediately revoke a grant |
-| `opendevops audit verify --dir <dir>` | strictly verify audit structure and completion |
-| `opendevops audit verify --allow-incomplete` | diagnose structurally valid crashed/in-progress runs |
-| `opendevops version` | print the installed version |
-
-## Documentation
-
-| Guide | Contents |
-|---|---|
-| [Getting started](guides/getting-started.md) | first installation and live session |
-| [Architecture](guides/architecture.md) | graph, middleware, gateways, execution and data flow |
-| [Configuration](guides/configuration.md) | every supported setting |
-| [Policy](guides/policy.md) | rule schema, packs, precedence and extension |
-| [Security model](guides/security-model.md) | trust boundaries, failure modes and residual risk |
-| [Budgets](guides/budgets.md) | call limits, timeouts, pricing and USD stop-losses |
-| [Audit](guides/audit.md) | event schema, verification, shipping and authenticity |
-| [Interfaces](guides/interfaces.md) | CLI, dashboard, HTTP, webhooks, Slack and scheduler |
-| [Deployment](guides/deployment.md) | service stack, monitoring and production gates |
-| [Development](guides/development.md) | tests, conventions and extension points |
-| [Upgrade notes](docs/UPGRADE.md) | dependency and migration guidance |
-| [Release process](RELEASING.md) | versioning, artifacts, signing and PyPI trusted publishing |
-
 ## Development
 
 ```sh
@@ -300,7 +306,7 @@ npm ci
 npm run frontend:check
 npm run frontend:build
 
-uv sync --extra checkpoint --extra server --extra slack --extra ssh --extra dev
+uv sync --extra checkpoint --extra server --extra slack --extra ssh --extra models --extra dev
 
 uv run pytest -q
 uv run ruff check .
