@@ -197,7 +197,7 @@ Read the full [security model](guides/security-model.md) before connecting real 
 
 ```sh
 # Install the published package; no repository clone or frontend build is needed.
-uv tool install "opendevops[checkpoint,ssh]==0.1.1"
+uv tool install "opendevops[checkpoint,ssh]==0.1.2"
 
 mkdir opendevops-workspace
 opendevops init opendevops-workspace
@@ -243,9 +243,9 @@ Grafana, and the authenticated dashboard:
 
 ```sh
 curl -fLO \
-  https://github.com/skundu42/opendevops/releases/download/v0.1.1/opendevops-deploy-0.1.1.tar.gz
-tar -xzf opendevops-deploy-0.1.1.tar.gz
-cd opendevops-0.1.1
+  https://github.com/skundu42/opendevops/releases/download/v0.1.2/opendevops-deploy-0.1.2.tar.gz
+tar -xzf opendevops-deploy-0.1.2.tar.gz
+cd opendevops-0.1.2
 cp .env.example .env
 # Fill every required blank in .env.
 

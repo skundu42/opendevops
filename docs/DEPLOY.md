@@ -18,13 +18,13 @@ application, dependencies, and compiled TypeScript dashboard.
 
 ```sh
 curl -fLO \
-  https://github.com/skundu42/opendevops/releases/download/v0.1.1/opendevops-deploy-0.1.1.tar.gz
-tar -xzf opendevops-deploy-0.1.1.tar.gz
-cd opendevops-0.1.1
+  https://github.com/skundu42/opendevops/releases/download/v0.1.2/opendevops-deploy-0.1.2.tar.gz
+tar -xzf opendevops-deploy-0.1.2.tar.gz
+cd opendevops-0.1.2
 cp .env.example .env
 ```
 
-The bundle pins `ghcr.io/skundu42/opendevops:0.1.1` and preconfigures its shared Redis daily
+The bundle pins `ghcr.io/skundu42/opendevops:0.1.2` and preconfigures its shared Redis daily
 counter. Check the release `SHA256SUMS` before starting it. Building from source remains available
 to contributors through the checked-in `Dockerfile`, but is not required for deployment.
 The application image deliberately omits infrastructure vendor CLIs. Add only the clients for
