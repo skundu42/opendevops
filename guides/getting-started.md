@@ -16,8 +16,8 @@ app.
 ## 1. Install
 
 ```sh
-uv tool install \
-  'opendevops[checkpoint,ssh] @ https://github.com/skundu42/opendevops/releases/download/v0.1.0/opendevops-0.1.0-py3-none-any.whl'
+# Install the published package; no repository clone or frontend build is needed.
+uv tool install "opendevops[checkpoint,ssh]==0.1.2"
 mkdir opendevops-workspace
 opendevops init opendevops-workspace
 cd opendevops-workspace

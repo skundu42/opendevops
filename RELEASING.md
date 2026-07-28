@@ -82,15 +82,15 @@ available before pushing the tag.
 
 ## Supported installation paths
 
-Until PyPI trusted publishing is enabled, install the wheel directly from a GitHub Release:
+Preferred install from the published package:
+
+```sh
+uv tool install "opendevops[checkpoint,ssh]==0.1.2"
+```
+
+GitHub Release wheel (when installing a specific artifact directly):
 
 ```sh
 uv tool install \
-  'opendevops[checkpoint,ssh] @ https://github.com/skundu42/opendevops/releases/download/v0.1.0/opendevops-0.1.0-py3-none-any.whl'
-```
-
-After PyPI is enabled, the shorter equivalent is:
-
-```sh
-uv tool install "opendevops[checkpoint,ssh]==0.2.0"
+  'opendevops[checkpoint,ssh] @ https://github.com/skundu42/opendevops/releases/download/v0.1.2/opendevops-0.1.2-py3-none-any.whl'
 ```
