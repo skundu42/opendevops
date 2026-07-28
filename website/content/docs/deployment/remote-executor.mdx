@@ -1,0 +1,67 @@
+---
+title: Remote executor
+description: Isolate credentials and command execution by environment and read/write channel.
+---
+
+Remote mode moves infrastructure credentials and subprocess execution out of the agent process.
+It is required for production-capable write operation.
+
+## Topology
+
+Deploy one worker for each enabled pair:
+
+| Environment | Read channel | Write channel |
+| --- | --- | --- |
+| staging | diagnostics credential | scoped staging mutation credential |
+| production | observation-only credential | scoped production mutation credential |
+
+Each deployment asserts its environment and channel at boot. It holds one credential family, the
+agent signing public key, and optionally declared runtime secrets.
+
+## Request protocol
+
+The agent:
+
+1. completes budget and policy evaluation;
+2. consumes dangerous grant capacity when required;
+3. builds a canonical execution request;
+4. signs claims binding the request to environment, channel, target, run, and tool call;
+5. sends the request to the configured worker URL.
+
+The worker:
+
+1. verifies signature, age, and required claims;
+2. compares environment and channel to its fixed deployment identity;
+3. constructs a clean process environment;
+4. executes argv without a shell and within timeout/output limits;
+5. scrubs and returns the bounded result.
+
+## Kubernetes hardening
+
+The shipped manifests use:
+
+- a dedicated namespace with Pod Security `restricted`;
+- non-root execution and a read-only root filesystem;
+- dropped Linux capabilities;
+- tmpfs working storage;
+- gVisor runtime where available;
+- default-deny ingress and egress NetworkPolicies;
+- IMDS blocking;
+- ingress limited to the agent;
+- destination allowlists for infrastructure APIs.
+
+Read and write workers must not share a ServiceAccount, secret, or writable volume.
+
+## Configuration
+
+Set `executor.mode=remote` and configure URLs for every environment/channel pair the active policy
+can select. Boot validation refuses incomplete coverage.
+
+Keep the private signing key in the agent service and the public verification key in workers. Source
+infrastructure credentials from a Secret or CSI provider at runtime; never bake them into images.
+
+## Verification
+
+Test mismatched environment, mismatched channel, expired signatures, modified argv, replay, unknown
+targets, output truncation, tool timeout, network denial, and unavailable workers. All must fail
+closed with correlated audit events.

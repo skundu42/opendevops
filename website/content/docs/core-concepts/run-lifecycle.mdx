@@ -1,0 +1,72 @@
+---
+title: Run lifecycle
+description: Understand how a request becomes a completed, denied, cancelled, or interrupted run.
+---
+
+A run is the unit of execution, budgeting, correlation, and audit. A thread may contain many runs;
+an individual run has one terminal outcome.
+
+## Lifecycle
+
+<Steps>
+
+### Admission
+
+The gateway assigns `run_id`, `thread_id`, principal, interface, environment, and budget profile.
+It rejects concurrent turns on one chat thread and attributes every downstream event to the exact
+identity.
+
+### Reasoning
+
+The model consumes the bounded thread state and produces assistant tokens or a structured tool
+call. Model tokens, latency, price, and cumulative cost are recorded after each call.
+
+### Tool admission
+
+Budget middleware checks remaining call and time capacity. Policy normalizes and evaluates the
+request. A deny returns a tool-visible refusal so the model can adapt without executing anything.
+
+### Escalation
+
+An `escalate` decision checkpoints the graph and moves the run to `interrupted`. A human may
+approve, edit, or reject. Production enforces requester/approver separation before suspended
+context is removed.
+
+### Execution
+
+An allowed request selects one credential family, enters the local or remote executor, captures
+bounded output, scrubs secret-like data, and returns the sanitized result to the graph.
+
+### Completion
+
+The gateway commits the final response and terminal audit event. Cancelled, failed, budget-exhausted,
+and rejected runs also receive explicit terminal records.
+
+</Steps>
+
+## Terminal states
+
+| State | Meaning | Resumable |
+| --- | --- | --- |
+| `completed` | graph returned a final answer | no |
+| `interrupted` | a policy escalation awaits resolution | yes |
+| `cancelled` | operator or client requested cancellation | no |
+| `failed` | infrastructure or graph error terminated the run | no |
+| `budget_exhausted` | a hard call, tool, recursion, time, or spend limit stopped work | no |
+| `rejected` | a human or timeout sweeper denied an escalation | graph resumes long enough to record the refusal and adapt |
+
+## Idempotency and concurrency
+
+Webhook fingerprints map duplicate alerts into the same incident thread. Scheduler jobs set
+`max_instances=1`, coalesce missed invocations, and add jitter. Capability grants atomically consume
+execution capacity before a dangerous action so concurrent workers cannot overspend the grant.
+
+## Cancellation
+
+Cancellation is cooperative across the gateway, graph, and executor. The operations UI and CLI can
+request it. An executor timeout remains the final backstop when a child process or remote request
+does not respond.
+
+An interrupted run should not be cancelled as a substitute for a decision. The escalation sweeper
+resumes stale interruptions with an explicit reject decision so the audit trail records how the
+request was resolved.

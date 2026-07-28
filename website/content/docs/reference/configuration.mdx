@@ -1,0 +1,74 @@
+---
+title: Configuration
+description: Organize models, targets, policies, budgets, interfaces, execution, and control-plane state.
+---
+
+An initialized workspace separates runtime configuration by responsibility:
+
+```text
+config/
+├── config.yaml      # targets, interfaces, gateway, executor, state
+├── models.yaml      # providers, aliases, agents, pricing
+├── budgets.yaml     # profiles and daily accounting
+└── policy/          # ordered base packs and environment overlays
+```
+
+## Name values, do not store them
+
+Fields ending in `_env` contain environment-variable names:
+
+```yaml
+targets:
+  github:
+    token_env: OPENDEVOPS_GITHUB_TOKEN
+```
+
+The credential value belongs in process secret management. Do not place API keys, kubeconfig
+contents, tokens, private keys, or passwords in YAML.
+
+## Models
+
+Every agent role references an alias. Every alias resolves to a provider model and every resolved
+model has pricing:
+
+```yaml
+aliases:
+  fast: anthropic:claude-haiku
+  deep: anthropic:claude-sonnet
+
+agents:
+  supervisor: deep
+  investigator: fast
+
+pricing:
+  anthropic:claude-haiku:
+    input_per_million: 0.80
+    output_per_million: 4.00
+```
+
+Provider-specific extras and credential env names must be installed and configured before boot.
+
+## Targets
+
+Target configuration provides credential names and an explicit allowlist. Policy may narrow this
+scope further, never widen it.
+
+Use separate read and write credentials per environment. The legacy staging write kubeconfig is a
+compatibility fallback, not a production design.
+
+## Interfaces
+
+Configure identity, authentication, and fixed budget/environment selection for HTTP, webhooks,
+Slack, scheduler, and dashboard entry points. Missing route credentials make the corresponding
+route unavailable.
+
+## Validate
+
+Run after every change:
+
+```bash
+opendevops config check
+```
+
+Validation should also run in CI for deployment configuration. Treat a boot refusal as a broken
+deployment artifact, not as a reason to disable the check.

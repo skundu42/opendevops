@@ -1,0 +1,72 @@
+---
+title: Capability grants
+description: Propose, approve, activate, consume, expire, and revoke dangerous operational authority.
+---
+
+Dangerous capabilities are versioned state, not free-form prompts or dashboard YAML. A grant makes
+one pre-existing policy path usable for a bounded target and time; it cannot create a path that
+policy denies.
+
+## Lifecycle
+
+```text
+proposed → approved → active → exhausted | expired | revoked
+```
+
+Each transition records actor identity, timestamp, reason, and control-plane revision.
+
+## Grant fields
+
+A proposal includes:
+
+- environment and typed capability, such as `kubernetes_deploy`;
+- explicit target set;
+- operational reason;
+- activation and expiration;
+- total execution count;
+- per-run and repeated-action limits;
+- failure threshold and cooldown;
+- mandatory dry-run setting;
+- requester identity.
+
+Production approval must come from a different issuer-and-subject identity than the requester.
+Activation is an administrative action. Revocation takes effect immediately.
+
+## CLI workflow
+
+```bash
+opendevops config propose-grant \
+  --environment prod \
+  --capability kubernetes_deploy \
+  --target kind-prod/web \
+  --reason "Deploy reviewed release 2026.07.26"
+
+opendevops config approve-grant <proposal-id> \
+  --actor change-approver
+
+opendevops config activate-grant <proposal-id> \
+  --actor platform-admin
+
+opendevops config grants
+```
+
+## Atomic consumption
+
+The executor-facing control plane consumes grant capacity before each write. Consumption is atomic,
+so parallel workers cannot both use the same final execution slot. Failure counters and cooldowns
+limit retry loops even when the model continues proposing the same operation.
+
+## What a grant cannot do
+
+A grant cannot:
+
+- override a policy deny or built-in safety hook;
+- introduce a new executable or command form;
+- widen a target beyond its explicit set;
+- select a different credential family;
+- disable production requester/approver separation;
+- skip a required dry run;
+- survive expiration or revocation.
+
+Use the operations UI for a visual propose → approve → activate workflow, or the CLI for controlled
+automation. Both call the same control-plane service.

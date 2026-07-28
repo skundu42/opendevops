@@ -1,0 +1,41 @@
+---
+title: CLI reference
+description: Commands for workspace setup, configuration, chat, grants, audit verification, and version inspection.
+---
+
+| Command | Purpose |
+| --- | --- |
+| `opendevops init [directory]` | scaffold configuration and Kubernetes bootstrap files |
+| `opendevops chat` | run the streaming local REPL |
+| `opendevops config check` | validate runtime-critical configuration |
+| `opendevops config grants` | list control-plane revision and capability proposals |
+| `opendevops config propose-grant` | propose a typed, expiring dangerous capability |
+| `opendevops config approve-grant` | approve a proposal |
+| `opendevops config activate-grant` | activate an approved proposal |
+| `opendevops config revoke-grant` | immediately revoke a grant |
+| `opendevops audit verify --dir <dir>` | strictly verify audit chain structure and completion |
+| `opendevops audit verify --allow-incomplete` | inspect structurally valid crashed or active runs |
+| `opendevops version` | print the installed version |
+
+## Chat options
+
+```bash
+opendevops chat \
+  --environment staging \
+  --profile interactive \
+  --principal operator@example.com
+```
+
+`--environment` selects the policy overlay. `--profile` selects stop-losses. `--principal`
+attributes daily spend and audit events.
+
+Inside the REPL:
+
+- `/cost` shows current session and day totals;
+- `/quit`, `/exit`, or `/q` exits;
+- `Ctrl-C` cancels the active run.
+
+## Scripting guidance
+
+Prefer HTTP or registered scheduler jobs for automation. The interactive CLI is designed for a
+human-in-the-loop terminal and may add presentation or approval behavior unsuitable for parsing.

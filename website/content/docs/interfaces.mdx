@@ -1,0 +1,74 @@
+---
+title: Interfaces
+description: Use the CLI, operations UI, HTTP gateway, webhooks, Slack chat-ops, and scheduler safely.
+---
+
+Every interface enters `AgentGateway`. Identity, environment, budget profile, policy behavior,
+credential selection, approval separation, and audit semantics remain consistent.
+
+## CLI
+
+`opendevops chat` provides a streaming REPL for local operation. It displays sanitized tool
+lifecycle, policy denials, approval prompts, and spend. `Ctrl-C` cancels the active turn without
+ending the session.
+
+Use the CLI for evaluation, break-glass diagnosis from a controlled workstation, and policy
+development against sandbox targets.
+
+## Operations UI
+
+The authenticated UI combines identity-scoped agent chat with live control. Roles are deliberately
+non-hierarchical:
+
+| Role | Core authority |
+| --- | --- |
+| `viewer` | inspect bounded operational status |
+| `operator` | chat, cancel, and propose grants |
+| `approver` | resolve escalations and approve proposals |
+| `admin` | activation, revocation, session control, and break-glass authority |
+
+Operators cannot approve. Approvers cannot initiate agent turns. Production also checks the exact
+requester and approver identities even when group assignments overlap.
+
+## HTTP and webhooks
+
+The service exposes health, authenticated gateway, dashboard, Alertmanager, GitHub, and run-complete
+routes. Route-specific HMAC or bearer credentials protect external webhook paths because senders
+cannot use the internal gateway token.
+
+If a configured webhook secret environment variable is missing, the route returns `503`. It never
+silently disables authentication.
+
+Alert fingerprints map duplicate alerts into one incident thread. GitHub webhook signatures use
+`X-Hub-Signature-256`.
+
+## Slack chat-ops
+
+Slack Socket Mode avoids a public inbound route. Channel/thread identifiers deterministically map
+to an agent thread; configured Slack principals map to an internal principal and budget profile.
+Unmapped users are not served.
+
+Escalations use approve, edit, and reject actions, then resume through the same gateway path as the
+CLI and dashboard. Production requester separation is enforced inside the gateway, not only in the
+Slack UI.
+
+## Scheduler
+
+Jobs live in `scheduler/jobs.yaml` and are either agent prompts or registered non-agent maintenance
+runners:
+
+```yaml
+jobs:
+  - id: drift-detection
+    trigger: { cron: "0 * * * *" }
+    command: >-
+      Detect configuration drift. Do not remediate.
+    timeout_s: 600
+    environment: staging
+```
+
+Every job has fixed coalescing, single-instance execution, misfire grace, and jitter. The schema
+rejects unknown keys at boot. Scheduled agent work uses a dedicated principal and budget profile.
+
+The escalation sweeper resumes stale interruptions with a reject decision so unattended runs never
+remain parked without a recorded resolution.

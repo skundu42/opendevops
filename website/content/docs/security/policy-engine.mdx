@@ -1,0 +1,122 @@
+---
+title: Policy engine
+description: Write, order, test, and operate fail-closed rules for structured infrastructure actions.
+---
+
+The policy engine evaluates every tool call before credential selection or execution. Its default
+answer is deny.
+
+## Decision pipeline
+
+```text
+tool request
+  → schema validation
+  → argv normalization
+  → environment overlay
+  → ordered rule matching
+  → built-in safety hooks
+  → allow | rewrite | deny | escalate
+  → credential + channel selection
+```
+
+Any parsing, matching, hook, or configuration error produces a denial.
+
+## Rule shape
+
+Policies are YAML packs loaded in an explicit order. A representative rule:
+
+```yaml
+rules:
+  - id: k8s-read-pods
+    tool: run_command
+    effect: allow
+    executables: [kubectl]
+    subcommands:
+      - [get, pods]
+      - [describe, pod]
+      - [logs]
+    environments: [staging, prod]
+    required_flags:
+      - --context
+      - --namespace
+    targets:
+      contexts: [kind-staging, prod-observe]
+      namespaces: [web, payments]
+    credential: kubernetes
+    channel: ro
+```
+
+The exact repository schema should be treated as the source of truth when extending packs; run
+`opendevops config check` after every change.
+
+## Effects
+
+| Effect | Behavior |
+| --- | --- |
+| `allow` | continue to credential selection and execution |
+| `rewrite` | replace the request with a deterministic safer form, then re-evaluate hooks |
+| `deny` | return a structured refusal with the winning rule identifier |
+| `escalate` | checkpoint the run and request a human decision |
+
+Use `rewrite` for bounded transformations such as enforcing a log tail or adding a required output
+format. Do not use it to turn a broad unknown request into a guessed mutation.
+
+## Matching and precedence
+
+Rules are ordered and deterministic. Environment overlays narrow or replace base behavior for
+staging and production. Built-in hooks then enforce invariants that ordinary packs cannot override,
+including shell denial, secret restrictions, protected Kubernetes resources, cloud mutation
+boundaries, GitHub API path checks, and dangerous-command grant requirements.
+
+Unknown tools, missing contexts, unexpected positional arguments, ambiguous namespaces, and
+unrecognized flags fall through to deny.
+
+## Extending policy safely
+
+<Steps>
+
+### Start from the exact command shape
+
+Capture the structured argv you expect. Separate read and write forms; never allow a whole
+executable because one subcommand is safe.
+
+### Identify dangerous flags
+
+Review configuration-loading, plugin, file-output, endpoint, impersonation, selector, and
+recursive flags. Deny them or constrain their values.
+
+### Bind the target
+
+Require explicit context, namespace, repository, account, region, host, or resource identifiers.
+Avoid implicit defaults in production.
+
+### Select one channel and credential family
+
+Read rules use `ro`; write rules use `rw`. Boot validation should fail when the credential coverage
+does not exist.
+
+### Add corpus tests
+
+Include allowed examples plus near-miss cases: reordered flags, unknown flags, alternate resources,
+path traversal, shell tokens, response files, protected targets, and missing context.
+
+### Test the full middleware path
+
+Assert the final executor request, decision audit event, scrubbed output, and denial behavior, not
+only the matcher in isolation.
+
+</Steps>
+
+## Policy operations
+
+Treat policy as code:
+
+- require review from an infrastructure owner and security owner for new write rules;
+- version packs with releases;
+- run the policy corpus in CI;
+- expose rule identifiers in denial telemetry;
+- alert on denial spikes, which may indicate bad automation or bypass probing;
+- keep production overlays smaller than staging, never broader.
+
+Capability grants can narrow a dangerous rule at runtime, but never override a deny. Continue with
+[capability grants](/docs/security/capability-grants).

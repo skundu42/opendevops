@@ -1,0 +1,72 @@
+---
+title: Audit and verification
+description: Interpret, verify, ship, and protect the per-run hash chain and control-plane ledger.
+---
+
+Audit records answer who asked, which controls evaluated the request, what was executed, what it
+cost, how an escalation was resolved, and whether the run completed.
+
+## Per-run chain
+
+Each run writes an ordered JSONL file. Every event includes:
+
+- schema version, event type, timestamp, and sequence;
+- `run_id`, `thread_id`, tool/model correlation identifiers where applicable;
+- principal, interface, environment, and budget profile;
+- decision metadata and bounded, scrubbed excerpts;
+- the previous event hash and current event hash.
+
+The hash covers canonical event content and the previous hash. Reordering, editing, or dropping a
+line breaks verification.
+
+## Verify locally
+
+```bash
+opendevops audit verify --dir ./audit
+```
+
+Strict mode expects a valid terminal event:
+
+```bash
+opendevops audit verify --dir ./audit --allow-incomplete
+```
+
+Use `--allow-incomplete` only to diagnose crashed or in-progress files. It still validates chain
+structure.
+
+## Structural integrity versus authenticity
+
+A local chain proves internal structural consistency. An actor able to replace the whole directory
+could recompute it. Production authenticity requires shipping events to an independently protected
+destination:
+
+- S3 with Object Lock and a bucket policy that denies agent roles;
+- an INSERT-only database owned by a separate identity;
+- a WORM-capable log or SIEM destination.
+
+Protect the sink credentials from both the agent process and execution workers.
+
+## Data minimization
+
+Audit is intentionally useful without becoming a transcript store. It excludes raw prompts,
+assistant responses, complete stdout/stderr, browser session tokens, command secrets, and credential
+values. It can contain bounded scrubbed excerpts and structured command metadata, which should still
+be classified as operationally sensitive.
+
+## Control-plane ledger
+
+Dashboard login, thread lifecycle, approvals, cancellation, session revocation, detail access, and
+capability-grant transitions use a separate content-free hash-linked ledger. Exact OIDC issuer and
+subject identifiers provide attribution.
+
+## Shipping and alerting
+
+The service bundle includes Vector to merge per-run files into a durable spool. Configure the final
+sink before production, then alert on:
+
+- shipper lag;
+- chain verification failure;
+- an incomplete-run spike;
+- unexpected schema versions;
+- missing terminal events;
+- a sudden increase in policy denial or grant activity.

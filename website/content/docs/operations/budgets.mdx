@@ -1,0 +1,57 @@
+---
+title: Budgets and stop-losses
+description: Bound model calls, tools, recursion, elapsed time, run cost, and daily principal spend.
+---
+
+Budgets prevent one investigation, loop, principal, or automation source from consuming unbounded
+resources. They are safety controls as well as cost controls.
+
+## Control layers
+
+| Limit | Scope | Checked |
+| --- | --- | --- |
+| model calls | run | before each model invocation |
+| tool calls | run | before policy and execution |
+| recursion | graph run | before the next graph step |
+| wall time | run | throughout middleware and executor work |
+| tool timeout | invocation | inside local or remote executor |
+| USD spend | run | before calls, updated from actual usage after calls |
+| daily USD | principal | through SQLite locally or Redis in service mode |
+
+## Profiles
+
+Interfaces select named profiles such as `interactive`, `incident`, or `scheduled`. Keep profiles
+aligned to operational intent:
+
+- interactive runs can allow more conversational model turns but short tool timeouts;
+- incident runs may allow deeper diagnosis while keeping writes independently gated;
+- scheduled runs should be read-only, short, and aggressively capped;
+- webhook runs must use a fixed service principal and environment overlay.
+
+## Pricing
+
+Every configured model alias needs an input and output price row. Configuration validation refuses
+unknown pricing because an unpriced alias would bypass the USD stop-loss.
+
+Cost is known after a model provider returns usage. Run and daily dollar limits are therefore
+post-call stop-losses: a call that began below the limit can finish above it. Call, recursion, wall
+time, and concurrency controls bound that possible overshoot.
+
+## Daily accounting
+
+The local CLI uses SQLite. Service mode should use the shared Redis counter so every server worker,
+webhook, Slack event, and scheduled job observes the same per-principal total.
+
+If the Redis backend is selected without a valid URL, the service refuses to boot. It never falls
+back to a worker-local counter.
+
+## Choosing limits
+
+1. replay representative incidents and record call, tool, latency, and cost distributions;
+2. set the normal profile above the successful p95, not the largest observed runaway;
+3. cap scheduled and webhook principals separately;
+4. alert at 80% of the daily budget;
+5. preserve enough headroom for in-flight calls;
+6. test that budget exhaustion produces a terminal audit event and useful operator message.
+
+Use `/cost` in the CLI or the operations UI spend views to inspect current utilization.

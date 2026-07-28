@@ -1,0 +1,142 @@
+---
+title: Getting started
+description: Go from a released wheel to a live, read-only Kubernetes diagnosis with no service infrastructure.
+---
+
+The local CLI tier runs in one process with SQLite state. You do not need the service stack,
+database, Slack app, or dashboard for your first investigation.
+
+## Prerequisites
+
+- Python 3.11 or 3.12
+- [`uv`](https://docs.astral.sh/uv/)
+- `kubectl` on your `PATH`
+- access to a cluster where you can create the agent ServiceAccount
+- an API key for your chosen model provider
+- optionally, a local `kind` cluster as a disposable target
+
+## 1. Install and initialize
+
+```bash
+uv tool install "opendevops[checkpoint,ssh]==0.1.2"
+
+mkdir opendevops-workspace
+opendevops init opendevops-workspace
+cd opendevops-workspace
+cp .env.example .env
+```
+
+`checkpoint` enables local escalation and resume. `ssh` installs the structured read-only SSH tool;
+omit it if you do not plan to connect remote hosts.
+
+The generated workspace contains configuration, policy packs, Kubernetes bootstrap manifests, and
+empty target allowlists. `opendevops init` refuses to replace an existing workspace unless
+`--force` is explicit.
+
+## 2. Configure the model
+
+The default aliases use Anthropic. Set the matching key in `.env`:
+
+```dotenv
+ANTHROPIC_API_KEY=...
+```
+
+To use OpenAI, Azure OpenAI, Google, Bedrock, or an OpenAI-compatible endpoint:
+
+1. install the corresponding optional extra;
+2. add the provider and alias to `config/models.yaml`;
+3. add a pricing row for every model alias;
+4. name the credential environment variable in configuration.
+
+An unpriced model is an unmetered model, so configuration validation refuses it.
+
+## 3. Provision a read-only Kubernetes identity
+
+The agent must not use your personal kubeconfig. Create its ServiceAccount and build a kubeconfig
+containing only the contexts you want the agent to see:
+
+```bash
+kubectl apply -f ops/k8s/agent-view-rbac.yaml
+ops/k8s/gen-kubeconfig.sh kind-kind
+```
+
+Verify the credential cannot read Secrets:
+
+```bash
+kubectl auth can-i get secrets \
+  --as=system:serviceaccount:opendevops:sa-agent-view
+# expected: no
+```
+
+## 4. Allow the target
+
+Edit `config/config.yaml`:
+
+```yaml
+targets:
+  kubernetes:
+    kubeconfig_ro: ~/.kube/agent-view.yaml
+    allowed_contexts:
+      - kind-kind
+```
+
+An empty `allowed_contexts` list is a deliberate boot gate. A credential alone is not authorization;
+the context must also be listed.
+
+## 5. Validate before running
+
+```bash
+opendevops config check
+```
+
+Validation checks runtime-critical invariants, including:
+
+- every enabled policy family has credential coverage;
+- every model alias has pricing;
+- target allowlists are non-empty where required;
+- referenced secret values are present without printing them;
+- daily budget backends have valid storage configuration;
+- the compiled tool inventory matches policy expectations.
+
+## 6. Start a session
+
+```bash
+opendevops chat \
+  --environment staging \
+  --profile interactive \
+  --principal "$USER"
+```
+
+Try:
+
+```text
+why is pod api-0 in namespace web crash-looping?
+```
+
+The REPL streams assistant text, shows sanitized tool lifecycle events, identifies policy denials by
+rule, and prints the run and daily spend after every turn. Press `Ctrl-C` to cancel the active run
+without terminating the REPL.
+
+## 7. Verify the record
+
+Each run writes a hash-chained JSONL file beneath `./audit`:
+
+```bash
+opendevops audit verify --dir ./audit
+```
+
+A clean exit confirms structural consistency: event ordering, hash links, sequence numbers, and the
+completion record. It does not prove who wrote the file; production authenticity requires an
+independently protected append-only or WORM sink.
+
+## Common boot refusals
+
+| Symptom | Meaning | Resolution |
+| --- | --- | --- |
+| no Kubernetes contexts are allow-listed | no deployment scope was chosen | add only the intended contexts |
+| unpriced model | a configured alias can spend without accounting | add the provider pricing row |
+| policy pack lacks credential coverage | rules exist for a tool family that cannot authenticate | configure the credential or remove the pack |
+| Redis daily counter lacks a URL | the shared stop-loss cannot be enforced | set `redis_url` or use local SQLite |
+| tool inventory mismatch | graph tools and policy coverage diverged | review the extension and its policy rules |
+
+Next, learn [how a run moves through the system](/docs/core-concepts/architecture).

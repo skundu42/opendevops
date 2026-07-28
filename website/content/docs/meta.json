@@ -1,0 +1,18 @@
+{
+  "title": "opendevops",
+  "root": true,
+  "pages": [
+    "index",
+    "getting-started",
+    "---Core concepts---",
+    "core-concepts",
+    "---Safety and control---",
+    "security",
+    "operations",
+    "---Run in production---",
+    "interfaces",
+    "deployment",
+    "---Reference---",
+    "reference"
+  ]
+}

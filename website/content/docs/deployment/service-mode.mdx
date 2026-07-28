@@ -1,0 +1,99 @@
+---
+title: Service mode
+description: Deploy the durable queue, gateway, dashboard, scheduler, observability, and audit shipping stack.
+---
+
+Service mode is the self-hosted path for HTTP, webhooks, Slack, scheduled work, multi-user
+operations, and durable threads.
+
+> Do not run the service stack on a Kubernetes cluster the agent manages. Use a dedicated
+> operations VM or separate operations cluster.
+
+## Services
+
+| Service | Role |
+| --- | --- |
+| LangGraph server | graph, durable run queue, streaming, and webhook application |
+| Postgres | queue and checkpoint state |
+| Redis | task queue, shared daily budget counter, and production dashboard sessions |
+| Caddy | sole ingress and machine-to-machine bearer boundary |
+| Vector | per-run audit shipping and durable spool |
+| Prometheus + Grafana | metrics, alerts, and fleet dashboards |
+| agent-state volume | capability ledger and private chat transcripts |
+
+## Bring up the stack
+
+```bash
+cp .env.example .env
+# Fill required model, gateway, database, and dashboard credentials.
+
+docker compose config -q
+docker compose pull
+docker compose up -d
+
+curl -sf http://localhost:8123/healthz
+```
+
+The server container publishes no host port. Caddy on `:8123` is the external ingress. The webhook
+application reaches the server API through the internal loopback URL configured by
+`OPENDEVOPS_SELF_URL`.
+
+## Authentication
+
+Local smoke tests may use the explicit static-token mode. Production must use generic OpenID
+Connect:
+
+```yaml
+server:
+  dashboard_auth_mode: oidc
+  dashboard_session_backend: redis
+  dashboard_session_redis_url: redis://redis:6379/2
+  dashboard_cookie_secure: true
+  oidc:
+    issuer: https://id.example.com/realms/operations
+    client_id_env: OIDC_CLIENT_ID
+    client_secret_env: OIDC_CLIENT_SECRET
+    redirect_uri: https://ops.example.com/dashboard/oidc/callback
+    roles_claim: groups
+    role_mappings:
+      viewer: [devops-readers]
+      operator: [devops-operators]
+      approver: [change-approvers]
+      admin: [devops-admins]
+```
+
+Register the callback exactly, terminate TLS before Caddy, use secure cookies, store sessions in
+Redis, and keep operator and approver memberships separate. Session cookies contain only opaque,
+revocable handles.
+
+## State and backups
+
+Back up Postgres and the agent-state volume. Encrypt the latter because it contains private
+identity-scoped chat transcripts and the capability/control ledger. Align transcript retention with
+organizational policy.
+
+The scheduler includes maintenance runners for thread pruning, spend reporting, database dumps, and
+stale escalation resolution.
+
+## Audit shipping
+
+Vector tails per-run chains into the spool. Configure an independently protected final sink before
+production. The agent and executor roles must not be able to rewrite or delete that destination.
+
+## Production go-live gates
+
+- OIDC issuer, audience, exact redirect URI, group mappings, and logout are tested.
+- Redis-backed sessions and daily counters survive worker restarts.
+- TLS, secure cookies, CSRF protection, and immediate session revocation are verified.
+- Operator/requester and approver identities are separated.
+- The service stack cannot administer its own host cluster.
+- Every enabled policy family has a least-privilege credential.
+- Production write credentials exist only in remote write executors.
+- Capability expiration, atomic consumption, cooldown, and revocation are exercised.
+- Server-side dry-run and post-change verification pass for every write capability.
+- Audit verification and shipping failure alerts are active.
+- Budget exhaustion, cancellation, webhook duplication, and escalation timeout paths are tested.
+- Restore procedures for Postgres, control state, and audit spool are rehearsed.
+
+Continue with the [remote executor](/docs/deployment/remote-executor) before enabling production
+writes.

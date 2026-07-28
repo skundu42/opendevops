@@ -1,0 +1,60 @@
+---
+title: Troubleshooting
+description: Diagnose boot refusals, denied actions, interrupted runs, missing telemetry, and executor failures.
+---
+
+## The service refuses to start
+
+Run `opendevops config check` and fix the first reported invariant. Common causes include empty
+target allowlists, unpriced models, missing credentials for an enabled policy family, incomplete
+remote executor URL coverage, and invalid Redis configuration.
+
+Do not bypass validation. A partial boot would make safety behavior depend on which worker handled a
+request.
+
+## A familiar read command is denied
+
+Use the reported rule identifier and inspect:
+
+1. selected environment overlay;
+2. executable and exact subcommand shape;
+3. explicit context, namespace, account, region, repository, or host;
+4. unknown or unsafe flags;
+5. target allowlist membership;
+6. credential and channel coverage.
+
+A tool being read-only in normal usage does not make every flag safe.
+
+## A write remains interrupted
+
+Confirm an authorized approver resolved the correct `thread_id`, that requester separation passed,
+and that the capability is active and unexpired. The timeout sweeper should eventually resume stale
+requests with a rejection; verify scheduler health if it does not.
+
+## Webhook returns 503
+
+The route's configured HMAC or bearer environment variable is absent. Add it to the service secret
+configuration and restart the application. `503` is intentional fail-closed behavior.
+
+## Webhook returns 202 but no run appears
+
+Check `OPENDEVOPS_SELF_URL`. The webhook application runs inside the server container and must reach
+the internal server API, not the external Caddy address.
+
+## Audit verification fails
+
+Preserve the file. Run verification with `--allow-incomplete` to distinguish a missing terminal
+event from a broken sequence or hash link. Compare the local file with the independently shipped
+copy, then investigate filesystem and process logs.
+
+## Remote executor rejects a signed request
+
+Compare the worker's fixed environment/channel with policy output, check clock skew and signature
+age, validate the public key deployment, and confirm the canonical argv digest was not changed in
+transit. Do not route around the rejecting worker to local execution in production.
+
+## Spend looks lower than provider billing
+
+Confirm the model alias resolves to the expected price row and token units. Remember that cost
+updates after provider usage returns; in-flight calls may complete after the run crossed a USD
+threshold. Compare provider usage IDs with model-call audit events without copying prompts.

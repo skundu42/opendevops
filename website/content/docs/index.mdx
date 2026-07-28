@@ -1,0 +1,64 @@
+---
+title: Documentation
+description: Build, operate, and reason about an autonomous operations agent whose authority stays narrower than its prompt.
+---
+
+opendevops is an open-source operations agent built on LangGraph and LangChain deepagents. It can
+investigate infrastructure, diagnose incidents, explain CI failures, verify drift, and execute a
+deliberately narrow set of remediations.
+
+The model never receives a shell. Every command is a structured `argv` request that crosses budget
+controls, fail-closed policy, credential selection, output scrubbing, and a per-run audit chain.
+
+## Choose your path
+
+<Cards>
+  <Card title="Run your first investigation" href="/docs/getting-started">
+    Install the released package, initialize a workspace, create a secrets-denied Kubernetes
+    identity, and diagnose a test workload.
+  </Card>
+  <Card title="Understand the architecture" href="/docs/core-concepts/architecture">
+    Follow a request from the interface gateway through the agent graph, policy engine, executor,
+    credentials, and audit sink.
+  </Card>
+  <Card title="Review the safety model" href="/docs/security/execution-boundaries">
+    Learn what the agent can trust, which controls stay outside the model, and how production writes
+    become possible without becoming ambient.
+  </Card>
+  <Card title="Deploy service mode" href="/docs/deployment/service-mode">
+    Bring up the self-hosted stack, configure OIDC and Redis sessions, ship audit events, and assess
+    the production go-live gates.
+  </Card>
+</Cards>
+
+## What is supported
+
+| Area | Supported today | Boundary |
+| --- | --- | --- |
+| Kubernetes | diagnostics, logs, events, Helm inspection, controlled apply/rollout/scale | production write requires an active expiring grant, server dry-run, independent approval, and a write credential |
+| GitHub | CI diagnosis, run inspection, pull-request remediation | repository and API method/path allowlists |
+| AWS | curated EC2, ECS, RDS, CloudFormation, S3, Lambda, CloudWatch, and related reads | no cloud-resource deployment or IAM access |
+| Google Cloud | curated Compute, GKE, Cloud SQL, Pub/Sub, Logging, Storage, Run, and Functions reads | mutations and secret access denied |
+| Azure | curated VM, AKS, ACR, networking, SQL, Cosmos DB, Monitor, and resource reads | mutations and secret material denied |
+| Remote hosts | structured, read-only SSH checks | pinned user, key, hosts, and `known_hosts` |
+| Interfaces | CLI, HTTP, Slack, scheduler, Alertmanager, GitHub webhooks, operations UI | every path enters one gateway and safety core |
+
+> opendevops is not a general cloud deployment engine. Terraform, Pulumi, provider-wide
+> deployment commands, IAM mutation, and unrestricted CLI access are intentionally unavailable.
+
+## The operating invariant
+
+The model may propose an action. It cannot make the action permissible.
+
+Permission emerges only when all independent controls agree:
+
+1. the active policy pack recognizes the exact tool, executable, subcommand, flags, target, and
+   environment;
+2. the request is still within its run and daily budgets;
+3. a scoped credential is configured for the winning policy rule and execution channel;
+4. dangerous actions have a typed, unexpired capability grant with execution capacity remaining;
+5. required dry-run and human approval checks have completed;
+6. the executor accepts the signed, structured request.
+
+Continue with [Getting started](/docs/getting-started), or read the
+[architecture](/docs/core-concepts/architecture) before you connect infrastructure.

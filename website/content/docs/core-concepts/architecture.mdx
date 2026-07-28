@@ -1,0 +1,117 @@
+---
+title: Architecture
+description: Follow identity, intent, policy, credentials, execution, state, and audit across the system.
+---
+
+opendevops separates reasoning authority from execution authority. The model decides what it would
+like to inspect or change; components outside the model decide whether that request is affordable,
+recognized, permitted, credentialed, executable, and recorded.
+
+## System map
+
+```text
+CLI · HTTP · Slack · Scheduler · Webhooks · Operations UI
+                         │
+                         ▼
+                   AgentGateway
+                         │
+               identity · environment
+                         │
+                         ▼
+        LangGraph agent + budget middleware
+                         │
+                  structured tool call
+                         │
+                         ▼
+             fail-closed policy engine
+               │ allow / rewrite │ escalate
+               ▼                 ▼
+       credential selector   human decision
+               │                 │
+               └──── capability grant
+                         │
+                         ▼
+             argv-only local/remote executor
+                         │
+                         ▼
+       Kubernetes · GitHub · cloud CLIs · SSH
+
+Every stage ───────────► hash-chained audit + telemetry
+```
+
+## Component responsibilities
+
+### Interfaces
+
+Interfaces authenticate a user or service, normalize the request, choose an environment and budget
+profile, and submit it to `AgentGateway`. They never execute infrastructure commands directly.
+
+### Gateway
+
+The gateway is the single orchestration seam. `LocalGateway` supports the CLI with an in-process
+graph and SQLite checkpointing. `ServerGateway` submits work to service mode and exposes durable
+threads, queued runs, streaming events, interruption, resume, and cancellation.
+
+Both implementations preserve the same identity, environment, policy, budget, and audit semantics.
+
+### Agent graph
+
+The LangGraph graph owns the reasoning loop, tool selection, checkpointed conversation state, and
+escalation interrupts. It receives only scrubbed tool results. It does not receive credential
+values, shell access, raw dashboard session data, or a policy-bypass mechanism.
+
+### Middleware
+
+Budget middleware checks model calls, tool calls, recursion depth, elapsed time, per-run USD spend,
+and daily principal spend. Policy middleware converts a proposed tool call into a decision:
+`allow`, `rewrite`, `deny`, or `escalate`.
+
+### Policy engine
+
+Policy evaluates normalized requests against ordered rule packs and environment overlays. Rules can
+constrain exact executables, subcommands, flags, namespaces, contexts, repositories, hosts, API
+methods, and execution channels. A policy exception becomes a denial.
+
+### Credential selector
+
+The winning rule names a credential family and channel, not a secret value. The executor constructs
+a fresh child environment and injects only the selected family. Model-provider keys and unrelated
+cloud credentials do not flow into child processes.
+
+### Executor
+
+Local execution uses `shell=False` and a structured argv list. Remote execution sends a signed
+decision envelope to a worker fixed to one environment and read/write channel. The worker verifies
+the signature and envelope claims before loading its local credentials.
+
+### Audit and observability
+
+Every run records lifecycle, policy, tool, cost, approval, and completion events with correlation
+identifiers. JSONL events form a per-run SHA-256 chain. OpenTelemetry emits content-free timing and
+status data for run, model, policy, and tool spans.
+
+## Data classification
+
+| Data | Model context | Operations UI | Audit | Executor |
+| --- | --- | --- | --- | --- |
+| user prompt / assistant response | yes | owning operator only | no | no |
+| structured tool intent | yes | sanitized lifecycle only | decision metadata | signed request |
+| stdout / stderr | scrubbed excerpt | no | bounded scrubbed excerpt | yes, then scrubbed |
+| credential values | no | no | no | selected family only |
+| policy rule and effect | yes | yes | yes | signed claims |
+| cost and timing | yes | yes | yes | timeout only |
+
+## Deployment tiers
+
+1. **Local CLI:** one process, SQLite state, direct local executor. Best for evaluation and a
+   single operator.
+2. **Service mode:** durable server queue, Postgres, Redis, Caddy, scheduler, Slack, webhooks,
+   dashboard, Prometheus, Grafana, and audit shipping.
+3. **Remote executor:** credential-holding workers on Kubernetes, split by environment and
+   read/write channel.
+
+The service stack must not run on a cluster the agent manages. Use a dedicated operations VM or a
+separate operations cluster to avoid a self-control path.
+
+Continue with the [run lifecycle](/docs/core-concepts/run-lifecycle) or review the
+[execution boundary](/docs/security/execution-boundaries).

@@ -1,0 +1,46 @@
+---
+title: Observability
+description: Monitor runs, queues, policies, executors, spend, audit integrity, and operator control activity.
+---
+
+Service mode exposes two complementary views: the authenticated operations UI for run-level
+investigation and Prometheus/Grafana/OpenTelemetry for fleet health.
+
+## Operations UI
+
+The dashboard combines verified audit chains with live gateway telemetry. It shows:
+
+- active and queued runs, workers, retries, errors, and pending approvals;
+- success rate, spend, denials, escalations, and seven-day activity;
+- recent runs with principal, environment, model/tool counts, and cost;
+- correlated model, policy, tool, and audit events;
+- capability proposals and remaining grant capacity;
+- integration configuration posture without returning credential values.
+
+Chat content is private to the exact OIDC issuer and subject. Run detail deliberately excludes
+prompts, responses, raw argv, output, and credentials.
+
+## Service metrics
+
+Prometheus covers run success, queue latency, policy latency, executor errors, audit lag, and budget
+utilization. Shipped alert rules include:
+
+- policy-denial spikes;
+- daily spend above 80%;
+- scheduler silence beyond 1.5 times the expected period;
+- audit-shipper lag.
+
+## OpenTelemetry
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` to export OTLP/HTTP traces and metrics. Spans carry run, thread,
+tool call, model call, and application trace identifiers where available. Attributes are
+content-free: use them to correlate latency and failure without exporting prompts or command output.
+
+## Useful investigation order
+
+1. confirm queue health and worker availability;
+2. locate the run by `run_id` or incident thread;
+3. inspect model, policy, and executor timing;
+4. check the winning policy rule and target channel;
+5. verify the terminal audit event and shipper status;
+6. compare spend and denial rates with the recent baseline.

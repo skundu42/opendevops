@@ -1,0 +1,93 @@
+---
+title: Execution boundaries
+description: The trust model, credential isolation, argv-only execution, output scrubbing, and residual risks.
+---
+
+Safety does not depend on the model consistently following an instruction. The controls that
+authorize execution, choose credentials, and limit spend run outside model context.
+
+## Trust boundaries
+
+### The model is untrusted input
+
+Prompts, retrieved text, tool output, alert payloads, logs, and repository content may all contain
+adversarial instructions. They can influence reasoning, but they cannot directly alter policy,
+credential selection, the executor channel, or an active capability grant.
+
+### Policy is necessary, not sufficient
+
+Policy constrains recognized requests and fails closed. Credentials remain the hard boundary: a
+read-only kubeconfig cannot mutate even if a rule is accidentally permissive. Production uses both
+controls and tests their overlap.
+
+### The executor receives the minimum environment
+
+The executor builds a clean environment instead of inheriting the agent process. It injects basic
+runtime variables plus exactly one credential family selected by the winning policy rule.
+Model-provider credentials never pass to infrastructure subprocesses.
+
+## No shell surface
+
+Tool requests use:
+
+```python
+argv: list[str]
+```
+
+Execution uses `shell=False`. Shell interpreters, command-building utilities, response files,
+unbounded file paths, and command substitutions are denied. The policy engine evaluates normalized
+arguments rather than a shell string.
+
+This removes an entire expansion layer, but it does not make every binary safe. Rules still
+constrain flags that can execute plugins, load configuration, write files, or contact arbitrary
+endpoints.
+
+## Secret handling
+
+Configuration names credential environment variables; it does not contain their values.
+Standalone `{{secret:NAME}}` declarations can inject environment variables for env-aware programs.
+Embedded interpolation is denied because it would move secret material into argv, process listings,
+and audit-visible metadata.
+
+Output passes through deterministic token-pattern and high-entropy scrubbing before entering model
+context, virtual files, or audit excerpts. Operators should still treat source systems as sensitive
+and avoid commands whose normal output is primarily secret material.
+
+## Remote executor boundary
+
+Remote mode splits workers by:
+
+- environment: `staging` or `prod`;
+- channel: `ro` or `rw`;
+- credential family held by that deployment.
+
+The agent signs a short-lived decision envelope containing the run, tool call, environment, channel,
+executable, argv digest, and selected target. A worker verifies the signature and asserts that the
+claims match its fixed environment and channel before execution.
+
+The agent holds the signing private key. Workers hold only the verification key and their scoped
+infrastructure credential.
+
+## Production controls
+
+Production writes require all of the following:
+
+1. an explicit write policy rule for the command shape;
+2. a production-specific write credential;
+3. a typed capability grant for the exact target set;
+4. an unexpired grant with execution and repetition capacity;
+5. mandatory server-side dry-run where supported;
+6. approval from an authorized identity distinct from the requester;
+7. successful remote executor signature and channel validation.
+
+## Residual risks
+
+- A permitted read can return sensitive operational data even after token scrubbing.
+- Vendor CLIs are complex; every newly allowed flag expands the reviewed surface.
+- USD budgets are post-call stop-losses and may overshoot by already in-flight model work.
+- A local SHA-256 chain proves structure, not independent authenticity.
+- An authorized human can approve a harmful but syntactically permitted change.
+- Read-only access can still create availability pressure through expensive queries.
+
+Use dedicated targets for evaluation, test denial behavior, and connect production only after the
+[deployment gates](/docs/deployment/service-mode#production-go-live-gates) pass.
