@@ -17,6 +17,38 @@ description: Commands for workspace setup, configuration, chat, grants, audit ve
 | `opendevops audit verify --allow-incomplete` | inspect structurally valid crashed or active runs |
 | `opendevops version` | print the installed version |
 
+## Capability grants
+
+Grants are typed, expiring authority. They cannot override a policy deny. Full lifecycle and
+limits: [capability grants](/docs/security/capability-grants).
+
+```bash
+opendevops config propose-grant \
+  --environment prod \
+  --capability kubernetes_deploy \
+  --target kind-prod/web \
+  --reason "Deploy reviewed release 2026.07.26"
+
+opendevops config approve-grant <proposal-id> --actor change-approver
+opendevops config activate-grant <proposal-id> --actor platform-admin
+opendevops config grants
+opendevops config revoke-grant <proposal-id> --actor platform-admin
+```
+
+| Flag / arg | Default | Notes |
+| --- | --- | --- |
+| `--capability` | required | `kubernetes_deploy`, `github_write`, `aws_deploy`, `gcp_deploy`, `azure_deploy`, or `ssh_mutation` |
+| `--target` | required | repeatable; explicit only — wildcards (`*`, `all`) and duplicates are refused |
+| `--reason` | required | 8 to 500 characters |
+| `--environment` | `staging` | `staging` or `prod` only |
+| `--ttl` | `3600` | seconds; 60 to 604800 |
+| `--max-executions` | `10` | 1 to 100 |
+| `--actor` | OS user | identity used for the role check |
+| `<proposal-id>` | — | positional on approve / activate / revoke |
+
+Propose needs `operator`, approve needs `approver`, activate and revoke need `admin`. In
+production, approval must come from a different identity than the requester.
+
 ## Chat options
 
 ```bash
@@ -29,13 +61,23 @@ opendevops chat \
 `--environment` selects the policy overlay. `--profile` selects stop-losses. `--principal`
 attributes daily spend and audit events.
 
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--environment` | `staging` | policy environment overlay |
+| `--profile` | `interactive` | per-run budget profile |
+| `--principal` | OS user | audit and per-principal daily budget attribution |
+
 Inside the REPL:
 
 - `/cost` shows current session and day totals;
 - `/quit`, `/exit`, or `/q` exits;
 - `Ctrl-C` cancels the active run.
 
+If a rule escalates, the REPL renders an approval panel and prompts `approve` / `edit` /
+`reject`; a non-interactive session auto-rejects. See [interfaces](/docs/interfaces).
+
 ## Scripting guidance
 
 Prefer HTTP or registered scheduler jobs for automation. The interactive CLI is designed for a
 human-in-the-loop terminal and may add presentation or approval behavior unsuitable for parsing.
+See [interfaces](/docs/interfaces).
