@@ -41,7 +41,7 @@ opendevops config revoke-grant <proposal-id> --actor platform-admin
 | `--target` | required | repeatable; explicit only — wildcards (`*`, `all`) and duplicates are refused |
 | `--reason` | required | 8 to 500 characters |
 | `--environment` | `staging` | `staging` or `prod` only |
-| `--ttl` | `3600` | seconds; 60 to 604800 |
+| `--ttl` | `3600` | seconds; 60 to `control_plane.max_grant_ttl_s` (default 86400) |
 | `--max-executions` | `10` | 1 to 100 |
 | `--actor` | OS user | identity used for the role check |
 | `<proposal-id>` | — | positional on approve / activate / revoke |
