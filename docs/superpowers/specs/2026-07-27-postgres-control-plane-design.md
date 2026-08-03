@@ -16,4 +16,7 @@ Status: implementing
 ## Out of scope
 
 - Automatic migration from existing SQLite files to Postgres (operator dump/restore)
-- Shared Redis spent-token cache for remote executor
+
+## Follow-up (done)
+
+- Shared Redis spent-token cache for remote executor — see `2026-07-31-production-hardening-design.md`

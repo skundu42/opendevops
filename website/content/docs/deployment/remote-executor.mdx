@@ -32,9 +32,10 @@ The worker:
 
 1. verifies signature, age, and required claims;
 2. compares environment and channel to its fixed deployment identity;
-3. constructs a clean process environment;
-4. executes argv without a shell and within timeout/output limits;
-5. scrubs and returns the bounded result.
+3. claims the decision in the spent-token store (in-memory, or Redis when scaled);
+4. constructs a clean process environment;
+5. executes argv without a shell and within timeout/output limits;
+6. scrubs and returns the bounded result.
 
 ## Kubernetes hardening
 
@@ -57,8 +58,12 @@ Read and write workers must not share a ServiceAccount, secret, or writable volu
 Set `executor.mode=remote` and configure URLs for every environment/channel pair the active policy
 can select. Boot validation refuses incomplete coverage.
 
-Keep the private signing key in the agent service and the public verification key in workers. Source
-infrastructure credentials from a Secret or CSI provider at runtime; never bake them into images.
+Keep the private signing key in the agent service and the public verification key in workers.
+Optionally set `executor.signing_keys` for a distinct private key per environment/channel and point
+each worker's `verify_key_env` at the matching public key. For multi-replica workers set
+`executor.spent_token_backend: redis`. Optional agent mTLS uses `executor.tls` (CA + client cert);
+terminate server TLS at the mesh or sidecar. Source infrastructure credentials from a Secret or CSI
+provider at runtime; never bake them into images.
 
 ## Verification
 

@@ -16,5 +16,18 @@ from opendevops.executor_service.service import (
     build_app_from_env,
     create_app,
 )
+from opendevops.executor_service.spent import (
+    MemorySpentDecisionStore,
+    RedisSpentDecisionStore,
+    SpentDecisionStore,
+    build_spent_store,
+)
 
-__all__ = ["build_app_from_env", "create_app"]
+__all__ = [
+    "MemorySpentDecisionStore",
+    "RedisSpentDecisionStore",
+    "SpentDecisionStore",
+    "build_app_from_env",
+    "build_spent_store",
+    "create_app",
+]

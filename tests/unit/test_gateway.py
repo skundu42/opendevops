@@ -784,10 +784,9 @@ async def test_run_scoped_dry_run_not_reused_across_runs_on_a_thread(
 async def test_summarizer_trigger_adds_haiku_delta_to_authoritative(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A REAL summarization trigger during a run: the haiku summarizer call lands in the callback
-    aggregate (authoritative) but not in state (the in-graph middleware only prices the MAIN
-    model), so the run's authoritative cost exceeds state by exactly the summarizer's usage, and
-    the daily counter is topped up with only that delta.
+    """A REAL summarization trigger during a run: the haiku summarizer is priced in-graph AND in
+    the gateway callback aggregate, so ``cost_usd_state`` and ``cost_usd_authoritative`` both
+    include the compaction spend (gateway delta ≈ 0) and the daily counter matches.
 
     The default (main-model) summarizer is replaced by our haiku one via the harness-profile
     exclusion, so the summary model call is priced on the haiku row. Summarization is forced to
@@ -849,12 +848,12 @@ async def test_summarizer_trigger_adds_haiku_delta_to_authoritative(
     finally:
         await gw.aclose()
 
-    # State = MAIN (opus) only: 2 tool turns (0.01 each) + final text (0.00375) = 0.02375.
-    assert result.cost_usd_state == pytest.approx(0.02375)
-    # Authoritative adds the haiku summarizer usage (2000*1 + 100*5)/1e6 = 0.0025.
+    # MAIN (opus): 2 tool turns (0.01 each) + final text (0.00375) = 0.02375.
+    # Haiku summarizer: (2000*1 + 100*5)/1e6 = 0.0025 → total 0.02625 in both ledgers.
+    assert result.cost_usd_state == pytest.approx(0.02625)
     assert result.cost_usd_authoritative == pytest.approx(0.02625)
-    assert result.cost_usd_authoritative > result.cost_usd_state
-    # The daily counter received the middleware's opus charge + the gateway's haiku delta.
+    assert result.cost_usd_authoritative == pytest.approx(result.cost_usd_state)
+    # In-graph already charged summarizer; gateway delta is ~0; daily total is complete.
     assert await counter.total("global") == pytest.approx(0.02625)
 
 

@@ -15,5 +15,9 @@ Status: implementing
 
 ## Out of scope
 
-- Per-call in-graph re-pricing for summarizer (follow-up)
 - Non-LangChain raw HTTP providers
+
+## Follow-up (done)
+
+- Per-call in-graph re-pricing for summarizer — see `2026-07-31-production-hardening-design.md`
+  (`price_message` + Haiku summarizer flush into `run_cost_usd` / daily counter)

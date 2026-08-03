@@ -2,16 +2,31 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
-from opendevops.config import ExecutorChannelUrls, ExecutorConfig
+from opendevops.config import (
+    ExecutorChannelKeys,
+    ExecutorChannelUrls,
+    ExecutorConfig,
+    ExecutorTlsConfig,
+    VaultSecretConfig,
+)
 
 
 def _full_urls() -> dict[str, ExecutorChannelUrls]:
     return {
         "staging": ExecutorChannelUrls(ro="http://s-ro", rw="http://s-rw"),
         "prod": ExecutorChannelUrls(ro="http://p-ro", rw="http://p-rw"),
+    }
+
+
+def _full_signing_keys() -> dict[str, ExecutorChannelKeys]:
+    return {
+        "staging": ExecutorChannelKeys(ro="S_RO", rw="S_RW"),
+        "prod": ExecutorChannelKeys(ro="P_RO", rw="P_RW"),
     }
 
 
@@ -38,7 +53,7 @@ def test_remote_requires_both_environments() -> None:
 
 
 def test_remote_requires_signing_key_env() -> None:
-    with pytest.raises(ValidationError, match="signing_key_env"):
+    with pytest.raises(ValidationError, match="signing_key"):
         ExecutorConfig(mode="remote", urls=_full_urls())
 
 
@@ -48,6 +63,55 @@ def test_remote_valid() -> None:
     assert cfg.urls is not None
     assert cfg.urls["staging"].ro == "http://s-ro"
     assert cfg.urls["prod"].rw == "http://p-rw"
+
+
+def test_remote_valid_with_signing_keys_map_only() -> None:
+    cfg = ExecutorConfig(
+        mode="remote", urls=_full_urls(), signing_keys=_full_signing_keys()
+    )
+    assert cfg.signing_key_env_for("staging", "ro") == "S_RO"
+    assert cfg.signing_key_env_for("prod", "rw") == "P_RW"
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_remote_rejects_blank_per_route_signing_key_names(blank: str) -> None:
+    with pytest.raises(ValidationError, match="must not be blank"):
+        ExecutorConfig(
+            mode="remote",
+            urls=_full_urls(),
+            signing_keys={
+                "staging": {"ro": blank, "rw": "S_RW"},
+                "prod": {"ro": "P_RO", "rw": "P_RW"},
+            },
+        )
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_remote_rejects_blank_shared_signing_key_name(blank: str) -> None:
+    with pytest.raises(ValidationError, match="signing_key_env must not be blank"):
+        ExecutorConfig(mode="remote", urls=_full_urls(), signing_key_env=blank)
+
+
+def test_signing_key_env_for_falls_back_to_shared() -> None:
+    cfg = ExecutorConfig(
+        mode="remote", urls=_full_urls(), signing_key_env="SHARED"
+    )
+    assert cfg.signing_key_env_for("staging", "rw") == "SHARED"
+
+
+def test_tls_requires_cert_pair() -> None:
+    with pytest.raises(ValidationError, match="cert_file"):
+        ExecutorTlsConfig(cert_file=Path("/certs/client.crt"))
+
+
+def test_vault_approle_requires_ids() -> None:
+    with pytest.raises(ValidationError, match="role_id_env"):
+        VaultSecretConfig(auth="approle")
+
+
+def test_vault_kubernetes_requires_role() -> None:
+    with pytest.raises(ValidationError, match="kubernetes_role"):
+        VaultSecretConfig(auth="kubernetes")
 
 
 def test_unknown_key_forbidden() -> None:

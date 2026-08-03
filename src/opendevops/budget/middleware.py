@@ -52,7 +52,7 @@ from langgraph.runtime import Runtime
 
 from opendevops.budget.daily import DailyCounter
 from opendevops.config import Daily, ResolvedProfile
-from opendevops.models.pricing import PriceTable
+from opendevops.models.pricing import PriceTable, build_price_key_index, price_message
 
 logger = logging.getLogger(__name__)
 
@@ -170,9 +170,10 @@ class CostCapMiddleware(AgentMiddleware[BudgetStateMixin, Any, Any]):
     the ``incident`` profile's on the next. An absent/unknown profile name falls back to
     ``default_profile`` — fail-safe, never crashing a live hook on a misconfigured context.
 
-    ``model_key`` is the configured main-agent ``provider:model`` (a single model per run;
-    multi-model runs would re-key per call). Pricing math is delegated to the ``PriceTable``;
-    this middleware never re-derives USD.
+    ``model_key`` is the configured main-agent ``provider:model`` fallback. Each call is
+    re-keyed from the ``AIMessage``'s reported model name when that name maps to a priced
+    row (so a summarizer/subagent message that lands in ``aafter_model`` is not mis-priced
+    as the main model). Pricing math is delegated to the ``PriceTable``.
     """
 
     state_schema = BudgetStateMixin
@@ -189,6 +190,7 @@ class CostCapMiddleware(AgentMiddleware[BudgetStateMixin, Any, Any]):
         super().__init__()
         self._price_table = price_table
         self._model_key = model_key
+        self._price_index = build_price_key_index(price_table)
         self._profiles = profiles
         self._trip_ratio = trip_ratio
         self._default_profile = default_profile
@@ -247,7 +249,15 @@ class CostCapMiddleware(AgentMiddleware[BudgetStateMixin, Any, Any]):
                 usage_delta["usage_missing"] += 1
                 continue
             try:
-                cost += self._price_table.cost_usd(self._model_key, usage)
+                call_cost, _key, used_default = price_message(
+                    message,
+                    self._price_table,
+                    default_model_key=self._model_key,
+                    index=self._price_index,
+                )
+                cost += call_cost
+                if used_default:
+                    usage_delta["usage_missing"] += 1
             except Exception:
                 logger.exception(
                     "cost_usd failed for model_key=%r; counting as a usage blind spot",
@@ -293,6 +303,7 @@ class DailyBudgetMiddleware(AgentMiddleware[BudgetStateMixin, Any, Any]):
         super().__init__()
         self._price_table = price_table
         self._model_key = model_key
+        self._price_index = build_price_key_index(price_table)
         self._counter = counter
         self._daily_cfg = daily_cfg
         self._fail_mode = fail_mode
@@ -323,7 +334,13 @@ class DailyBudgetMiddleware(AgentMiddleware[BudgetStateMixin, Any, Any]):
             if not usage:
                 continue
             try:
-                cost += self._price_table.cost_usd(self._model_key, usage)
+                call_cost, _, _ = price_message(
+                    message,
+                    self._price_table,
+                    default_model_key=self._model_key,
+                    index=self._price_index,
+                )
+                cost += call_cost
                 charged = True
             except Exception:
                 logger.exception(

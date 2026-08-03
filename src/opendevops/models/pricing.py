@@ -29,9 +29,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
-from langchain_core.messages import UsageMetadata
+from langchain_core.messages import AIMessage, UsageMetadata
 
 from opendevops.config import ModelPricing, ModelsConfig
 
@@ -106,3 +106,100 @@ class PriceTable:
             + cache_creation * price.cache_write
             + output_tokens * price.output
         ) / 1e6
+
+
+def build_price_key_index(prices: dict[str, Any] | PriceTable) -> dict[str, str]:
+    """Index each priced ``provider:model`` key by itself and by a *unique* bare model suffix.
+
+    When two providers price the same bare model (e.g. ``openai:gpt-4o`` and ``azure:gpt-4o``),
+    the bare suffix is omitted from the index so callers cannot silently pick the first insert.
+    Disambiguate via :func:`resolve_price_key`'s ``default_model_key`` provider prefix instead.
+    """
+    keys = prices.prices if isinstance(prices, PriceTable) else prices
+    index: dict[str, str] = {}
+    ambiguous_suffixes: set[str] = set()
+    for key in keys:
+        index[key] = key
+        _, _, suffix = key.partition(":")
+        if not suffix or suffix in ambiguous_suffixes:
+            continue
+        existing = index.get(suffix)
+        if existing is not None and existing != key:
+            del index[suffix]
+            ambiguous_suffixes.add(suffix)
+            continue
+        index.setdefault(suffix, key)
+    return index
+
+
+def resolve_price_key(
+    model_name: str,
+    prices: dict[str, Any] | PriceTable,
+    *,
+    index: dict[str, str] | None = None,
+    default_model_key: str | None = None,
+) -> str | None:
+    """Map a reported model name to a priced ``provider:model`` key, or ``None`` if unknown.
+
+    Resolution order: exact ``provider:model`` hit → unique bare-suffix index hit →
+    ``{default_provider}:{bare}`` when ``default_model_key`` is set and that row exists.
+    Ambiguous bare names without a matching default-provider row return ``None`` (caller
+    falls back to pricing with the default key explicitly).
+    """
+    table = prices.prices if isinstance(prices, PriceTable) else prices
+    if model_name in table:
+        return model_name
+    lookup = index if index is not None else build_price_key_index(prices)
+    hit = lookup.get(model_name)
+    if hit is not None:
+        return hit
+    if default_model_key and ":" not in model_name:
+        provider, _, _ = default_model_key.partition(":")
+        if provider:
+            candidate = f"{provider}:{model_name}"
+            if candidate in table:
+                return candidate
+    return None
+
+
+def reported_model_name(message: AIMessage) -> str | None:
+    """Best-effort model id from an ``AIMessage``'s ``response_metadata`` / ``name``."""
+    meta = getattr(message, "response_metadata", None) or {}
+    if isinstance(meta, dict):
+        for key in ("model_name", "model", "model_id"):
+            value = meta.get(key)
+            if isinstance(value, str) and value:
+                return value
+    name = getattr(message, "name", None)
+    return name if isinstance(name, str) and name else None
+
+
+def price_message(
+    message: AIMessage,
+    price_table: PriceTable,
+    *,
+    default_model_key: str,
+    index: dict[str, str] | None = None,
+) -> tuple[float, str, bool]:
+    """Price one AIMessage: ``(usd, model_key_used, used_default_fallback)``.
+
+    Prefers the message's reported model name when it maps to a priced row; otherwise falls
+    back to ``default_model_key`` (typically the main agent). Raises ``UnpricedModelError``
+    only when the chosen key itself has no row.
+    """
+    usage = message.usage_metadata
+    if not usage:
+        return 0.0, default_model_key, False
+    reported = reported_model_name(message)
+    used_default = False
+    if reported:
+        resolved = resolve_price_key(
+            reported,
+            price_table,
+            index=index,
+            default_model_key=default_model_key,
+        )
+        if resolved is not None:
+            return price_table.cost_usd(resolved, usage), resolved, False
+        used_default = True
+    return price_table.cost_usd(default_model_key, usage), default_model_key, used_default

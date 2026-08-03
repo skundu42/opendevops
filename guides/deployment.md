@@ -186,6 +186,11 @@ extra (`langgraph-sdk` must not exist there; SDK firewall).
 3. the agent routes via `executor.urls[environment][channel]`;
 4. `ssh_run` routes through the same `POST /execute` path (`tool_family=ssh`).
 
+**Multi-replica / transport:** set `executor.spent_token_backend: redis` before scaling any
+executor Deployment above one replica. Optional `executor.tls` configures agent mTLS; optional
+`executor.signing_keys` selects per-(env, channel) private keys (each pod's `verify_key_env`
+holds the matching public key).
+
 ## Standing pre-go-live gates (all tiers)
 
 Environment/ops work owed before the first live run against real infrastructure, independent of

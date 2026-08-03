@@ -32,7 +32,9 @@ SSH private key live exclusively on the matching executor pods.
   reach `POST /execute`), and default-deny EGRESS except DNS + an allowlisted CIDR with IMDS
   (`169.254.169.254/32`) and link-local blocked. RECOMMENDED transport hardening: **mTLS** between
   the agent and the service (e.g. a service mesh) — the signed token binds integrity at the app
-  layer; mTLS adds transport-level authentication. Cert management is out of scope here (doc-only).
+  layer; mTLS adds transport-level authentication. Configure agent-side mTLS via
+  `executor.tls` (`ca_file` / `cert_file` / `key_file`); terminate server TLS at the mesh or
+  sidecar. Cert issuance/rotation remains an operator concern.
 
 ## Wiring
 - Each pod's env must supply: the ed25519 **public** verify key (env var named by
@@ -55,8 +57,13 @@ SSH private key live exclusively on the matching executor pods.
 4. **`ssh_run` routes through the service** — `tool_family=ssh` on `POST /execute`; agent does
    not hold the SSH key.
 
-Shared ed25519 keypair across pods (one private on agent, one public on all services). Per-route
-keys remain a possible future hardening.
+Default: one shared ed25519 keypair (agent private via `signing_key_env`, public on every service
+via `verify_key_env`). Optional per-(environment, channel) keys: set `executor.signing_keys` on
+the agent and point each Deployment's `verify_key_env` at the matching public key.
+
+**Multi-replica:** set `executor.spent_token_backend: redis` and `spent_token_redis_url` on every
+executor pod (and keep the same Redis DB). The in-memory spent-decision cache is only safe at
+`replicas: 1`.
 
 ## Dependencies
 The service needs `cryptography` (ed25519), `httpx`, and `fastapi` — all already resolved + pinned

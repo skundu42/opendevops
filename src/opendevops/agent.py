@@ -93,8 +93,10 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from deepagents import (
     CompiledSubAgent,
@@ -114,7 +116,10 @@ from langchain.agents.middleware import (
     ModelCallLimitMiddleware,
     ToolCallLimitMiddleware,
 )
+from langchain.agents.middleware.types import ExtendedModelResponse, ModelResponse
+from langgraph.types import Command
 
+from opendevops.budget.daily import DailyCounter
 from opendevops.budget.middleware import (
     BudgetStateMixin,
     CostCapMiddleware,
@@ -123,7 +128,7 @@ from opendevops.budget.middleware import (
 from opendevops.config import validate_runtime_config
 from opendevops.context import AgentContext
 from opendevops.models import registry
-from opendevops.models.pricing import PriceTable
+from opendevops.models.pricing import PriceTable, build_price_key_index
 from opendevops.policy.engine import LOG_SUMMARIZER_SUBAGENT, YamlRuleEngine
 from opendevops.policy.guard import SingleToolCallMiddleware
 from opendevops.policy.loader import check_credential_coverage, load_policy
@@ -132,11 +137,12 @@ from opendevops.prompts import SYSTEM_PROMPT
 from opendevops.state import DevOpsState
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from langgraph.graph.state import CompiledStateGraph
     from langgraph.runtime import Runtime
 
     from opendevops.audit.logger import AuditLogger
-    from opendevops.budget.daily import DailyCounter
     from opendevops.config import AppConfig, ResolvedProfile
 
 logger = logging.getLogger(__name__)
@@ -211,33 +217,288 @@ _registered_profiles: set[str] = set()
 _registry_lock = threading.Lock()
 
 
+@dataclass
+class _PendingSummarySpend:
+    """Invocation-local summarizer spend (never stored on the shared middleware instance)."""
+
+    cost_usd: float = 0.0
+    usage: dict[str, Any] = field(default_factory=dict)
+
+
+# Context-local so concurrent runs on one compiled graph cannot charge each other.
+_pending_summary_spend: ContextVar[_PendingSummarySpend | None] = ContextVar(
+    "opendevops_pending_summary_spend", default=None
+)
+
+
+def _get_pending_spend() -> _PendingSummarySpend:
+    pending = _pending_summary_spend.get()
+    if pending is None:
+        pending = _PendingSummarySpend()
+        _pending_summary_spend.set(pending)
+    return pending
+
+
+def _take_pending_spend() -> _PendingSummarySpend | None:
+    pending = _pending_summary_spend.get()
+    _pending_summary_spend.set(None)
+    if pending is None:
+        return None
+    if pending.cost_usd <= 0 and not pending.usage:
+        return None
+    return pending
+
+
+def _clear_pending_spend() -> None:
+    _pending_summary_spend.set(None)
+
+
+def _empty_usage() -> dict[str, Any]:
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read": 0,
+        "cache_creation": 0,
+        "usage_missing": 0,
+    }
+
+
+def _principal_from_runtime(runtime: Any) -> str:
+    context = getattr(runtime, "context", None)
+    principal = getattr(context, "principal", None) if context is not None else None
+    if principal is None and isinstance(context, dict):
+        principal = context.get("principal")
+    return str(principal or "unknown")
+
+
 class _HaikuSummarizationMiddleware(_DeepAgentsSummarizationMiddleware):
-    """Marker subclass so deepagents' default summarizer can be replaced *in place* by name.
+    """Haiku summarizer + in-graph pricing so compaction spend hits ``run_cost_usd``.
 
     ``_DeepAgentsSummarizationMiddleware.name`` reports the public alias
     ``"SummarizationMiddleware"`` only for the exact base class, and its own ``__name__`` for any
-    subclass (verified via probe
-    against deepagents 0.6.12). Therefore the harness profile's
-    ``excluded_middleware={"SummarizationMiddleware"}`` drops the factory's default (main-model)
-    summarizer, while this subclass — reporting ``"_HaikuSummarizationMiddleware"`` — is neither
-    matched by that exclusion nor a duplicate ``.name`` for langchain's ``create_agent`` dedupe.
+    subclass. The harness profile's ``excluded_middleware={"SummarizationMiddleware"}`` drops the
+    factory default while this subclass remains. Compaction runs inside ``awrap_model_call`` (not
+    ``abefore_model``); we wrap the summarizer model, accumulate spend in a :class:`ContextVar`,
+    and flush into state via ``ExtendedModelResponse.command`` from that same wrap — so a final-turn
+    compaction is still accounted, and concurrent runs cannot share pending counters.
     """
 
+    _price_table: PriceTable | None = None
+    _summarizer_model_key: str | None = None
+    _price_index: dict[str, str] | None = None
+    _daily_counter: DailyCounter | None = None
 
-def _build_summarizer(cfg: AppConfig, backend: Any) -> _DeepAgentsSummarizationMiddleware:
+    def _note_summary_usage(self, response: Any) -> None:
+        """Price a summarizer model response into the invocation-local pending contribution."""
+        usage = getattr(response, "usage_metadata", None)
+        if not usage or self._price_table is None or not self._summarizer_model_key:
+            return
+        pending = _get_pending_spend()
+        try:
+            cost = self._price_table.cost_usd(self._summarizer_model_key, usage)
+        except Exception:  # noqa: BLE001 - pricing gap is a blind spot, not a run failure
+            logger.exception("summarizer cost_usd failed; counting as usage_missing")
+            if not pending.usage:
+                pending.usage = _empty_usage()
+            pending.usage["usage_missing"] = int(pending.usage.get("usage_missing", 0)) + 1
+            return
+        details = usage.get("input_token_details") or {}
+        if not pending.usage:
+            pending.usage = _empty_usage()
+        pending.usage["input_tokens"] = int(pending.usage.get("input_tokens", 0)) + int(
+            usage.get("input_tokens", 0)
+        )
+        pending.usage["output_tokens"] = int(pending.usage.get("output_tokens", 0)) + int(
+            usage.get("output_tokens", 0)
+        )
+        pending.usage["cache_read"] = int(pending.usage.get("cache_read", 0)) + int(
+            details.get("cache_read", 0)
+        )
+        pending.usage["cache_creation"] = int(pending.usage.get("cache_creation", 0)) + int(
+            details.get("cache_creation", 0)
+        )
+        pending.cost_usd = float(pending.cost_usd) + cost
+
+    async def _charge_daily(
+        self, cost: float, runtime: Any, usage: dict[str, Any]
+    ) -> dict[str, Any]:
+        if cost <= 0 or self._daily_counter is None:
+            return usage
+        principal = _principal_from_runtime(runtime)
+        try:
+            await self._daily_counter.add("global", cost)
+            await self._daily_counter.add(f"principal:{principal}", cost)
+        except Exception:  # noqa: BLE001 - mirror DailyBudgetMiddleware after-write posture
+            logger.warning(
+                "daily counter write failed for summarizer spend; run continues",
+                exc_info=True,
+            )
+            usage = dict(usage)
+            usage["counter_write_failed"] = True
+        return usage
+
+    def _merge_spend_into_result(
+        self, result: Any, *, cost: float, usage: dict[str, Any]
+    ) -> Any:
+        """Attach summarizer spend to the wrap result via ``ExtendedModelResponse.command``."""
+        update: dict[str, Any] = {}
+        if cost > 0:
+            update["run_cost_usd"] = cost
+        if usage:
+            update["run_usage"] = usage
+        if not update:
+            return result
+
+        if isinstance(result, ExtendedModelResponse):
+            existing = result.command
+            existing_update = getattr(existing, "update", None) if existing is not None else None
+            if isinstance(existing_update, dict):
+                merged = dict(existing_update)
+                if "run_cost_usd" in update:
+                    merged["run_cost_usd"] = float(merged.get("run_cost_usd") or 0.0) + float(
+                        update["run_cost_usd"]
+                    )
+                if "run_usage" in update:
+                    merged["run_usage"] = update["run_usage"]
+                return ExtendedModelResponse(
+                    model_response=result.model_response,
+                    command=Command(update=merged),
+                )
+            return ExtendedModelResponse(
+                model_response=result.model_response,
+                command=Command(update=update),
+            )
+
+        if isinstance(result, ModelResponse):
+            return ExtendedModelResponse(
+                model_response=result,
+                command=Command(update=update),
+            )
+        # Unknown shape — best-effort: leave unchanged rather than break the model node.
+        logger.warning(
+            "summarizer spend %s could not be attached to wrap result type %s",
+            cost,
+            type(result).__name__,
+        )
+        return result
+
+    async def awrap_model_call(
+        self,
+        request: Any,
+        handler: Callable[[Any], Awaitable[Any]],
+    ) -> Any:
+        """Run parent compaction, then flush invocation-local summarizer spend into state.
+
+        Deepagents summarises inside ``asyncio.gather``, which copies the ContextVar map into
+        child tasks. We therefore materialise the mutable pending bucket *before* calling
+        super so the child task mutates the same object the parent later flushes.
+        """
+        _get_pending_spend()
+        try:
+            result = await super().awrap_model_call(request, handler)
+        except BaseException:
+            _clear_pending_spend()
+            raise
+        pending = _take_pending_spend()
+        if pending is None:
+            return result
+        usage = await self._charge_daily(
+            pending.cost_usd, getattr(request, "runtime", None), pending.usage
+        )
+        return self._merge_spend_into_result(
+            result, cost=pending.cost_usd, usage=usage
+        )
+
+    def wrap_model_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
+        """Sync counterpart: flush spend into state (daily charge is async-only)."""
+        _get_pending_spend()
+        try:
+            result = super().wrap_model_call(request, handler)
+        except BaseException:
+            _clear_pending_spend()
+            raise
+        pending = _take_pending_spend()
+        if pending is None:
+            return result
+        if pending.cost_usd > 0 and self._daily_counter is not None:
+            logger.warning(
+                "summarizer daily charge skipped on sync wrap_model_call path; "
+                "run_cost_usd still updated"
+            )
+        return self._merge_spend_into_result(
+            result, cost=pending.cost_usd, usage=pending.usage
+        )
+
+
+class _PricingChatModelProxy:
+    """Delegate to a chat model while noting usage for in-graph summarizer pricing.
+
+    Uses composition (not attribute assignment on the inner model) so pydantic/fake
+    chat models that forbid setting ``ainvoke`` keep working in tests.
+    """
+
+    def __init__(self, inner: Any, note: Any) -> None:
+        object.__setattr__(self, "_inner", inner)
+        object.__setattr__(self, "_note", note)
+
+    async def ainvoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
+        response = await self._inner.ainvoke(input, config, **kwargs)
+        self._note(response)
+        return response
+
+    def invoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
+        response = self._inner.invoke(input, config, **kwargs)
+        self._note(response)
+        return response
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+def _attach_summarizer_pricing(
+    middleware: _HaikuSummarizationMiddleware,
+    cfg: AppConfig,
+    *,
+    counter: DailyCounter | None,
+) -> None:
+    """Wire PriceTable + model wrap so compaction spend is visible in-graph."""
+    price_table = PriceTable.from_config(cfg.models)
+    model_key = registry.resolve(cfg, "summarizer")
+    middleware._price_table = price_table
+    middleware._summarizer_model_key = model_key
+    middleware._price_index = build_price_key_index(price_table)
+    middleware._daily_counter = counter
+
+    # ``model`` is a read-only property over ``_lc_helper.model`` (deepagents).
+    lc_helper = getattr(middleware, "_lc_helper", None)
+    if lc_helper is None:
+        return
+    proxy = _PricingChatModelProxy(lc_helper.model, middleware._note_summary_usage)
+    lc_helper.model = proxy
+
+
+def _build_summarizer(
+    cfg: AppConfig,
+    backend: Any,
+    *,
+    counter: DailyCounter | None = None,
+) -> _DeepAgentsSummarizationMiddleware:
     """Build the haiku-backed replacement for deepagents' default summarization middleware.
 
     Reuses the deepagents factory so the model-aware trigger/keep defaults, summary prompt, and
     backend-offload behavior all match the default the factory would have built — only the model
     changes (the ``summarizer`` agent alias -> haiku) and the concrete type is re-tagged to the
     marker subclass so the profile's name-form exclusion of the base class leaves it in place.
+    Compaction spend is priced in-graph (see :class:`_HaikuSummarizationMiddleware`).
     """
     summarizer_model = registry.build_chat_model(cfg, "summarizer")
     middleware = create_summarization_middleware(summarizer_model, backend)
     # Re-tag the concrete type (a no-op-layout subclass) so ``.name`` becomes distinct and the
     # base-class exclusion preserves this instance. See :class:`_HaikuSummarizationMiddleware`.
     middleware.__class__ = _HaikuSummarizationMiddleware
-    return middleware
+    priced = cast(_HaikuSummarizationMiddleware, middleware)
+    _attach_summarizer_pricing(priced, cfg, counter=counter)
+    return priced
 
 
 def _build_log_summarizer_subagent(cfg: AppConfig) -> CompiledSubAgent:
@@ -656,7 +917,7 @@ def build_agent(
         # Replace deepagents' default (main-model) summarizer with the haiku-backed one. The
         # matching harness-profile exclusion (registered below) drops the default so this is an
         # in-place, name-matched swap — see the module docstring.
-        _build_summarizer(cfg, backend),
+        _build_summarizer(cfg, backend, counter=counter),
         # Collapse any parallel tool-call turn to a single call BEFORE PolicyMiddleware sees it, so
         # the escalate interrupt()'s replay window can never contain a sibling to double-execute
         # (the third replay-safety layer; see policy/guard.py). Innermost custom model wrap.

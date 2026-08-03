@@ -601,25 +601,34 @@ class RemoteExecutor:
             raise RemoteExecutorError(
                 "executor.mode='remote' requires executor.urls (per-(env,channel) service map)"
             )
+        self._cfg = cfg
         self._urls = cfg.executor.urls
-        self._signing_key_env = cfg.executor.signing_key_env
         self._private_key = private_key
+        self._private_keys: dict[tuple[str, str], Any] = {}
         self._client = client
         self._run_id_provider = run_id_provider or _default_run_id
         self._now = now
 
-    def _key(self) -> Any:
-        if self._private_key is None:
-            from opendevops.tools.signing import load_private_key_from_env
+    def _key(self, environment: str, channel: str) -> Any:
+        """Load the ed25519 private key for ``(environment, channel)`` (cached per route)."""
+        if self._private_key is not None:
+            # Test injection: a single key covers every route.
+            return self._private_key
+        cache_key = (environment, channel)
+        cached = self._private_keys.get(cache_key)
+        if cached is not None:
+            return cached
+        from opendevops.tools.signing import load_private_key_from_env
 
-            self._private_key = load_private_key_from_env(self._signing_key_env)
-        return self._private_key
+        env_name = self._cfg.executor.signing_key_env_for(environment, channel)
+        key = load_private_key_from_env(env_name)
+        self._private_keys[cache_key] = key
+        return key
 
     def _http(self) -> httpx.AsyncClient:
         if self._client is None:
-            import httpx
 
-            self._client = httpx.AsyncClient()
+            self._client = _build_remote_http_client(self._cfg)
         return self._client
 
     def _base_url(self, environment: str, channel: str) -> str:
@@ -674,7 +683,7 @@ class RemoteExecutor:
             tcid,
             channel,
             tool_family,
-            self._key(),
+            self._key(environment, channel),
             environment=environment,
             host=host,
             now=self._now,
@@ -736,6 +745,28 @@ def _safe_detail(resp: httpx.Response) -> str:
         if isinstance(detail, str):
             return detail
     return "error"
+
+
+def _build_remote_http_client(cfg: AppConfig) -> httpx.AsyncClient:
+    """Build the agent → executor HTTP client, optionally with mTLS (``executor.tls``)."""
+    import ssl
+
+    import httpx
+
+    tls = cfg.executor.tls
+    if tls is None:
+        return httpx.AsyncClient()
+    if tls.verify and tls.ca_file is not None:
+        context = ssl.create_default_context(cafile=str(tls.ca_file))
+    elif tls.verify:
+        context = ssl.create_default_context()
+    else:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    if tls.cert_file is not None and tls.key_file is not None:
+        context.load_cert_chain(certfile=str(tls.cert_file), keyfile=str(tls.key_file))
+    return httpx.AsyncClient(verify=context)
 
 
 def select_executor(cfg: AppConfig) -> RemoteExecutor | None:

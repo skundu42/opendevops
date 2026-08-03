@@ -38,12 +38,15 @@ Two accounting paths, deliberately:
    jump-to-end decision.
 2. **Gateway-level aggregation** — the gateway wraps every run with
    `get_usage_metadata_callback()`, a contextvar-based aggregate that catches **all** model calls
-   in the run, including the summarizer's internal calls and the `log-summarizer` subagent, which
-   never pass through our middleware hooks. This aggregate is **authoritative**: it feeds the
-   daily counter and the REPL's cost lines.
+   in the run, including the `log-summarizer` subagent. This aggregate is **authoritative** for
+   LocalGateway: it tops up the daily counter with any delta the in-graph path missed and feeds
+   the REPL's cost lines.
 
-A graph test scripts a summarization trigger and asserts the run's accounted cost includes it —
-the gap between the two paths is exactly why both exist.
+Context-compaction (Haiku summarizer) spend is now priced **in-graph** as well: the summarizer
+middleware wraps its model invoke and flushes USD into `run_cost_usd` / the daily counter so
+mid-run CostCap trips and ServerGateway state accounting see compaction. Per-call pricing also
+re-keys from an `AIMessage`'s reported model name when that name maps to a priced row.
+`log-summarizer` subagent calls remain primarily covered by the LocalGateway callback.
 
 ## Pricing
 

@@ -6,7 +6,7 @@
 # signed decision executes); this ingress rule adds NETWORK reachability restriction so nothing else
 # in the cluster can even open a connection. RECOMMENDED transport hardening: mTLS between the agent
 # and the service (e.g. a service mesh) to add transport-level authentication on top of the signed
-# token — doc-only here; cert management is out of scope.
+# token. Agent-side client certs/CA pin: executor.tls in config.yaml; cert issuance remains ops.
 #
 # EGRESS: default-deny except DNS and an allowlisted CIDR range with the cloud instance metadata
 # endpoint (169.254.169.254) and the whole link-local range EXCLUDED — so a compromised tool cannot

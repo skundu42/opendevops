@@ -17,24 +17,25 @@ Per turn the gateway:
    ``run_completed`` audit events and a friendly :class:`RunResult` (or a wrapped raise);
 5. on success, runs the **authoritative accounting** (below) and closes the chain.
 
-Authoritative accounting — the summarizer-coverage rule
--------------------------------------------------------
-The in-graph budget middleware prices and counts only the *main* model's calls (it keys every
-call to ``self._model_key``) and adds each per-call amount to the daily counter as it goes. A
-summarizer (or any nested model call) is invisible to that middleware but **is** seen by the
+Authoritative accounting — the multi-model coverage rule
+--------------------------------------------------------
+In-graph budget middleware prices each ``AIMessage`` by its reported model name when that name
+maps to a priced row (fallback: main ``model_key``). Context-compaction (Haiku summarizer) also
+flushes its spend into ``run_cost_usd`` / the daily counter. Nested subagent calls (e.g. the
+log-summarizer) may still be invisible to middleware hooks but **are** seen by the
 usage-metadata callback, which aggregates ``{model_name: usage}`` across every chat-model call
 in the turn. So after the run:
 
-* ``state_total`` = ``final_state.run_cost_usd`` (main-model spend the counter already has);
+* ``state_total`` = ``final_state.run_cost_usd`` (in-graph spend the counter already has);
 * ``authoritative`` = Σ ``price_table.cost_usd(mapped_key_i, usage_i)`` over the callback
-  aggregate (main **+** summarizer + anything else).
+  aggregate (main **+** summarizer **+** subagents + anything else).
 
 If ``authoritative > state_total`` the gateway adds only the **delta** to the daily counter
 (both the ``global`` and ``principal:<principal>`` scopes, matching the middleware's two
 writes). Adding just the delta — not the whole authoritative figure — avoids double-counting
-the per-call amounts the middleware already wrote, while still making the daily ledger complete
-(it now includes the summarizer). A callback model name that does not map to a priced row is
-log-warned, priced with the main model's row, and counted as one ``usage_missing`` blind spot.
+amounts already written in-graph, while still completing the daily ledger for nested calls.
+A callback model name that does not map to a priced row is log-warned, priced with the main
+model's row, and counted as one ``usage_missing`` blind spot.
 """
 
 from __future__ import annotations
@@ -766,19 +767,20 @@ class LocalGateway:
 
     def _resolve_price_key(self, model_name: str) -> str | None:
         """Map a reported model name to a priced ``provider:model`` key, or ``None`` if unknown."""
-        if model_name in self._price_table.prices:
-            return model_name
-        return self._price_key_by_name.get(model_name)
+        from opendevops.models.pricing import resolve_price_key
+
+        return resolve_price_key(
+            model_name,
+            self._price_table,
+            index=self._price_key_by_name,
+            default_model_key=self._model_key,
+        )
 
     def _build_price_key_index(self) -> dict[str, str]:
-        """Index each priced key by itself and by its bare model suffix (after ``provider:``)."""
-        index: dict[str, str] = {}
-        for key in self._price_table.prices:
-            index[key] = key
-            _, _, suffix = key.partition(":")
-            if suffix:
-                index.setdefault(suffix, key)
-        return index
+        """Index priced keys; bare suffixes only when unique across providers."""
+        from opendevops.models.pricing import build_price_key_index
+
+        return build_price_key_index(self._price_table)
 
     # -- refusal / interruption paths -----------------------------------------------------
 
