@@ -587,8 +587,10 @@ async def test_cancel_interrupts_in_flight_run(
     build_gateway: BuildGateway, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     gw, _audit, _counter, _cfg = build_gateway([_txt("never reached")])
+    started = asyncio.Event()
 
     async def _slow(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        started.set()
         await asyncio.sleep(5)
         return {}
 
@@ -597,7 +599,7 @@ async def test_cancel_interrupts_in_flight_run(
     task = asyncio.ensure_future(
         gw.run("thread-c", "hang", principal="sandipan", interface="cli", environment="staging")
     )
-    await asyncio.sleep(0.1)  # let the run reach its guarded await
+    await started.wait()  # wait until the run reaches its guarded await
     await gw.cancel("thread-c")
     result = await task
 

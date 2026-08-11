@@ -31,9 +31,9 @@ The stack (`docker-compose.yml`):
 ```sh
 # 1. download the versioned, source-free deployment bundle
 curl -fLO \
-  https://github.com/skundu42/opendevops/releases/download/v0.2.0/opendevops-deploy-0.2.0.tar.gz
-tar -xzf opendevops-deploy-0.2.0.tar.gz
-cd opendevops-0.2.0
+  https://github.com/skundu42/opendevops/releases/download/v0.2.1/opendevops-deploy-0.2.1.tar.gz
+tar -xzf opendevops-deploy-0.2.1.tar.gz
+cd opendevops-0.2.1
 
 # 2. secrets — copy the template, then fill every required blank:
 #    GATEWAY_TOKEN, ANTHROPIC_API_KEY, LANGSMITH_API_KEY,
@@ -52,7 +52,7 @@ curl -s -H "Authorization: Bearer $GATEWAY_TOKEN" \
 # The shipped local config signs in with DASHBOARD_TOKEN.
 ```
 
-The bundle pins `ghcr.io/skundu42/opendevops:0.2.0`, supports `linux/amd64` and `linux/arm64`, and
+The bundle pins `ghcr.io/skundu42/opendevops:0.2.1`, supports `linux/amd64` and `linux/arm64`, and
 preconfigures the daily counter for the Compose Redis service. Verify `SHA256SUMS` from the same
 GitHub release before running it. Contributors can build the checked-in `Dockerfile` locally and
 override `LANGGRAPH_IMAGE`; release consumers do not need Python, uv, Node.js, or the source tree.

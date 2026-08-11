@@ -5,6 +5,15 @@ and uses Git tags prefixed with `v`.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-11
+
+### Fixed
+
+- Updated PyPI trusted publishing to a metadata-v2.5-compatible action release.
+- Removed a timing race from the gateway cancellation test used by the release gate.
+
+See [docs/releases/v0.2.1.md](docs/releases/v0.2.1.md).
+
 ## [0.2.0] - 2026-08-11
 
 ### Added
@@ -66,6 +75,7 @@ See [docs/releases/v0.1.1.md](docs/releases/v0.1.1.md).
   pipeline with checksums, SBOMs, and provenance.
 
 [0.1.2]: https://github.com/skundu42/opendevops/releases/tag/v0.1.2
+[0.2.1]: https://github.com/skundu42/opendevops/releases/tag/v0.2.1
 [0.2.0]: https://github.com/skundu42/opendevops/releases/tag/v0.2.0
 [0.1.1]: https://github.com/skundu42/opendevops/releases/tag/v0.1.1
 [0.1.0]: https://github.com/skundu42/opendevops/releases/tag/v0.1.0

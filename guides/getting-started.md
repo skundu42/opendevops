@@ -17,7 +17,7 @@ app.
 
 ```sh
 # Install the published package; no repository clone or frontend build is needed.
-uv tool install "opendevops[checkpoint,ssh]==0.2.0"
+uv tool install "opendevops[checkpoint,ssh]==0.2.1"
 mkdir opendevops-workspace
 opendevops init opendevops-workspace
 cd opendevops-workspace
