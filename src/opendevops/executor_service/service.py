@@ -29,7 +29,6 @@ RemoteExecutor client path, which the service never calls.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import time
 from collections.abc import Callable
@@ -135,6 +134,7 @@ def create_app(
     secret_source: SecretSource | None = None,
     executor: Any = None,
     ssh_executor: Any = None,
+    spent_store: Any = None,
     now: Callable[[], float] = time.time,
 ) -> FastAPI:
     """Build the executor service app.
@@ -152,8 +152,13 @@ def create_app(
             :class:`LocalExecutor`. Tests inject a spy to prove a rejected request never runs.
         ssh_executor: the SSH runner (``.execute(host, argv, timeout, cred)``); defaults to
             :class:`SshExecutor`.
+        spent_store: optional :class:`~opendevops.executor_service.spent.SpentDecisionStore`;
+            defaults to :func:`~opendevops.executor_service.spent.build_spent_store` (memory or
+            Redis per ``executor.spent_token_backend``).
         now: injectable clock for token-expiry checks (deterministic tests).
     """
+    from opendevops.executor_service.spent import build_spent_store
+
     source = (
         secret_source
         if secret_source is not None
@@ -162,27 +167,10 @@ def create_app(
     runner: Any = executor if executor is not None else LocalExecutor()
     ssh_runner: Any = ssh_executor if ssh_executor is not None else SshExecutor()
 
-    # I1 — spent-decision (replay) cache, closure-scoped so it lives for the app's lifetime.
-    # Keyed by (run_id, tool_call_id); the value is the token ``exp`` (its eviction time). A valid
-    # token is single-use: a second presentation within the 120s TTL is a replay and is rejected
-    # 409 WITHOUT executing. The lock makes the check-and-mark atomic so two concurrent duplicates
-    # cannot both pass. SINGLE-REPLICA assumption: this is per-process — a multi-replica
-    # per-(env,channel) deployment needs a SHARED store (Redis), mirroring the daily-counter's
-    # Redis option (budgets.daily.backend). Not built here; documented.
-    spent: dict[tuple[str, str], float] = {}
-    spent_lock = asyncio.Lock()
-
-    async def _claim_decision(run_id: str, tool_call_id: str, exp: float) -> bool:
-        """Atomically claim (run_id, tool_call_id); False if already spent. Evicts stale keys."""
-        key = (run_id, tool_call_id)
-        async with spent_lock:
-            current = now()
-            for stale in [k for k, e in spent.items() if e <= current]:
-                del spent[stale]
-            if key in spent:
-                return False
-            spent[key] = exp
-            return True
+    # I1 — spent-decision (replay) store. A valid token is single-use: a second presentation
+    # within the TTL is a replay and is rejected 409 WITHOUT executing. ``memory`` is correct
+    # for replicas: 1; ``redis`` is required for horizontally scaled per-(env,channel) pods.
+    store = spent_store if spent_store is not None else build_spent_store(cfg, now=now)
 
     app = FastAPI(title="opendevops executor service")
     app.state.identity_environment = identity_environment
@@ -237,8 +225,15 @@ def create_app(
 
         # 1b. REPLAY guard (I1): mark the decision spent on first valid presentation, BEFORE any
         #     execution and regardless of outcome (a retry must re-authorize with a fresh token). A
-        #     second presentation within the TTL is a replay -> 409, no run.
-        if not await _claim_decision(req.run_id, req.tool_call_id, token.exp):
+        #     second presentation within the TTL is a replay -> 409, no run. Store outages fail
+        #     closed (503) so we never execute when we cannot prove the decision is unspent.
+        try:
+            claimed = await store.claim(req.run_id, req.tool_call_id, token.exp)
+        except Exception as exc:  # noqa: BLE001 - any store failure is fail-closed
+            raise HTTPException(
+                status_code=503, detail="spent-decision store unavailable (fail-closed)"
+            ) from exc
+        if not claimed:
             raise HTTPException(
                 status_code=409, detail="decision token already spent (replay rejected)"
             )

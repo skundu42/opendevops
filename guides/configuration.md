@@ -96,12 +96,16 @@ directory entries.
 executor:
   mode: local                # local (default) | remote (requires full urls map)
   urls: null                 # remote: {staging: {ro, rw}, prod: {ro, rw}} service base URLs
-  signing_key_env: null      # remote, agent side: env var name of the ed25519 PRIVATE key (base64, 32 raw bytes)
-  verify_key_env: null       # remote, service side: env var name of the ed25519 PUBLIC key
+  signing_key_env: null      # remote, agent: shared PRIVATE key env-var NAME (unless signing_keys is complete)
+  signing_keys: null         # optional per-(env,channel) PRIVATE key env-var NAMES
+  verify_key_env: null       # remote, service: PUBLIC key env-var NAME (per-pod for per-route keys)
+  spent_token_backend: memory  # memory (replicas: 1) | redis (multi-replica shared replay cache)
+  spent_token_redis_url: null  # required when spent_token_backend=redis
+  tls: null                  # optional agent mTLS: {ca_file, cert_file, key_file, verify}
   secret_source: env         # env | file (CSI/volume) | vault (HashiCorp KV v2)
   secret_env_prefix: ""      # optional namespace prefix for env lookups
   secret_file_dir: null      # file backend: directory of per-NAME secret files
-  vault: null                # vault: {addr_env, token_env, mount, path_prefix, value_field}
+  vault: null                # vault: {addr_env, auth, …} — auth is token | approle | kubernetes
 ```
 
 A standalone `{{secret:NAME}}` argv entry declares a child environment variable and is removed
@@ -109,7 +113,9 @@ before execution. Use it only with programs that natively read that variable (fo
 `PGPASSWORD`). Embedded references are rejected; there is no shell expansion.
 
 `mode: remote` routes both `run_command` and `ssh_run` to per-(environment, channel) executor
-pods — see [security model](security-model.md#the-executor-split-moderemote).
+pods — see [security model](security-model.md#the-executor-split-moderemote). Horizontally
+scaled executor Deployments must use `spent_token_backend: redis`. Vault `auth: approle` /
+`kubernetes` obtain a client token before the KV v2 read (static `token` remains the default).
 
 ### `control_plane` — grants + chat durable store
 

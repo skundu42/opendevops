@@ -214,10 +214,12 @@ opendevops config grants
 ```
 
 The control plane is an additional gate: a grant never overrides a policy deny, credential scope,
-target allowlist, or dry-run requirement. AWS, GCP, and Azure policy packs remain read-only until
-reviewed deployment commands and distinct rw credentials are added. Production Kubernetes
-execution also requires `targets.kubernetes.kubeconfig_rw_by_environment.prod`; the legacy
-`kubeconfig_rw` field is accepted only as a staging fallback.
+target allowlist, or dry-run requirement. Curated AWS / Google Cloud / Azure write packs
+(`aws-write` / `gcloud-write` / `az-write`) unlock scale/rollout-class ops only when distinct
+`credential_env_rw` identities are configured; IAM, secret access, destroy, and provider-wide
+deployment remain denied. Production Kubernetes execution also requires
+`targets.kubernetes.kubeconfig_rw_by_environment.prod`; the legacy `kubeconfig_rw` field is
+accepted only as a staging fallback.
 
 ## Why the execution model is different
 

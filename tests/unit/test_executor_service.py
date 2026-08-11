@@ -395,6 +395,31 @@ async def test_concurrent_duplicates_run_exactly_once(tmp_path: Any) -> None:
     assert len(spy.calls) == 1
 
 
+class _RaisingSpentStore:
+    async def claim(self, run_id: str, tool_call_id: str, exp: float) -> bool:
+        raise RuntimeError("redis down")
+
+
+async def test_spent_store_outage_fails_closed_without_executing(tmp_path: Any) -> None:
+    priv, pub = generate_keypair()
+    spy = SpyExecutor(output="ran")
+    app = _app(
+        make_cfg(str(tmp_path)),
+        public_key=pub,
+        executor=spy,
+        spent_store=_RaisingSpentStore(),
+        now=lambda: 1000.0,
+    )
+    argv = ["kubectl", "get", "pods"]
+    token = _sign(priv, argv, family="kubectl")
+    async with _client(app) as client:
+        resp = await client.post(
+            "http://svc/execute", json=_body(argv, token, family="kubectl")
+        )
+    assert resp.status_code == 503
+    assert not spy.called
+
+
 # --------------------------------------------------------------------------------------
 # secrets-into-env, full-scrub
 # --------------------------------------------------------------------------------------

@@ -44,12 +44,16 @@ execution:
 executor:                                    # Executor split. Default local = in-process (holds creds+secrets+SSH key); remote routes run_command AND ssh_run to per-(env,channel) service pods.
   mode: local                                # local | remote. remote requires executor.urls for both staging and prod (ro+rw each); tokens bind environment+channel(+host for ssh); each pod asserts OPENDEVOPS_EXECUTOR_ENV/_CHANNEL.
   urls: null                                 # remote: {staging: {ro: http://…, rw: http://…}, prod: {ro: http://…, rw: http://…}} — required when mode=remote
-  signing_key_env: null                      # remote (agent): NAME of the env var holding the ed25519 PRIVATE signing key (base64 raw 32 bytes); required when mode=remote
-  verify_key_env: null                       # remote (service): NAME of the env var holding the ed25519 PUBLIC verify key (base64 raw 32 bytes); the service holds the public key only
+  signing_key_env: null                      # remote (agent): shared PRIVATE signing-key env-var NAME (base64 raw 32 bytes); required unless signing_keys is complete
+  signing_keys: null                         # optional per-(env,channel) PRIVATE key env-var NAMES: {staging: {ro, rw}, prod: {ro, rw}}
+  verify_key_env: null                       # remote (service): PUBLIC verify-key env-var NAME; for per-route keys each Deployment sets its matching public key
+  spent_token_backend: memory                # memory (replicas: 1) | redis (required for multi-replica per-(env,channel) Deployments)
+  spent_token_redis_url: null                # e.g. redis://redis:6379/3 when spent_token_backend=redis
+  tls: null                                  # optional agent mTLS: {ca_file, cert_file, key_file, verify}; server TLS via mesh/sidecar
   secret_source: env                         # env | file (CSI/volume) | vault (HashiCorp KV v2)
   secret_env_prefix: ""                      # optional prefix for env lookups
   secret_file_dir: null                      # file backend: directory of per-NAME secret files
-  vault: null                                # vault backend: {addr_env, token_env, mount, path_prefix, value_field}
+  vault: null                                # vault: {addr_env, auth: token|approle|kubernetes, token_env / role_id_env+secret_id_env / kubernetes_role+jwt_path, mount, path_prefix, value_field}
 audit: {dir: ./audit}
 policy: {dir: ./config/policy}
 state: {dir: ./state}                       # LocalGateway checkpointer sqlite db (0o700 dir)

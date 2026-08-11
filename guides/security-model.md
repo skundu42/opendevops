@@ -82,7 +82,12 @@ reaches execution without passing the policy engine.
 > **Status:** production-capable with a complete `executor.urls` map. `mode=remote` is opt-in.
 > The token binds `environment` and `channel` (plus `host` for `ssh_run`); each service pod
 > asserts `OPENDEVOPS_EXECUTOR_ENV` / `OPENDEVOPS_EXECUTOR_CHANNEL` and rejects mismatches with
-> 403. The agent routes per `(env, channel)` and does not hold infra or SSH credentials. See
+> 403. Spent decisions are tracked in-process by default; set `executor.spent_token_backend:
+> redis` before scaling a Deployment above one replica. Optional `executor.tls` pins the agent
+> client to the executor CA (and may present a client certificate); terminate server TLS at the
+> mesh/sidecar. Optional `executor.signing_keys` selects a distinct private key per
+> `(environment, channel)` while each pod verifies with its own `verify_key_env` public key.
+> The agent routes per `(env, channel)` and does not hold infra or SSH credentials. See
 > `ops/executor/README.md`. `mode=local` remains the default single-process path.
 
 ## Structural guards
@@ -148,7 +153,17 @@ policy-denial-spike rule — repeated denials are a bypass-probing signal, not n
   currently often still uses the local executor with carefully scoped credentials.
 - The control ledger and dashboard chat transcript default to SQLite. Set
   `control_plane.backend: postgres` (with `database_url_env`) for multi-replica service mode.
-- AWS, GCP and Azure packs remain read-only. A deploy capability type exists in change control,
-  but no grant can override the absent/denied mutation rules or create cloud `rw` credentials.
+- Cloud write packs (`aws-write` / `gcloud-write` / `az-write`) are curated scale/rollout-class
+  ops only — hybrid dry-run, grant-gated in production, and boot-gated on distinct
+  `credential_env_rw` identities. They are not a general cloud deployment engine: IAM, secret
+  reads, terminate/destroy, Terraform/Pulumi/CloudFormation updates, and unrestricted CLI
+  mutations remain denied. A grant cannot create authority the pack and credentials do not already
+  provide.
 - Grant target strings record the reviewed change scope; executable target enforcement remains in
   the policy pack's parsed allowlists and credential scope.
+- Remote executor multi-replica Deployments must set `executor.spent_token_backend: redis` (shared
+  spent-decision cache). The default in-memory store is correct only for `replicas: 1`.
+- Agent→executor mTLS is optional via `executor.tls` (client cert + CA pin); server TLS termination
+  is expected at the mesh/sidecar. Per-(environment, channel) signing keys are optional via
+  `executor.signing_keys` (each service pod still loads its matching public key from
+  `verify_key_env`).

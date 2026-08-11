@@ -12,5 +12,8 @@ Status: implementing
 
 ## Out of scope
 
-- Vault AppRole / Kubernetes auth (token env is enough for v1)
 - Writing secrets
+
+## Follow-up (done)
+
+- Vault AppRole / Kubernetes auth — see `2026-07-31-production-hardening-design.md`

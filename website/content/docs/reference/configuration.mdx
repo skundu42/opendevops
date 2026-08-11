@@ -62,6 +62,13 @@ Configure identity, authentication, and fixed budget/environment selection for H
 Slack, scheduler, and dashboard entry points. Missing route credentials make the corresponding
 route unavailable.
 
+## Executor (remote mode)
+
+When `executor.mode=remote`, configure the full `urls` map, a signing key (`signing_key_env` and/or
+`signing_keys`), and for multi-replica workers `spent_token_backend: redis`. Optional `tls` pins the
+agent client to the executor CA; optional Vault `auth` may be `token`, `approle`, or `kubernetes`.
+See the [remote executor](/docs/deployment/remote-executor) guide.
+
 ## Validate
 
 Run after every change:

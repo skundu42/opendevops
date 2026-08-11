@@ -3,6 +3,23 @@
 All notable changes to this project are documented here. The project follows Semantic Versioning
 and uses Git tags prefixed with `v`.
 
+## [Unreleased]
+
+### Added
+
+- Shared Redis spent-decision store for multi-replica remote executor pods
+  (`executor.spent_token_backend: redis`).
+- Optional agent→executor mTLS via `executor.tls` (CA + client certificate).
+- Optional per-(environment, channel) signing keys via `executor.signing_keys`.
+- Vault AppRole and Kubernetes auth for `executor.secret_source: vault`.
+- In-graph re-pricing for context-compaction (Haiku summarizer) and per-message model key
+  resolution so CostCap / daily counters see non-main model spend.
+
+### Fixed
+
+- Documentation that still claimed AWS/GCP/Azure packs were read-only after curated write packs
+  shipped in 0.1.2.
+
 ## [0.1.2] - 2026-07-27
 
 ### Added

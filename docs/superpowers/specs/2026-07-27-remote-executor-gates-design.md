@@ -20,11 +20,14 @@ Scope: close the four pre-deployment gates in `ops/executor/README.md`
 3. **Client routing** — `RemoteExecutor` selects `urls[environment][channel]` per decision. `ssh_run` always uses channel `ro`.
 4. **SSH remote** — agent keeps host allowlist check; does **not** hold the SSH key. Service resolves `targets.ssh` credentials and runs `SshExecutor`. Connection failures → 502; agent maps to the existing refusal string (no exec meta).
 
-## Out of scope
+## Out of scope (at gates landing)
 
-- Per-(env,channel) signing keys
-- Postgres control ledger / Vault SecretSource / multi-provider LLMs (later sub-projects)
-- Shared Redis replay cache for multi-replica executor pods
+- Postgres control ledger / Vault SecretSource / multi-provider LLMs (later sub-projects; landed separately)
+
+## Follow-up (done)
+
+- Per-(env,channel) signing keys + shared Redis spent-token cache + agent mTLS —
+  see `2026-07-31-production-hardening-design.md`
 
 ## Test plan
 

@@ -293,17 +293,105 @@ class ExecutorChannelUrls(BaseModel):
     rw: str
 
 
+class ExecutorChannelKeys(BaseModel):
+    """Env-var NAMES holding ed25519 keys for the ``ro`` and ``rw`` channels of one environment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ro: str
+    rw: str
+
+    @field_validator("ro", "rw", mode="after")
+    @classmethod
+    def _require_key_env_name(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("executor signing-key env-var names must not be blank")
+        return value
+
+
+class ExecutorTlsConfig(BaseModel):
+    """Optional mTLS for the agent → executor HTTP client (``mode=remote``).
+
+    Paths point at PEM files (typically CSI/Secret mounts). When ``cert_file`` + ``key_file`` are
+    set the agent presents a client certificate; ``ca_file`` pins the executor's server CA.
+    Server-side TLS termination is expected at the mesh/sidecar or ingress — the FastAPI app itself
+    still speaks plain HTTP on the pod port.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ca_file: Path | None = None
+    cert_file: Path | None = None
+    key_file: Path | None = None
+    # ``verify: false`` is a test-only escape hatch; production must pin a CA.
+    verify: bool = True
+
+    @field_validator("ca_file", "cert_file", "key_file", mode="after")
+    @classmethod
+    def _expand_tls_paths(cls, value: Path | None) -> Path | None:
+        return value.expanduser() if value is not None else None
+
+    @model_validator(mode="after")
+    def _client_cert_pair(self) -> ExecutorTlsConfig:
+        if (self.cert_file is None) ^ (self.key_file is None):
+            raise ValueError(
+                "executor.tls.cert_file and executor.tls.key_file must be set together "
+                "(client certificate pair)"
+            )
+        return self
+
+
 class VaultSecretConfig(BaseModel):
-    """HashiCorp Vault KV v2 settings for ``executor.secret_source=vault``."""
+    """HashiCorp Vault KV v2 settings for ``executor.secret_source=vault``.
+
+    ``auth`` selects how the client obtains a Vault token before the KV read:
+
+    * ``token`` (default) — static token from ``token_env`` (v1 / local).
+    * ``approle`` — login via ``role_id_env`` + ``secret_id_env`` at ``auth/{auth_mount}/login``.
+    * ``kubernetes`` — login via the pod SA JWT at ``jwt_path`` with ``kubernetes_role``.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     addr_env: str = "VAULT_ADDR"
+    auth: Literal["token", "approle", "kubernetes"] = "token"
     token_env: str = "VAULT_TOKEN"
+    role_id_env: str | None = None
+    secret_id_env: str | None = None
+    kubernetes_role: str | None = None
+    jwt_path: Path = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+    auth_mount: str | None = None
     mount: str = "secret"
     path_prefix: str = "opendevops"
     # Optional KV field name; when null, uses key ``value`` then falls back to a single-field map.
     value_field: str = "value"
+
+    @field_validator("jwt_path", mode="after")
+    @classmethod
+    def _expand_jwt_path(cls, value: Path) -> Path:
+        return value.expanduser()
+
+    @model_validator(mode="after")
+    def _auth_fields(self) -> VaultSecretConfig:
+        if self.auth == "approle" and (not self.role_id_env or not self.secret_id_env):
+            raise ValueError(
+                "executor.vault.auth='approle' requires role_id_env and secret_id_env"
+            )
+        if self.auth == "kubernetes" and not self.kubernetes_role:
+            raise ValueError(
+                "executor.vault.auth='kubernetes' requires kubernetes_role"
+            )
+        return self
+
+    def resolved_auth_mount(self) -> str:
+        """Auth mount path: explicit ``auth_mount``, else ``approle`` / ``kubernetes`` / unused."""
+        if self.auth_mount:
+            return self.auth_mount
+        if self.auth == "approle":
+            return "approle"
+        if self.auth == "kubernetes":
+            return "kubernetes"
+        return "token"
 
 
 class ExecutorConfig(BaseModel):
@@ -325,10 +413,17 @@ class ExecutorConfig(BaseModel):
 
     * ``urls`` — required when ``mode=remote``: a map of ``staging`` / ``prod`` → ``{ro, rw}``
       service base URLs. Boot fails closed if either environment or either channel is missing.
-    * ``signing_key_env`` — NAME of the env var holding the agent's ed25519 PRIVATE signing key
-      (base64 of the raw 32 bytes); only the NAME lives in config. Required for remote.
+    * ``signing_key_env`` — NAME of the env var holding a shared agent ed25519 PRIVATE signing key
+      (base64 of the raw 32 bytes). Required for remote unless ``signing_keys`` is fully set.
+    * ``signing_keys`` — optional per-(environment, channel) private-key env-var NAMES. When set
+      for a route, that key is used instead of ``signing_key_env``.
     * ``verify_key_env`` — NAME of the env var holding the executor service's ed25519 PUBLIC verify
-      key (base64 raw 32 bytes). Read by the SERVICE, which holds the public key only.
+      key (base64 raw 32 bytes). Read by the SERVICE, which holds the public key only. For
+      per-route keys, each Deployment sets this to its matching public key.
+    * ``spent_token_backend`` — ``memory`` (default, single-replica) or ``redis`` (multi-replica
+      shared replay cache).
+    * ``spent_token_redis_url`` — Redis URL when ``spent_token_backend=redis``.
+    * ``tls`` — optional agent-side mTLS (CA + client cert) for ``mode=remote``.
     * ``secret_source`` — ``env`` | ``file`` (CSI/volume) | ``vault`` (HashiCorp KV v2).
     * ``secret_env_prefix`` — optional prefix for ``env`` lookups (namespacing).
     * ``secret_file_dir`` — directory of secret files when ``secret_source=file`` (CSI mount).
@@ -340,11 +435,22 @@ class ExecutorConfig(BaseModel):
     mode: Literal["local", "remote"] = "local"
     urls: dict[Literal["staging", "prod"], ExecutorChannelUrls] | None = None
     signing_key_env: str | None = None
+    signing_keys: dict[Literal["staging", "prod"], ExecutorChannelKeys] | None = None
     verify_key_env: str | None = None
+    spent_token_backend: Literal["memory", "redis"] = "memory"
+    spent_token_redis_url: str | None = None
+    tls: ExecutorTlsConfig | None = None
     secret_source: Literal["env", "file", "vault"] = "env"
     secret_env_prefix: str = ""
     secret_file_dir: Path | None = None
     vault: VaultSecretConfig | None = None
+
+    @field_validator("signing_key_env", mode="after")
+    @classmethod
+    def _require_shared_key_env_name(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("executor.signing_key_env must not be blank")
+        return value
 
     @field_validator("secret_file_dir", mode="after")
     @classmethod
@@ -353,18 +459,28 @@ class ExecutorConfig(BaseModel):
 
     @model_validator(mode="after")
     def _remote_requires_urls_and_signing_key(self) -> ExecutorConfig:
-        """``mode: remote`` needs the full URL map + signing-key env — fail-closed."""
+        """``mode: remote`` needs the full URL map + a signing key — fail-closed."""
         if self.mode == "remote":
             if self.urls is None or set(self.urls) != {"staging", "prod"}:
                 raise ValueError(
                     "executor.mode='remote' requires executor.urls with both "
                     "'staging' and 'prod' entries (each providing ro and rw base URLs)"
                 )
-            if not self.signing_key_env:
+            has_shared = bool(self.signing_key_env)
+            has_map = (
+                self.signing_keys is not None
+                and set(self.signing_keys) == {"staging", "prod"}
+            )
+            if not has_shared and not has_map:
                 raise ValueError(
                     "executor.mode='remote' requires executor.signing_key_env "
-                    "(the env var naming the agent's ed25519 private signing key)"
+                    "and/or a complete executor.signing_keys map "
+                    "(env var names for the agent's ed25519 private signing key(s))"
                 )
+        if self.spent_token_backend == "redis" and not self.spent_token_redis_url:
+            raise ValueError(
+                "executor.spent_token_backend='redis' requires executor.spent_token_redis_url"
+            )
         if self.secret_source == "file" and self.secret_file_dir is None:
             raise ValueError(
                 "executor.secret_source='file' requires executor.secret_file_dir "
@@ -373,9 +489,29 @@ class ExecutorConfig(BaseModel):
         if self.secret_source == "vault" and self.vault is None:
             raise ValueError(
                 "executor.secret_source='vault' requires executor.vault "
-                "(addr_env, token_env, mount, path_prefix)"
+                "(addr_env, auth, mount, path_prefix)"
             )
         return self
+
+    def signing_key_env_for(
+        self, environment: str, channel: str
+    ) -> str:
+        """Resolve the private-key env-var NAME for ``(environment, channel)``."""
+        if self.signing_keys is not None:
+            env_keys = None
+            if environment == "staging":
+                env_keys = self.signing_keys.get("staging")
+            elif environment == "prod":
+                env_keys = self.signing_keys.get("prod")
+            if env_keys is not None:
+                name = env_keys.ro if channel == "ro" else env_keys.rw if channel == "rw" else None
+                if name:
+                    return name
+        if self.signing_key_env:
+            return self.signing_key_env
+        raise ValueError(
+            f"no signing key configured for environment={environment!r} channel={channel!r}"
+        )
 
 
 class AuditConfig(BaseModel):
