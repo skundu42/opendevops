@@ -3,7 +3,7 @@
 import { Check, Copy } from 'lucide-react';
 import { useState } from 'react';
 
-const command = 'uv tool install "opendevops[checkpoint,ssh]==0.1.2"';
+const command = 'uv tool install "opendevops[checkpoint,ssh]==0.2.0"';
 
 export function CopyCommand() {
   const [copied, setCopied] = useState(false);

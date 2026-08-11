@@ -85,12 +85,12 @@ available before pushing the tag.
 Preferred install from the published package:
 
 ```sh
-uv tool install "opendevops[checkpoint,ssh]==0.1.2"
+uv tool install "opendevops[checkpoint,ssh]==0.2.0"
 ```
 
 GitHub Release wheel (when installing a specific artifact directly):
 
 ```sh
 uv tool install \
-  'opendevops[checkpoint,ssh] @ https://github.com/skundu42/opendevops/releases/download/v0.1.2/opendevops-0.1.2-py3-none-any.whl'
+  'opendevops[checkpoint,ssh] @ https://github.com/skundu42/opendevops/releases/download/v0.2.0/opendevops-0.2.0-py3-none-any.whl'
 ```

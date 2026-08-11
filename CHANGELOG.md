@@ -5,6 +5,8 @@ and uses Git tags prefixed with `v`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-11
+
 ### Added
 
 - Shared Redis spent-decision store for multi-replica remote executor pods
@@ -19,6 +21,8 @@ and uses Git tags prefixed with `v`.
 
 - Documentation that still claimed AWS/GCP/Azure packs were read-only after curated write packs
   shipped in 0.1.2.
+
+See [docs/releases/v0.2.0.md](docs/releases/v0.2.0.md).
 
 ## [0.1.2] - 2026-07-27
 
@@ -62,5 +66,6 @@ See [docs/releases/v0.1.1.md](docs/releases/v0.1.1.md).
   pipeline with checksums, SBOMs, and provenance.
 
 [0.1.2]: https://github.com/skundu42/opendevops/releases/tag/v0.1.2
+[0.2.0]: https://github.com/skundu42/opendevops/releases/tag/v0.2.0
 [0.1.1]: https://github.com/skundu42/opendevops/releases/tag/v0.1.1
 [0.1.0]: https://github.com/skundu42/opendevops/releases/tag/v0.1.0
