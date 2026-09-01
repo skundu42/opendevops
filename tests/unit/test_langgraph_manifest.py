@@ -46,6 +46,7 @@ def test_manifest_http_app_points_at_importable_asgi_app(
     assert (REPO_ROOT / path_part.lstrip("./")).is_file()
     # The default app builds lazily from $OPENDEVOPS_CONFIG (points at the shipped config.yaml).
     monkeypatch.setenv("OPENDEVOPS_CONFIG", str(REPO_ROOT / "config" / "config.yaml"))
+    monkeypatch.setenv("REDIS_URI", "redis://localhost:6379/1")
     module = importlib.import_module("opendevops.interfaces.webapp")
     app = getattr(module, attr)
     assert isinstance(app, FastAPI)

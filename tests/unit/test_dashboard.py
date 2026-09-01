@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
@@ -21,6 +23,7 @@ from opendevops.gateway.base import (
     ToolCall,
     ToolResult,
 )
+from opendevops.interfaces import dashboard as dashboard_module
 from opendevops.interfaces.dashboard import build_dashboard_snapshot
 from opendevops.interfaces.webapp import create_app
 
@@ -259,6 +262,24 @@ def test_snapshot_is_safe_and_useful_when_audit_dir_is_empty(tmp_path: Path) -> 
     assert snapshot["runs"] == []
     assert len(snapshot["daily"]) == 7
     assert all("credential_env" not in integration for integration in snapshot["integrations"])
+
+
+async def test_snapshot_cache_shares_one_scan_and_returns_independent_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+
+    def _build(cfg: AppConfig) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        return {"calls": calls, "nested": {"value": 1}}
+
+    monkeypatch.setattr(dashboard_module, "build_dashboard_snapshot", _build)
+    cache = dashboard_module._DashboardSnapshotCache(_cfg(tmp_path), ttl_s=60)
+    first, second = await asyncio.gather(cache.get(), cache.get())
+    assert calls == 1
+    first["nested"]["value"] = 2
+    assert second["nested"] == {"value": 1}
 
 
 async def test_dashboard_configuration_mutations_require_csrf_and_follow_lifecycle(

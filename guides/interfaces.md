@@ -68,6 +68,7 @@ Custom routes (mounted by the server from `interfaces/webapp.py`):
 | `GET /dashboard/oidc/login`, `GET /dashboard/oidc/callback` | OIDC | state + nonce + PKCE login flow |
 | `POST /dashboard/logout` | session + CSRF | revoke the current session |
 | `GET /healthz` | none | liveness |
+| `GET /readyz` | gateway bearer at Caddy | audit, budget counter, Redis, and PostgreSQL readiness |
 | `GET /metrics` | none (network-internal) | Prometheus |
 
 A route whose configured secret env var is unset returns **503** — fail-closed, never

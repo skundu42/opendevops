@@ -15,7 +15,7 @@ rule_files:
 
 scrape_configs:
   # The webhook app mounted on the LangGraph Server (langgraph.json http.app):
-  #   opendevops_webhook_requests_total{route,outcome}, opendevops_runs_started_total{interface}
+  #   webhook/run counters, policy denials, daily spend/caps, scheduler last-success timestamps
   - job_name: langgraph-server
     metrics_path: /metrics
     static_configs:

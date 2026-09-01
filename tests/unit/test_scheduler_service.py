@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -94,6 +95,19 @@ async def test_command_job_builds_fresh_thread_and_runs_scheduled() -> None:
     assert outcome == JobOutcome(
         job_id="drift", status="ok", thread_id="thread-1", run_id="run-42", error=None
     )
+
+
+async def test_success_records_scheduler_timestamp() -> None:
+    recorder = AsyncMock()
+    svc = SchedulerService(
+        StubGateway(result=_ok_result()),  # type: ignore[arg-type]
+        [],
+        success_recorder=recorder,
+    )
+    await svc.run_job(_cmd_spec())
+    recorder.assert_awaited_once()
+    assert recorder.await_args.args[0] == "drift"
+    assert recorder.await_args.args[1] > 0
 
 
 async def test_command_job_records_escalation_as_escalated() -> None:

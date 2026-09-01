@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import html
 import json
@@ -67,6 +68,7 @@ _MAX_AUDIT_FILES = 200
 _MAX_AUDIT_FILE_BYTES = 16 * 1024 * 1024
 _RECENT_RUNS = 24
 _MAX_CHAT_RESPONSE_CHARS = 100_000
+_SNAPSHOT_CACHE_TTL_S = 2.0
 
 _CSP = (
     "default-src 'self'; "
@@ -261,6 +263,30 @@ def _scope_approval_details(
             if isinstance(item, dict)
         ],
     }
+
+
+class _DashboardSnapshotCache:
+    """One bounded audit snapshot shared by every dashboard request and SSE client."""
+
+    def __init__(self, cfg: AppConfig, ttl_s: float = _SNAPSHOT_CACHE_TTL_S) -> None:
+        self._cfg = cfg
+        self._ttl_s = ttl_s
+        self._expires_at = 0.0
+        self._value: dict[str, Any] | None = None
+        self._lock = asyncio.Lock()
+
+    async def get(self) -> dict[str, Any]:
+        now = asyncio.get_running_loop().time()
+        if self._value is not None and now < self._expires_at:
+            return copy.deepcopy(self._value)
+        async with self._lock:
+            now = asyncio.get_running_loop().time()
+            if self._value is None or now >= self._expires_at:
+                self._value = await asyncio.to_thread(build_dashboard_snapshot, self._cfg)
+                self._expires_at = asyncio.get_running_loop().time() + self._ttl_s
+            return copy.deepcopy(self._value)
+
+
 def register_dashboard(
     app: FastAPI,
     cfg: AppConfig,
@@ -294,6 +320,8 @@ def register_dashboard(
     app.state.dashboard_auth = auth
     app.state.change_control = change_control
     app.state.dashboard_chat = chat_store
+    snapshot_cache = _DashboardSnapshotCache(cfg)
+    app.state.dashboard_snapshot_cache = snapshot_cache
 
     async def _session(request: Request) -> DashboardSession | None:
         return await auth.current(request.cookies.get(_COOKIE_NAME))
@@ -763,7 +791,7 @@ def register_dashboard(
         if denied is not None:
             return denied
         assert session is not None
-        snapshot = await asyncio.to_thread(build_dashboard_snapshot, cfg)
+        snapshot = await snapshot_cache.get()
         live = _scope_approval_details(
             await _live_snapshot(gateway, live_telemetry), session
         )
@@ -802,7 +830,7 @@ def register_dashboard(
                     await _live_snapshot(gateway, live_telemetry), session
                 )
                 yield {"event": "live", "data": json.dumps(live, separators=(",", ":"))}
-                snapshot = await asyncio.to_thread(build_dashboard_snapshot, cfg)
+                snapshot = await snapshot_cache.get()
                 snapshot["slis"]["queue_latency_ms"] = live.get("queue_latency_ms")
                 snapshot["control_plane"] = {
                     "revision": change_control.revision(),

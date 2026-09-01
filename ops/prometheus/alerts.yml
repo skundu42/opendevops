@@ -1,15 +1,7 @@
 # Prometheus alert rules for opendevops — the operability cross-checks.
 #
-# Honesty note on metric availability (which alerts fire TODAY vs are PRE-PROVISIONED):
-#   * LIVE now — series the webhook app (prometheus_client) and Vector already export:
-#       opendevops_webhook_requests_total{route,outcome}, opendevops_runs_started_total{...},
-#       vector_component_* / up{}.
-#   * PRE-PROVISIONED — series that need an exporter which has not shipped yet:
-#       opendevops_policy_denials_total (tool-layer denials — a metrics exporter over the audit
-#       stream), opendevops_daily_spend_usd (a spend exporter mirroring the RedisDailyCounter),
-#       opendevops_scheduler_last_success_timestamp_seconds (the APScheduler service).
-#     Prometheus tolerates a rule whose series does not exist yet — it simply never fires until the
-#     series appears, so wiring the alerting now means it is ready the moment the exporter ships.
+# The server exporter publishes webhook counters, audit-derived policy denials, daily-counter
+# spend/caps, and scheduler success timestamps. Vector publishes its own component metrics.
 
 groups:
   # -- policy-denial spike (bypass-probing signal) -------------------------------------
@@ -25,8 +17,7 @@ groups:
           summary: "Elevated unauthorized webhook requests (possible ingress probing)"
           description: "> 0.2 unauthorized webhook req/s for 10m — check source IPs and the gateway token."
 
-      # PRE-PROVISIONED: a spike in tool-layer policy DENY decisions (argv-bypass probing) — fires
-      # once an audit-metrics exporter publishes opendevops_policy_denials_total{rule_id}.
+      # A spike in tool-layer policy DENY decisions (argv-bypass probing).
       - alert: PolicyDenialSpike
         expr: sum(rate(opendevops_policy_denials_total[5m])) > 0.5
         for: 10m
@@ -39,8 +30,7 @@ groups:
   # -- daily spend > 80% of cap ------------------------------------------------------
   - name: opendevops-budget
     rules:
-      # PRE-PROVISIONED: needs opendevops_daily_spend_usd{scope} + opendevops_daily_cap_usd{scope}
-      # from a spend exporter mirroring the RedisDailyCounter (see ops/maintenance.py spend-report).
+      # The exporter reads the same configured daily counter used by the budget middleware.
       - alert: DailySpendOver80Percent
         expr: |
           opendevops_daily_spend_usd{scope="global"}
@@ -52,22 +42,18 @@ groups:
           summary: "Global daily spend over 80% of cap"
           description: "Daily USD envelope {{ $value | humanizePercentage }} consumed — runs will start refusing at 100%."
 
-  # -- scheduler silence > 1.5x period (PRE-PROVISIONED) ------------------------
+  # -- scheduler silence > 1.5x period ------------------------------------------
   - name: opendevops-scheduler
     rules:
-      # PRE-PROVISIONED: the APScheduler service exports its last-success timestamp; alert when a
-      # job hasn't succeeded for > 1.5x its 24h period (the drift/cert/backup hygiene jobs).
+      # The scheduler records each successful job completion in Redis; the server exports it.
       - alert: SchedulerSilence
         expr: time() - opendevops_scheduler_last_success_timestamp_seconds > 1.5 * 86400
         for: 15m
         labels:
           severity: warning
         annotations:
-          summary: "Scheduled job silent for > 1.5x its period"
-          # No {{ $labels.* }} interpolation: the scheduler metric's label schema isn't defined
-          # yet, so the description must not reference a label that does not exist. Rule stays inert
-          # until opendevops_scheduler_last_success_timestamp_seconds ships (see header note).
-          description: "No successful scheduled run in over 36h (> 1.5x the 24h period) — the scheduler may be down."
+          summary: "Scheduled job {{ $labels.job_id }} silent for over 36h"
+          description: "No successful {{ $labels.job_id }} run in over 36h — the scheduler or job may be failing."
 
   # -- audit-shipper lag -------------------------------------------------------------
   - name: opendevops-audit-shipper

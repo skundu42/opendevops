@@ -158,9 +158,8 @@ the [scheduler](interfaces.md#scheduler).
 Grafana (`:3000`, admin password from `GRAFANA_ADMIN_PASSWORD`) ships with the
 "opendevops — service ops" dashboard: runs, denials, daily spend, shipper lag. Prometheus alert
 rules (`ops/prometheus/alerts.yml`) cover policy-denial spikes (bypass probing), daily spend
->80%, scheduler silence >1.5× period, and audit-shipper lag. Some series are pre-provisioned for
-components that ship later and simply don't fire until then (see the header comment in
-`alerts.yml`).
+>80%, scheduler silence >1.5× period, and audit-shipper lag. The server exports denial totals from
+the audit chains, spend/caps from the daily counter, and scheduler success timestamps from Redis.
 
 The authenticated application dashboard at `:8123/dashboard` is the run-level companion. It
 publishes the defined run-success, queue-latency, policy-latency, executor-error, audit-lag and

@@ -96,6 +96,17 @@ def test_langgraph_server_env_wires_postgres_redis_and_config() -> None:
     assert env["OPENDEVOPS_CONFIG"].endswith("config.yaml")
 
 
+def test_server_healthcheck_uses_dependency_readiness() -> None:
+    healthcheck = _compose()["services"]["langgraph-server"]["healthcheck"]
+    assert "/readyz" in healthcheck["test"][-1]
+
+
+def test_scheduler_shares_redis_for_success_metrics() -> None:
+    scheduler = _compose()["services"]["scheduler"]
+    assert scheduler["environment"]["REDIS_URI"] == "redis://redis:6379/1"
+    assert scheduler["depends_on"]["redis"]["condition"] == "service_healthy"
+
+
 def test_compose_uses_the_published_image_by_default() -> None:
     image = _compose()["services"]["langgraph-server"]["image"]
     assert image == "${LANGGRAPH_IMAGE:-ghcr.io/skundu42/opendevops:latest}"

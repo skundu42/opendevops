@@ -21,18 +21,24 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
+import fakeredis
+import fakeredis.aioredis
 import httpx
 import pytest
 
 from graph.helpers import MODELS, budgets
+from opendevops.audit import AuditLogger
+from opendevops.audit.schema import EventType
 from opendevops.config import AppConfig
 from opendevops.interfaces import webapp
 from opendevops.interfaces.webapp import (
     _MAX_ALERTS_PER_REQUEST,
     _MAX_BODY_BYTES,
     NS_INCIDENT,
+    _RedisDeduplicator,
     create_app,
 )
+from opendevops.observability.prometheus import AuditDenialCache
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -193,6 +199,77 @@ async def test_healthz_ok_no_auth() -> None:
         resp = await client.get("/healthz")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+async def test_readyz_reports_dependency_failure() -> None:
+    app = create_app(_make_cfg(), _stub_gateway())
+    app.state.readiness = AsyncMock(
+        return_value={"audit": "ok", "daily_counter": "ok", "redis": "failed"}
+    )
+    async with _client(app) as client:
+        resp = await client.get("/readyz")
+    assert resp.status_code == 503
+    assert resp.json() == {
+        "status": "not_ready",
+        "checks": {"audit": "ok", "daily_counter": "ok", "redis": "failed"},
+    }
+
+
+async def test_metrics_exports_denials_spend_caps_and_scheduler_success() -> None:
+    app = create_app(_make_cfg(), _stub_gateway())
+    app.state.audit_denials = AsyncMock()
+    app.state.audit_denials.snapshot.return_value = {"no-delete": 3}
+    app.state.daily_counter = AsyncMock()
+    app.state.daily_counter.total.side_effect = lambda scope: {
+        "global": 12.5,
+        "principal:scheduler": 2.25,
+    }[scope]
+    app.state.redis = AsyncMock()
+    app.state.redis.hgetall.return_value = {"hygiene": "1756684800"}
+    async with _client(app) as client:
+        resp = await client.get("/metrics")
+    assert resp.status_code == 200
+    assert 'opendevops_policy_denials_total{rule_id="no-delete"} 3.0' in resp.text
+    assert 'opendevops_daily_spend_usd{scope="global"} 12.5' in resp.text
+    assert 'opendevops_daily_cap_usd{scope="global"}' in resp.text
+    assert (
+        'opendevops_scheduler_last_success_timestamp_seconds{job_id="hygiene"} '
+        "1.7566848e+09"
+    ) in resp.text
+
+
+async def test_audit_denial_cache_reads_changed_files_only(tmp_path: Path) -> None:
+    audit = AuditLogger(tmp_path)
+    audit.start_run(
+        "run-metrics",
+        principal={"interface": "api", "user": "test"},
+        environment="staging",
+    )
+    audit.append(
+        "run-metrics",
+        EventType.decision,
+        tool_call_id="call-1",
+        decision={
+            "effect": "deny",
+            "rule_id": "no-delete",
+            "reason": "denied",
+            "channel": "ro",
+        },
+    )
+    cache = AuditDenialCache(tmp_path)
+    assert await cache.snapshot() == {"no-delete": 1}
+    audit.append(
+        "run-metrics",
+        EventType.decision,
+        tool_call_id="call-2",
+        decision={
+            "effect": "deny",
+            "rule_id": "no-delete",
+            "reason": "denied again",
+            "channel": "ro",
+        },
+    )
+    assert await cache.snapshot() == {"no-delete": 2}
 
 
 async def test_metrics_exposition_lists_counters_after_traffic(
@@ -368,6 +445,35 @@ async def test_alertmanager_dedup_same_fingerprint_starts_one_run(
     assert second.status_code == 202
     assert second.json()["incidents"][0]["deduped"] is True
     gw.run.assert_awaited_once()
+
+
+async def test_redis_dedup_is_shared_and_expiring() -> None:
+    redis = fakeredis.aioredis.FakeRedis(server=fakeredis.FakeServer())
+    first = _RedisDeduplicator(redis)
+    second = _RedisDeduplicator(redis)
+    assert await first.see("same-alert", 1.0) is True
+    assert await second.see("same-alert", 1.0) is False
+    keys = await redis.keys("opendevops:webhook:dedup:*")
+    assert len(keys) == 1
+    assert await redis.ttl(keys[0]) > 0
+
+
+async def test_redis_dedup_outage_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(_TOKEN_ENV, _TOKEN)
+    redis = AsyncMock()
+    redis.set.side_effect = ConnectionError("redis unavailable")
+    gw = _stub_gateway()
+    app = create_app(
+        _make_cfg(alertmanager_token_env=_TOKEN_ENV), gw, redis_client=redis
+    )
+    async with _client(app) as client:
+        resp = await client.post(
+            "/webhooks/alertmanager", headers=_bearer(_TOKEN), json=_am_payload()
+        )
+    assert resp.status_code == 503
+    gw.run.assert_not_awaited()
 
 
 async def test_alertmanager_environment_from_config(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -690,12 +796,23 @@ async def test_github_oversized_body_413(monkeypatch: pytest.MonkeyPatch) -> Non
 # -- default app (langgraph.json http.app) -------------------------------------------------
 
 
+def test_module_app_requires_redis_for_cross_worker_dedup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webapp, "_DEFAULT_APP", None)
+    monkeypatch.setenv("OPENDEVOPS_CONFIG", str(REPO_ROOT / "config" / "config.yaml"))
+    monkeypatch.delenv("REDIS_URI", raising=False)
+    with pytest.raises(RuntimeError, match="REDIS_URI"):
+        webapp._build_default_app()
+
+
 def test_module_app_builds_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """``webapp.app`` lazily builds a FastAPI app from $OPENDEVOPS_CONFIG + a ServerGateway."""
     from fastapi import FastAPI
 
     monkeypatch.setattr(webapp, "_DEFAULT_APP", None)
     monkeypatch.setenv("OPENDEVOPS_CONFIG", str(REPO_ROOT / "config" / "config.yaml"))
+    monkeypatch.setenv("REDIS_URI", "redis://localhost:6379/1")
     assert isinstance(webapp.app, FastAPI)
 
 
@@ -714,6 +831,7 @@ def _capture_gateway_url(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(webapp, "_DEFAULT_APP", None)
     monkeypatch.setattr("opendevops.gateway.ServerGateway", _FakeGateway)
     monkeypatch.setenv("OPENDEVOPS_CONFIG", str(REPO_ROOT / "config" / "config.yaml"))
+    monkeypatch.setenv("REDIS_URI", "redis://localhost:6379/1")
     assert isinstance(webapp.app, FastAPI)
     return captured
 

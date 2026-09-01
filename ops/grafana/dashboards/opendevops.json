@@ -31,7 +31,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Policy / webhook denials (rate)",
-      "description": "LIVE: webhook unauthorized. PRE-PROVISIONED: tool-layer policy denials (needs the audit-metrics exporter).",
+      "description": "Webhook authorization failures and audit-derived tool-layer policy denials.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
@@ -45,7 +45,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum(rate(opendevops_policy_denials_total[5m]))",
-          "legendFormat": "policy denials (pre-provisioned)",
+          "legendFormat": "policy denials",
           "refId": "B"
         }
       ]
@@ -54,7 +54,7 @@
       "id": 3,
       "type": "gauge",
       "title": "Daily spend vs cap (global)",
-      "description": "PRE-PROVISIONED: fraction of the global daily USD envelope consumed (needs the spend exporter).",
+      "description": "Fraction of the configured global daily USD envelope consumed.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "fieldConfig": {

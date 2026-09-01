@@ -44,6 +44,7 @@ from opendevops.interfaces.scheduler.maintenance import (
     validate_backup_settings,
 )
 from opendevops.observability.otel import observe_operation, span
+from opendevops.observability.prometheus import record_scheduler_success
 
 if TYPE_CHECKING:
     from opendevops.gateway.base import AgentGateway
@@ -60,6 +61,7 @@ DEFAULT_SCHEDULED_PRINCIPAL = "scheduler"
 
 # A job_type runner: an async callable taking the JobSpec, doing its side effect, returning nothing.
 JobTypeRunner = Callable[[JobSpec], Awaitable[Any]]
+SuccessRecorder = Callable[[str, float], Awaitable[None]]
 
 JobStatus = Literal["ok", "escalated", "timeout", "error"]
 
@@ -104,12 +106,14 @@ class SchedulerService:
         job_types: dict[str, JobTypeRunner] | None = None,
         principal: str = DEFAULT_SCHEDULED_PRINCIPAL,
         scheduler: Any = None,
+        success_recorder: SuccessRecorder | None = None,
     ) -> None:
         self._gateway = gateway
         self._specs = specs
         self._job_types = dict(job_types or {})
         self._principal = principal
         self._scheduler = scheduler
+        self._success_recorder = success_recorder
 
     # -- per-job execution (pure orchestration over the gateway; directly unit-tested) --------
 
@@ -133,6 +137,11 @@ class SchedulerService:
             outcome.status,
             {"opendevops.environment": spec.environment},
         )
+        if outcome.status == "ok" and self._success_recorder is not None:
+            try:
+                await self._success_recorder(spec.id, time.time())
+            except Exception:  # noqa: BLE001 - telemetry cannot change a completed job outcome
+                logger.warning("could not record scheduler success for %r", spec.id, exc_info=True)
         return outcome
 
     async def _run_command_job(self, spec: JobSpec) -> JobOutcome:
@@ -315,8 +324,25 @@ async def serve_scheduler(
         job_types["hygiene"] = build_hygiene_runner(
             client, cfg, principal=cfg.scheduler.principal
         )
+    metrics_redis: Any = None
+    success_recorder: SuccessRecorder | None = None
+    if redis_url := os.environ.get("REDIS_URI"):
+        from redis.asyncio import from_url as redis_from_url
+
+        metrics_redis = redis_from_url(redis_url, decode_responses=True)
+
+        async def _record(job_id: str, timestamp: float) -> None:
+            await record_scheduler_success(metrics_redis, job_id, timestamp)
+
+        success_recorder = _record
+    else:
+        logger.warning("REDIS_URI is unset; scheduler success metrics are disabled")
     service = SchedulerService(
-        gateway, specs, job_types=job_types, principal=cfg.scheduler.principal
+        gateway,
+        specs,
+        job_types=job_types,
+        principal=cfg.scheduler.principal,
+        success_recorder=success_recorder,
     )
     stop = stop_event or asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -336,3 +362,5 @@ async def serve_scheduler(
         for sig in installed:
             loop.remove_signal_handler(sig)
         await gateway.aclose()
+        if metrics_redis is not None:
+            await metrics_redis.aclose()

@@ -159,8 +159,8 @@ these run under the scheduler service (see `guides/interfaces.md`).
 
 Grafana (`:3000`) is provisioned with the Prometheus datasource and the `opendevops — service ops`
 dashboard (runs, denials, daily spend, shipper lag). Alert rules live in `ops/prometheus/alerts.yml`
-Some series are **pre-provisioned** for the scheduler service / a spend exporter and simply do
-not fire until those components run — see the header comment in `alerts.yml`.
+and the server exports audit-derived denials, daily-counter spend/caps, and Redis-backed scheduler
+success timestamps.
 
 The application dashboard at `:8123/dashboard` adds identity-scoped operator chat and complements
 Grafana with live run, queue, worker, retry/cancellation and pending-approval state plus verified

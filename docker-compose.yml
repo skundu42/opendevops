@@ -72,6 +72,11 @@ services:
       - ./config:/deploy/config:ro     # config.yaml + models.yaml + budgets.yaml + policy/
       - agent-audit:/deploy/audit      # per-run audit chains (shared read-only with vector)
       - agent-state:/deploy/state      # capability grants, control events and local state
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
     networks:
       - agent-net
 
@@ -158,9 +163,12 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       OPENDEVOPS_CONFIG: /deploy/config/config.yaml
       LANGGRAPH_API_KEY: ${GATEWAY_TOKEN:?set GATEWAY_TOKEN}
+      REDIS_URI: redis://redis:6379/1
       OPENDEVOPS_BACKUP_DATABASE_URI: ${OPENDEVOPS_BACKUP_DATABASE_URI:-postgresql://postgres@postgres:5432/postgres?sslmode=disable}
       PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       OPENDEVOPS_BACKUP_DIR: ${OPENDEVOPS_BACKUP_DIR:-/backups}

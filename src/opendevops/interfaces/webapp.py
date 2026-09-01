@@ -13,7 +13,8 @@ Turns infrastructure events into agent runs, and exposes operational endpoints:
   ``204`` no-op.
 * ``POST /webhooks/run-complete`` — the ``client.runs.create(webhook=...)`` callback; bearer
   authenticated with the same Alertmanager token, logs + counts the completion, ``204``.
-* ``GET /healthz`` — unauthenticated liveness, ``200 {"status": "ok"}``.
+* ``GET /healthz`` — unauthenticated process liveness.
+* ``GET /readyz`` — dependency-aware audit, budget-counter, Redis, and PostgreSQL readiness.
 * ``GET /metrics`` — Prometheus exposition off a per-app :class:`CollectorRegistry`.
 * ``GET /dashboard`` — OIDC/RBAC operations control plane backed by live gateway state, persisted
   audit chains, and the capability-grant ledger. Browser sessions are opaque and server-side;
@@ -43,20 +44,34 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import time
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response
-from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    generate_latest,
+)
 
+from opendevops.budget.daily import build_daily_counter
 from opendevops.interfaces.dashboard import register_dashboard
 from opendevops.observability.live import LiveTelemetry
 from opendevops.observability.otel import (
     configure_opentelemetry,
     observe_operation,
     span,
+)
+from opendevops.observability.prometheus import (
+    SCHEDULER_LAST_SUCCESS_KEY,
+    AuditDenialCache,
 )
 
 if TYPE_CHECKING:
@@ -102,24 +117,13 @@ _MAX_BODY_BYTES = 1 * 1024 * 1024  # 1 MiB
 
 
 class _TTLSet:
-    """A tiny time-bounded seen-set for fingerprint dedup (single process, single worker).
-
-    ``see(key, now)`` returns ``True`` the first time a key is observed within the TTL window and
-    ``False`` for a repeat. Expired keys are swept lazily on each call, so the set stays bounded by
-    the live fingerprint set without a background task.
-
-    Multi-worker caveat: LangGraph Server may run this app across several worker processes, each
-    with its OWN ``_TTLSet``. A duplicate alert landing on a *different* worker will not be deduped
-    here — the deterministic ``uuid5`` thread id + ``if_exists="do_nothing"`` keeps thread creation
-    idempotent, but the RCA run could start twice. Exactly-once cross-worker dedup needs a shared
-    store (Redis); that is a future hardening item, out of scope for this in-memory set.
-    """
+    """Local-development fallback when the app is built without a Redis client."""
 
     def __init__(self, ttl_s: float) -> None:
         self._ttl = ttl_s
         self._seen: dict[str, float] = {}
 
-    def see(self, key: str, now: float) -> bool:
+    async def see(self, key: str, now: float) -> bool:
         self._evict(now)
         if key in self._seen:
             return False
@@ -133,11 +137,28 @@ class _TTLSet:
             del self._seen[k]
 
 
+class _RedisDeduplicator:
+    """Cross-worker webhook claims using one atomic Redis ``SET NX EX``."""
+
+    def __init__(self, redis_client: Any, ttl_s: int = int(_DEDUP_TTL_S)) -> None:
+        self._redis = redis_client
+        self._ttl_s = ttl_s
+
+    async def see(self, key: str, now: float) -> bool:
+        del now
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        claimed = await self._redis.set(
+            f"opendevops:webhook:dedup:{digest}", "1", nx=True, ex=self._ttl_s
+        )
+        return bool(claimed)
+
+
 class _Metrics:
     """The app's Prometheus counters on a dedicated registry (per-app, so tests stay re-entrant)."""
 
     def __init__(self) -> None:
         self.registry = CollectorRegistry()
+        self._refresh_lock = asyncio.Lock()
         self.webhook_requests = Counter(
             "opendevops_webhook_requests_total",
             "Webhook requests handled, by route and outcome.",
@@ -148,6 +169,30 @@ class _Metrics:
             "opendevops_runs_started_total",
             "Agent runs started by the webhook app, by originating interface.",
             ["interface"],
+            registry=self.registry,
+        )
+        self.policy_denials = Gauge(
+            "opendevops_policy_denials_total",
+            "Policy DENY decisions present in the audit stream, by rule.",
+            ["rule_id"],
+            registry=self.registry,
+        )
+        self.daily_spend = Gauge(
+            "opendevops_daily_spend_usd",
+            "Spend recorded in today's configured daily counter, by scope.",
+            ["scope"],
+            registry=self.registry,
+        )
+        self.daily_cap = Gauge(
+            "opendevops_daily_cap_usd",
+            "Configured daily spend cap, by scope.",
+            ["scope"],
+            registry=self.registry,
+        )
+        self.scheduler_last_success = Gauge(
+            "opendevops_scheduler_last_success_timestamp_seconds",
+            "Unix timestamp of the last successful scheduler job completion.",
+            ["job_id"],
             registry=self.registry,
         )
 
@@ -163,6 +208,57 @@ class _Metrics:
 
     def run_started(self, interface: str) -> None:
         self.runs_started.labels(interface=interface).inc()
+
+    async def refresh(
+        self,
+        cfg: AppConfig,
+        daily_counter: Any,
+        audit_denials: AuditDenialCache,
+        redis_client: Any,
+    ) -> None:
+        """Refresh gauges from their existing durable sources before exposition."""
+
+        async with self._refresh_lock:
+            try:
+                denials = await audit_denials.snapshot()
+                self.policy_denials.clear()
+                for rule_id, count in denials.items():
+                    self.policy_denials.labels(rule_id=rule_id).set(count)
+            except Exception:  # noqa: BLE001 - one source must not break all metrics
+                logger.warning("could not refresh policy-denial metrics", exc_info=True)
+
+            scopes = {
+                "global": cfg.budgets.daily.global_usd,
+                f"principal:{cfg.scheduler.principal}": cfg.budgets.daily.per_principal_usd,
+            }
+            try:
+                totals = {
+                    scope: await asyncio.wait_for(daily_counter.total(scope), timeout=1.0)
+                    for scope in scopes
+                }
+                self.daily_spend.clear()
+                self.daily_cap.clear()
+                for scope, cap in scopes.items():
+                    self.daily_spend.labels(scope=scope).set(totals[scope])
+                    self.daily_cap.labels(scope=scope).set(cap)
+            except Exception:  # noqa: BLE001 - readiness reports the failed dependency
+                logger.warning("could not refresh daily-spend metrics", exc_info=True)
+
+            if redis_client is not None:
+                try:
+                    values = await redis_client.hgetall(SCHEDULER_LAST_SUCCESS_KEY)
+                    self.scheduler_last_success.clear()
+                    for raw_job_id, raw_timestamp in values.items():
+                        job_id = (
+                            raw_job_id.decode("utf-8", "replace")
+                            if isinstance(raw_job_id, bytes)
+                            else str(raw_job_id)
+                        )[:128]
+                        timestamp = float(raw_timestamp)
+                        if job_id and timestamp > 0 and math.isfinite(timestamp):
+                            self.scheduler_last_success.labels(job_id=job_id).set(timestamp)
+                except Exception:  # noqa: BLE001 - preserve the rest of the scrape
+                    logger.warning("could not refresh scheduler metrics", exc_info=True)
 
 
 class WebhookError(Exception):
@@ -258,8 +354,55 @@ def _verify_github_signature(secret: str, body: bytes, header: str | None) -> bo
     return _ct_equal(expected, header)
 
 
+async def _tcp_ready(uri: str, default_port: int) -> bool:
+    parsed = urlsplit(uri)
+    if parsed.hostname is None:
+        return False
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(parsed.hostname, parsed.port or default_port), timeout=1.0
+        )
+    except (OSError, TimeoutError, ValueError):
+        return False
+    writer.close()
+    await writer.wait_closed()
+    return True
+
+
+async def _readiness(cfg: AppConfig, daily_counter: Any, redis_client: Any) -> dict[str, str]:
+    """Probe the stores this process needs without calling a model provider."""
+
+    audit_dir = Path(cfg.audit.dir)
+    checks = {
+        "audit": (
+            "ok"
+            if audit_dir.is_dir() and os.access(audit_dir, os.W_OK | os.X_OK)
+            else "failed"
+        )
+    }
+    try:
+        await asyncio.wait_for(daily_counter.total("global"), timeout=1.0)
+    except Exception:  # noqa: BLE001 - readiness returns a bounded status, never internals
+        checks["daily_counter"] = "failed"
+    else:
+        checks["daily_counter"] = "ok"
+    if redis_client is not None:
+        try:
+            redis_ok = bool(await asyncio.wait_for(redis_client.ping(), timeout=1.0))
+        except Exception:  # noqa: BLE001 - readiness returns a bounded status, never internals
+            redis_ok = False
+        checks["redis"] = "ok" if redis_ok else "failed"
+    if database_uri := os.environ.get("DATABASE_URI"):
+        checks["postgres"] = "ok" if await _tcp_ready(database_uri, 5432) else "failed"
+    return checks
+
+
 def create_app(
-    cfg: AppConfig, gateway: AgentGateway, notifier: SlackNotifier | None = None
+    cfg: AppConfig,
+    gateway: AgentGateway,
+    notifier: SlackNotifier | None = None,
+    *,
+    redis_client: Any = None,
 ) -> FastAPI:
     """Build the webhook FastAPI app over ``cfg`` and an injected :class:`AgentGateway`.
 
@@ -278,13 +421,23 @@ def create_app(
     app.state.gateway = gateway
     app.state.notifier = notifier
     app.state.metrics = _Metrics()
-    app.state.dedup = _TTLSet(_DEDUP_TTL_S)
+    app.state.redis = redis_client
+    app.state.dedup = (
+        _RedisDeduplicator(redis_client) if redis_client is not None else _TTLSet(_DEDUP_TTL_S)
+    )
+    app.state.daily_counter = build_daily_counter(cfg)
+    app.state.audit_denials = AuditDenialCache(cfg.audit.dir)
+    app.state.readiness = lambda: _readiness(
+        cfg, app.state.daily_counter, app.state.redis
+    )
     app.state.live_telemetry = LiveTelemetry()
     configure_opentelemetry()
     # Strong refs to in-flight background runs so the event loop does not GC a pending task; each
     # removes itself on completion (add_done_callback below).
     app.state.background_tasks = set()
     register_dashboard(app, cfg, gateway=gateway, live_telemetry=app.state.live_telemetry)
+    if redis_client is not None:
+        app.router.add_event_handler("shutdown", redis_client.aclose)
 
     def _spawn_run(
         thread_id: str, user_input: str, *, principal: str, interface: str
@@ -390,7 +543,12 @@ def create_app(
                 metrics.request("alertmanager", _IGNORED)
                 continue
             thread_id = str(uuid.uuid5(NS_INCIDENT, fingerprint))
-            is_new = app.state.dedup.see(fingerprint, now)
+            try:
+                is_new = await app.state.dedup.see(fingerprint, now)
+            except Exception:  # noqa: BLE001 - never start an un-deduplicated incident
+                logger.exception("Redis webhook deduplication failed")
+                metrics.request("alertmanager", _ERROR)
+                return _json_response(503, {"detail": "webhook deduplication is unavailable"})
             if is_new:
                 _spawn_run(
                     thread_id,
@@ -453,7 +611,12 @@ def create_app(
         key = f"gh:{repo}:{run_id}"
         thread_id = str(uuid.uuid5(NS_INCIDENT, key))
         now = asyncio.get_event_loop().time()
-        is_new = app.state.dedup.see(key, now)
+        try:
+            is_new = await app.state.dedup.see(key, now)
+        except Exception:  # noqa: BLE001 - never start an un-deduplicated incident
+            logger.exception("Redis webhook deduplication failed")
+            metrics.request("github", _ERROR)
+            return _json_response(503, {"detail": "webhook deduplication is unavailable"})
         if is_new:
             _spawn_run(
                 thread_id,
@@ -493,8 +656,23 @@ def create_app(
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/readyz")
+    async def readyz() -> Response:
+        checks = await app.state.readiness()
+        ready = all(value == "ok" for value in checks.values())
+        return _json_response(
+            200 if ready else 503,
+            {"status": "ready" if ready else "not_ready", "checks": checks},
+        )
+
     @app.get("/metrics")
     async def metrics_endpoint() -> Response:
+        await app.state.metrics.refresh(
+            cfg,
+            app.state.daily_counter,
+            app.state.audit_denials,
+            app.state.redis,
+        )
         data = generate_latest(app.state.metrics.registry)
         return Response(content=data, media_type=CONTENT_TYPE_LATEST)
 
@@ -649,13 +827,21 @@ def _build_default_app() -> FastAPI:
     on ``cfg`` (webhook secrets, environment, allowlist) is unchanged; only the gateway's target URL
     is redirected so in-container webhook runs reach the local API directly (bypassing Caddy).
     """
+    from redis.asyncio import from_url as redis_from_url
+
     from opendevops.agent import _load_server_config
     from opendevops.gateway import ServerGateway
 
     cfg = _load_server_config()
     self_url = os.environ.get(_SELF_URL_ENV) or _DEFAULT_SELF_URL
+    redis_url = os.environ.get("REDIS_URI") or cfg.budgets.daily.redis_url
+    if not redis_url:
+        raise RuntimeError(
+            "service mode requires REDIS_URI for cross-worker webhook deduplication"
+        )
     gateway = ServerGateway(cfg, url=self_url)
-    return create_app(cfg, gateway)
+    redis_client = redis_from_url(redis_url, decode_responses=True)
+    return create_app(cfg, gateway, redis_client=redis_client)
 
 
 def __getattr__(name: str) -> Any:
