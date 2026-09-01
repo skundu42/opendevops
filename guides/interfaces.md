@@ -16,7 +16,7 @@ uv run opendevops chat [--environment staging|prod] [--profile <name>] [--princi
 - `/cost` — session and daily spend; `/quit` `/exit` `/q` — leave.
 - **Ctrl-C cancels the in-flight run** via the gateway (audited, graceful) without killing the
   REPL.
-- Other subcommands: `opendevops version`, `opendevops config check`,
+- Other subcommands: `opendevops version`, `opendevops config check [--live]`,
   `opendevops audit verify --dir <dir>`, and the `opendevops config *-grant` lifecycle.
 
 ### Escalations in the CLI
@@ -86,8 +86,10 @@ Live control; production requester/approver separation is unchanged.
 Chat threads and their bounded transcripts are private to an exact issuer/subject pair and expire
 after the configured retention period. The browser receives assistant text plus sanitized tool
 lifecycle and policy-denial labels over the POST response's SSE stream. Raw tool arguments,
-stdout/stderr, escalation arguments, and credentials are neither sent to the chat UI nor stored in
-its transcript. The content-free control ledger records thread/run lifecycle attribution without
+stdout/stderr, and credentials are neither sent to the chat UI nor stored in its transcript. While
+an approval is pending, approver/admin sessions alone receive scrubbed, bounded
+argv/rule/reason/timeout details; they are transient and absent from completed-run APIs. The
+content-free control ledger records thread/run lifecycle attribution without
 copying prompts or responses.
 
 The control room answers what is running, what is queued, which approvals are waiting, where an
@@ -129,6 +131,9 @@ ledger with issuer + subject.
 Requires the `slack` extra and `slack.bot_token_env` / `slack.app_token_env` configured
 ([configuration](configuration.md#slack-scheduler-principals)).
 
+Start it with `opendevops slack [--server-url URL]`, or opt in to Compose with
+`docker compose --profile slack up -d`. It uses `ServerGateway`; CLI chat remains local.
+
 - **Thread mapping**: the agent thread id is derived deterministically from
   `channel:thread_ts`, so replying in a Slack thread resumes the same agent conversation.
 - **Fast ack**: messages are acknowledged within 3 s with a placeholder; the run executes
@@ -149,6 +154,9 @@ it into an authorized production action.
 `interfaces/scheduler/` — our own APScheduler service (never LangGraph Server crons: no license
 dependency, one mechanism for cron + event triggers). Jobs live in `scheduler/jobs.yaml`:
 
+Start it with `opendevops scheduler [--server-url URL] [--jobs-file PATH]`, or
+`docker compose --profile scheduler up -d`.
+
 ```yaml
 jobs:
   - id: drift-detection
@@ -166,12 +174,15 @@ jobs:
 
 - A job is either an **agent job** (`command:` — a prompt run on a fresh thread under the
   `scheduled` profile, attributed to the `scheduler.principal`) or a **non-agent job**
-  (`job_type: hygiene | escalation-sweep`, runners in `ops/maintenance.py`).
+  (`job_type: hygiene | escalation-sweep`, runners in the shipped scheduler package;
+  `ops/maintenance.py` is only the operator CLI).
 - Fixed knobs applied to every job (not configurable per job): `misfire_grace_time=300`,
   `coalesce=true`, `max_instances=1`, 60 s jitter — run a briefly-missed job, collapse backlogs,
   never overlap a job with itself, and de-synchronize the fleet from the cron edge.
-- Shipped jobs: hourly drift detection, daily cert-expiry and backup verification, daily hygiene
-  (thread pruning, spend mirror, pg_dump), and the 5-minute escalation sweep.
+- Shipped jobs: hourly drift detection, daily cert-expiry and backup verification, daily hygiene,
+  and the 5-minute escalation sweep. Hygiene first creates an atomic PostgreSQL 16 dump, then logs
+  global/scheduler-principal spend, then prunes at most 1,000 idle threads older than 30 days.
+  Failed backups prevent pruning; dump retention is operator-managed.
 - The schema is validated fail-closed at boot: unknown keys or malformed triggers refuse to start.
 
 ### The escalation-timeout sweeper

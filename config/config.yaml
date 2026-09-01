@@ -85,8 +85,8 @@ server:                                      # service mode: self-hosted LangGra
   source_allowlist: []                       # client IPs allowed to POST /webhooks/alertmanager (empty => allow all); direct peer only, proxy headers ignored (Caddy fronts this)
   webhook_environment: staging               # policy-environment overlay for webhook-initiated runs (staging|prod)
 slack:                                        # Slack Socket-Mode chat-ops adapter (opt-in; interfaces/slack_app.py)
-  bot_token_env: null                        # NAME of the env var holding the bot token (xoxb-...); null => starting the adapter errors
-  app_token_env: null                        # NAME of the env var holding the app-level token (xapp-...); null => starting the adapter errors
+  bot_token_env: OPENDEVOPS_SLACK_BOT_TOKEN  # bot token (xoxb-...); starting the adapter fails if unset
+  app_token_env: OPENDEVOPS_SLACK_APP_TOKEN  # app token (xapp-...); starting the adapter fails if unset
   default_channel_environment: staging       # policy-environment overlay for Slack-initiated runs (staging|prod)
 scheduler:                                    # our own APScheduler service (interfaces/scheduler/); jobs in scheduler/jobs.yaml
   jobs_file: scheduler/jobs.yaml             # path to the job set (fixed knobs misfire=300/coalesce/max_instances=1/jitter=60 applied to every job)

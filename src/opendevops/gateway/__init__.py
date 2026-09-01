@@ -7,6 +7,7 @@ from opendevops.gateway.base import (
     ApprovalSeparationError,
     AssistantText,
     Escalation,
+    EscalationDetails,
     EscalationEvent,
     GatewayConfigError,
     GatewayError,
@@ -16,6 +17,7 @@ from opendevops.gateway.base import (
     RunResult,
     ToolCall,
     ToolResult,
+    escalation_details,
 )
 from opendevops.gateway.local import LocalGateway
 from opendevops.gateway.server import ServerGateway
@@ -25,6 +27,7 @@ __all__ = [
     "ApprovalSeparationError",
     "AssistantText",
     "Escalation",
+    "EscalationDetails",
     "EscalationEvent",
     "GatewayConfigError",
     "GatewayError",
@@ -36,4 +39,5 @@ __all__ = [
     "ServerGateway",
     "ToolCall",
     "ToolResult",
+    "escalation_details",
 ]

@@ -32,7 +32,8 @@ Package extras, and when you need them:
 |---|---|---|
 | `checkpoint` | `langgraph-checkpoint-sqlite`, `aiosqlite` | escalation / resume (the CLI checkpointer) |
 | `server` | `langgraph-sdk`, `fastapi`, `redis`, … | service mode + parts of the test suite |
-| `slack` | `slack-bolt`, `apscheduler` | Slack chat-ops + the scheduler service |
+| `slack` | `slack-bolt`, `aiohttp` | Slack chat-ops |
+| `scheduler` | `apscheduler` | scheduler service |
 | `ssh` | `asyncssh` | the `ssh_run` remote-exec tool |
 | `dev` | `pytest`, `ruff`, `mypy`, `agentevals`, … | running tests |
 
@@ -92,7 +93,7 @@ chat until you have made an explicit blast-radius decision.
 
 ```sh
 opendevops config check
-# config OK: 1 contexts allowed, 3 budget profiles, 3 priced models
+# grouped successes and warnings, then: config OK
 
 opendevops chat
 ```
@@ -136,6 +137,7 @@ The process **refuses to start** rather than run in a degraded state. The common
 | `no kubernetes contexts are allow-listed` | `targets.kubernetes.allowed_contexts: []` | steps 3–4 above |
 | config INVALID: unpriced model | a model in `models.yaml agents:` has no `pricing:` entry | add the price row (an unpriced model is an unmetered model) |
 | pack refuses to boot (credential coverage) | a policy pack is present but its tool family has no credential configured (e.g. `gh-read.yaml` with `targets.github.token_env: null`) | configure the credential env var name, or remove the pack |
+| executable missing under `execution.trusted_path` | an installed policy pack enables that CLI | install it in the trusted path, or remove the unused pack |
 | `budgets.daily.backend: redis` without `redis_url` | daily counter misconfigured | set `redis_url` or use the default `sqlite` |
 | boot fails on tool inventory | the compiled graph bound a tool outside the expected set | this is the tamper guard doing its job; see [architecture](architecture.md#boot-time-assertions) |
 

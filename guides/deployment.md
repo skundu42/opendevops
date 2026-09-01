@@ -25,6 +25,8 @@ The stack (`docker-compose.yml`):
 | `vector` | tails per-run audit chains, merges them into the durable spool |
 | `prometheus` + `grafana` | metrics, alert rules, the provisioned ops dashboard |
 | `agent-state` volume | capability/control ledger plus private chat transcripts; encrypt and back it up |
+| `slack` / `scheduler` | opt-in profiles using the published image and Caddy bearer path |
+| `postgres-backups` volume | scheduler dumps; never pruned automatically |
 
 ### Bring-up
 
@@ -52,6 +54,13 @@ curl -s -H "Authorization: Bearer $GATEWAY_TOKEN" \
 # The shipped local config signs in with DASHBOARD_TOKEN.
 ```
 
+Slack is opt-in. Set `OPENDEVOPS_SLACK_BOT_TOKEN`, `OPENDEVOPS_SLACK_APP_TOKEN`, and at least
+one Slack user mapping under `principals`, then run `docker compose --profile slack up -d`.
+
+Scheduled jobs are opt-in with `docker compose --profile scheduler up -d`. The scheduler uses a
+passwordless `OPENDEVOPS_BACKUP_DATABASE_URI`, passes the password only via `PGPASSWORD`, writes
+to `OPENDEVOPS_BACKUP_DIR` on `postgres-backups`, and requires PostgreSQL 16 `pg_dump`.
+
 The bundle pins `ghcr.io/skundu42/opendevops:0.2.1`, supports `linux/amd64` and `linux/arm64`, and
 preconfigures the daily counter for the Compose Redis service. Verify `SHA256SUMS` from the same
 GitHub release before running it. Contributors can build the checked-in `Dockerfile` locally and
@@ -75,9 +84,10 @@ gateway-token protected.
 `/dashboard` provides identity-scoped operator chat, merges verified audit chains with live
 run/queue/worker/approval telemetry, and exposes RBAC-controlled cancellation, approval resolution,
 capability-grant configuration and session revocation. Chat turns use the same gateway and stream
-assistant/sanitized lifecycle events over SSE; raw tool arguments and output never reach the chat
-transcript. The separate run-detail API contains correlation, timing, policy and cost metadata but
-never prompts, responses, command arguments, output, or credential values.
+assistant/sanitized lifecycle events over SSE. Pending approval argv is visible only to
+approver/admin sessions and disappears after resolution; it never enters chat transcripts or
+completed-run APIs. The separate run-detail API contains correlation, timing, policy and cost
+metadata but never prompts, responses, command arguments, output, or credential values.
 
 Chat transcripts live in `control_plane.database` on the `agent-state` volume, are private to the
 exact issuer/subject and default to 30-day idle retention. Treat the volume as potentially

@@ -220,14 +220,18 @@ boundary, or dry-run requirement.
 
 ```yaml
 slack:
-  bot_token_env: null                  # xoxb- token env var name; null ⇒ adapter refuses to start
-  app_token_env: null                  # xapp- token env var name
+  bot_token_env: OPENDEVOPS_SLACK_BOT_TOKEN
+  app_token_env: OPENDEVOPS_SLACK_APP_TOKEN
   default_channel_environment: staging
 scheduler:
   jobs_file: scheduler/jobs.yaml
   principal: scheduler                 # audit user + daily-budget scope for scheduled runs
 principals: {}                         # external id -> {principal, profile, roles:[operator,...]}
 ```
+
+Slack requires both token values plus at least one principal mapping. Scheduler hygiene requires
+`OPENDEVOPS_BACKUP_DATABASE_URI` (passwordless), `PGPASSWORD`, `OPENDEVOPS_BACKUP_DIR`, and a
+PostgreSQL 16 `pg_dump`; these are deployment environment variables, never YAML secrets.
 
 ## `config/models.yaml`
 
@@ -276,8 +280,12 @@ See [budgets](budgets.md) for what enforces each number.
 
 ```sh
 uv run opendevops config check
+uv run opendevops config check --live  # also probe server and remote executor health
 ```
 
-loads and validates everything, printing counts (allowed contexts, budget profiles, priced
-models) or the exact validation error. Run it after every config change; the same validation runs
-at every boot.
+The offline check groups every discoverable success, warning, and failure: runtime invariants,
+models/provider extras and credentials, policy and credential-family coverage, local paths and
+trusted executables or remote signing/TLS, and scheduler jobs. Missing optional Slack/scheduler
+secrets and PostgreSQL 16 `pg_dump` are warnings until that service starts. `--live` uses the
+configured bearer and mTLS settings but never calls a model provider. Run it after every config
+change; the core preflight also runs at agent construction.

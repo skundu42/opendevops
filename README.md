@@ -57,7 +57,7 @@ spent $0.0841 (run) / $0.34 (today)
 | Models | Anthropic (default), OpenAI, Azure OpenAI, Google, Amazon Bedrock, OpenAI-compatible endpoints | non-Anthropic providers need an optional extra; every alias needs a pricing row |
 | Remote hosts | structured, read-only SSH checks | pinned user, key, hosts and `known_hosts` |
 | Interfaces | CLI, HTTP, Slack, scheduler, Alertmanager and GitHub webhooks | one shared gateway and safety core |
-| Operations UI | identity-scoped agent chat, live runs, approvals, policy/cost/audit detail and capability grants | OIDC RBAC + CSRF; chat never exposes raw tool arguments, output, or credential values |
+| Operations UI | identity-scoped agent chat, live runs, approvals, policy/cost/audit detail and capability grants | OIDC RBAC + CSRF; only approver/admin see transient scrubbed pending argv |
 
 > [!IMPORTANT]
 > This is not a general AWS, Google Cloud, or Azure deployment engine. Terraform, Pulumi,
@@ -112,7 +112,9 @@ Continue with the [step-by-step getting-started guide](guides/getting-started.md
 |---|---|
 | `opendevops init [directory]` | scaffold config and Kubernetes bootstrap files from the wheel |
 | `opendevops chat` | streaming REPL with environment, profile and principal selection |
-| `opendevops config check` | validate runtime-critical configuration |
+| `opendevops slack [--server-url URL]` | Slack Socket-Mode service over LangGraph Server |
+| `opendevops scheduler [--server-url URL] [--jobs-file PATH]` | scheduled agent and maintenance service |
+| `opendevops config check [--live]` | aggregated offline validation; optionally probe server/executors |
 | `opendevops config grants` | list the control-plane revision and capability proposals |
 | `opendevops config propose-grant` | propose a typed, expiring dangerous capability |
 | `opendevops config approve-grant` | approve a proposal (requester separation in prod) |
@@ -272,7 +274,8 @@ Configuration is strict Pydantic over three files:
 | [`config/policy/`](config/policy) | base denies, environment overlays and capability packs |
 
 Unknown keys fail validation. Missing credentials for an enabled policy family fail agent
-construction. Secret values belong in the process environment, never YAML.
+construction. Remove credential-gated pack files you do not use; an installed pack is enabled.
+Secret values belong in the process environment, never YAML.
 
 See the complete [configuration reference](guides/configuration.md).
 

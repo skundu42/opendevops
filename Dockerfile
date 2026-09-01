@@ -9,6 +9,20 @@ RUN npm ci --ignore-scripts \
 
 FROM langchain/langgraph-api:3.11@sha256:b3d7570205d4100f97f63ab1e32815f4d795b3cdd9dde66070081d3db23b0cb6
 
+# PostgreSQL 16 client for scheduler backups (the Debian base otherwise ships an older major).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl --fail --location https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg \
+    && . /etc/os-release \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-16 \
+    && pg_dump --version | grep -E " 16[.]" \
+    && rm -rf /var/lib/apt/lists/*
+
 ARG VERSION=0.0.0
 ARG VCS_REF=unknown
 
@@ -27,7 +41,7 @@ COPY --from=dashboard \
 
 RUN cd /deps/devops-agent \
     && PYTHONDONTWRITEBYTECODE=1 uv pip install --system --no-cache-dir \
-        -c /api/constraints.txt -e '.[checkpoint,server,slack,ssh]'
+        -c /api/constraints.txt -e '.[checkpoint,server,slack,scheduler,ssh]'
 
 ENV LANGGRAPH_HTTP='{"app": "/deps/devops-agent/src/opendevops/interfaces/webapp.py:app"}'
 ENV LANGSERVE_GRAPHS='{"devops": "/deps/devops-agent/src/opendevops/agent.py:server_graph"}'

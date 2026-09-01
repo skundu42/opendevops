@@ -26,7 +26,7 @@ from rich.panel import Panel
 
 from opendevops import __version__
 from opendevops.audit import main as audit_verify_main
-from opendevops.config import load_config, validate_runtime_config
+from opendevops.config import load_config
 from opendevops.control_plane import (
     ActionIdentity,
     Capability,
@@ -115,7 +115,7 @@ def init_workspace(
     """Create starter config, environment template, and Kubernetes bootstrap files."""
     destination = directory.expanduser().resolve()
     templates = _workspace_templates()
-    paths = (Path("config"), Path("ops/k8s"), Path(".env.example"))
+    paths = (Path("config"), Path("ops/k8s"), Path("scheduler"), Path(".env.example"))
     conflicts = [relative for relative in paths if (destination / relative).exists()]
     if conflicts and not force:
         rendered = ", ".join(str(path) for path in conflicts)
@@ -139,22 +139,35 @@ def init_workspace(
 
 
 @config_app.command("check")
-def config_check() -> None:
-    """Load and validate config; print a one-line OK with counts, or the validation error."""
+def config_check(
+    live: bool = typer.Option(False, "--live", help="Probe server and remote executor health."),
+) -> None:
+    """Run aggregated offline checks and optional authenticated health probes."""
+    from opendevops.preflight import run_live_preflight, run_offline_preflight
+
     try:
         cfg = load_config()
-        validate_runtime_config(cfg)
     except Exception as exc:  # noqa: BLE001 - surface any load/validation failure to the user
-        err_console.print(f"[red]config INVALID:[/red] {exc}")
+        err_console.print("[bold red]FAILURES[/bold red]")
+        err_console.print(f"  - configuration schema: {exc}")
         raise typer.Exit(code=1) from exc
-
-    contexts = len(cfg.targets.kubernetes.allowed_contexts)
-    profiles = len(cfg.budgets.per_run.profiles)
-    priced = len(cfg.models.pricing)
-    console.print(
-        f"[green]config OK[/green]: {contexts} contexts allowed, "
-        f"{profiles} budget profiles, {priced} priced models"
-    )
+    report = run_offline_preflight(cfg)
+    if live:
+        report.merge(asyncio.run(run_live_preflight(cfg)))
+    if report.successes:
+        console.print("[bold green]SUCCESSES[/bold green]")
+        for item in report.successes:
+            console.print(f"  [green]✓[/green] {item}")
+    if report.warnings:
+        console.print("[bold yellow]WARNINGS[/bold yellow]")
+        for item in report.warnings:
+            console.print(f"  [yellow]![/yellow] {item}")
+    if report.failures:
+        err_console.print("[bold red]config INVALID — FAILURES[/bold red]")
+        for item in report.failures:
+            err_console.print(f"  [red]✗[/red] {item}")
+        raise typer.Exit(code=1)
+    console.print("[bold green]config OK[/bold green]")
 
 
 def _control_actor(cfg: AppConfig, actor: str | None, required_role: str) -> ActionIdentity:
@@ -335,6 +348,55 @@ def chat(
     _run_repl(gateway, environment=environment, profile=profile, principal=principal)
 
 
+@app.command()
+def slack(
+    server_url: str | None = typer.Option(None, "--server-url", help="LangGraph Server URL."),
+) -> None:
+    """Run the Slack Socket-Mode adapter against LangGraph Server."""
+    from opendevops.interfaces.slack_app import start
+
+    try:
+        cfg = load_config()
+        from opendevops.preflight import run_offline_preflight
+
+        report = run_offline_preflight(cfg, check_environment=False, service="slack")
+        if not report.ok:
+            raise RuntimeError("; ".join(report.failures))
+        configure_tracing(cfg)
+        asyncio.run(start(cfg, server_url=server_url))
+    except Exception as exc:  # noqa: BLE001 - service startup errors are operator-facing
+        err_console.print(f"[red]could not start Slack:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command()
+def scheduler(
+    server_url: str | None = typer.Option(None, "--server-url", help="LangGraph Server URL."),
+    jobs_file: Path | None = typer.Option(  # noqa: B008
+        None, "--jobs-file", help="Scheduler jobs YAML."
+    ),
+) -> None:
+    """Run scheduled agent and maintenance jobs against LangGraph Server."""
+    from opendevops.interfaces.scheduler import serve_scheduler
+
+    try:
+        cfg = load_config()
+        from opendevops.preflight import run_offline_preflight
+
+        if jobs_file is not None:
+            cfg = cfg.model_copy(
+                update={"scheduler": cfg.scheduler.model_copy(update={"jobs_file": jobs_file})}
+            )
+        report = run_offline_preflight(cfg, check_environment=False, service="scheduler")
+        if not report.ok:
+            raise RuntimeError("; ".join(report.failures))
+        configure_tracing(cfg)
+        asyncio.run(serve_scheduler(cfg, server_url=server_url, jobs_file=jobs_file))
+    except Exception as exc:  # noqa: BLE001 - service startup errors are operator-facing
+        err_console.print(f"[red]could not start scheduler:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+
 # --------------------------------------------------------------------------------------
 # REPL internals (seams the tests drive)
 # --------------------------------------------------------------------------------------
@@ -491,16 +553,13 @@ def _stdin_is_interactive() -> bool:
 
 def _render_escalation_panel(escalation: Escalation) -> None:
     """Render the red human-approval panel for a suspended escalation (argv, rule, reason)."""
-    payload = escalation.payload
-    request = (payload.get("action_requests") or [{}])[0]
-    argv = request.get("args", {}).get("argv") or []
-    review = (payload.get("review_configs") or [{}])[0]
-    rule = review.get("rule_id", "?")
-    reason = review.get("reason", "")
+    from opendevops.gateway import escalation_details
+
+    details = escalation_details(escalation)
     console.print(
         Panel.fit(
-            f"[bold]{escape(' '.join(str(a) for a in argv))}[/bold]\n"
-            f"rule: [bold]{escape(str(rule))}[/bold]\n{escape(str(reason))}",
+            f"[bold]{escape(' '.join(details.argv))}[/bold]\n"
+            f"rule: [bold]{escape(details.rule_id)}[/bold]\n{escape(details.reason)}",
             title="escalation — human approval required",
             border_style="red",
         )

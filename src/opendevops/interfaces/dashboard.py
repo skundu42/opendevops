@@ -11,7 +11,7 @@ import re
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import parse_qs
 
 import httpx
@@ -122,10 +122,43 @@ def _html(
     return HTMLResponse(body, headers=_security_headers())
 
 
+class ApproveDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["approve"]
+
+
+class RejectDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["reject"]
+    message: str | None = Field(default=None, min_length=1, max_length=2000)
+
+
+class EditArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    argv: list[Annotated[str, Field(strict=True, min_length=1, max_length=4096)]] = Field(
+        min_length=1, max_length=128
+    )
+
+
+class EditDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["edit"]
+    args: EditArgs
+
+
+ApprovalDecision = Annotated[
+    ApproveDecision | RejectDecision | EditDecision, Field(discriminator="type")
+]
+
+
 class ApprovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    decisions: list[dict[str, Any]] = Field(min_length=1, max_length=10)
+    decisions: list[ApprovalDecision] = Field(min_length=1, max_length=10)
 
 
 class SessionRevokeRequest(BaseModel):
@@ -212,6 +245,22 @@ async def _live_snapshot(gateway: AgentGateway, live_telemetry: LiveTelemetry) -
     }
 
 
+def _scope_approval_details(
+    live: dict[str, Any], session: DashboardSession
+) -> dict[str, Any]:
+    """Expose transient command details only to approval-capable identities."""
+
+    if {"approver", "admin"}.intersection(session.roles):
+        return live
+    detail_fields = {"tool", "argv", "rule_id", "reason", "timeout_s"}
+    return {
+        **live,
+        "pending_approvals": [
+            {key: value for key, value in item.items() if key not in detail_fields}
+            for item in live.get("pending_approvals", [])
+            if isinstance(item, dict)
+        ],
+    }
 def register_dashboard(
     app: FastAPI,
     cfg: AppConfig,
@@ -715,7 +764,9 @@ def register_dashboard(
             return denied
         assert session is not None
         snapshot = await asyncio.to_thread(build_dashboard_snapshot, cfg)
-        live = await _live_snapshot(gateway, live_telemetry)
+        live = _scope_approval_details(
+            await _live_snapshot(gateway, live_telemetry), session
+        )
         snapshot["live"] = live
         snapshot["slis"]["queue_latency_ms"] = live.get("queue_latency_ms")
         snapshot["identity"] = {
@@ -747,7 +798,9 @@ def register_dashboard(
             while True:
                 if await request.is_disconnected():
                     return
-                live = await _live_snapshot(gateway, live_telemetry)
+                live = _scope_approval_details(
+                    await _live_snapshot(gateway, live_telemetry), session
+                )
                 yield {"event": "live", "data": json.dumps(live, separators=(",", ":"))}
                 snapshot = await asyncio.to_thread(build_dashboard_snapshot, cfg)
                 snapshot["slis"]["queue_latency_ms"] = live.get("queue_latency_ms")
@@ -820,7 +873,9 @@ def register_dashboard(
             body = await _json_model(request, ApprovalRequest)
             assert isinstance(body, ApprovalRequest)
             result = await gateway.resume_interrupt(
-                thread_id, body.decisions, approver=session.principal
+                thread_id,
+                [item.model_dump(exclude_none=True) for item in body.decisions],
+                approver=session.principal,
             )
         except (DashboardAuthError, ChangeControlError, GatewayError) as exc:
             return _error(str(exc), 403)

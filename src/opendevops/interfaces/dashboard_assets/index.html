@@ -455,6 +455,19 @@
     </div>
     <div id="run-detail-body"><p class="empty-state">Select a run to inspect it.</p></div>
   </aside>
+  <dialog id="approval-edit-dialog" aria-labelledby="approval-edit-title">
+    <form id="approval-edit-form">
+      <h2 id="approval-edit-title">Edit command arguments</h2>
+      <p>Enter argv as a JSON array. Each item is preserved as one argument, including spaces.</p>
+      <label for="approval-edit-argv">argv JSON string[]</label>
+      <textarea id="approval-edit-argv" rows="10" required spellcheck="false"></textarea>
+      <p id="approval-edit-feedback" class="form-feedback" role="alert"></p>
+      <div class="row-actions">
+        <button id="approval-edit-cancel" class="small-action" type="button">Cancel</button>
+        <button class="small-action primary" type="submit">Re-evaluate and approve</button>
+      </div>
+    </form>
+  </dialog>
   <script src="/dashboard/assets/dashboard.js" type="module"></script>
 </body>
 </html>

@@ -69,6 +69,7 @@ from opendevops.gateway.base import (
     RunEvent,
     RunResult,
     enforce_approval_separation,
+    escalation_details,
 )
 from opendevops.gateway.translate import (
     extract_interrupt,
@@ -105,6 +106,7 @@ class _Suspended:
     prof: ResolvedProfile
     baseline_cost: float
     authoritative_so_far: float
+    payload: dict[str, Any]
 
 # A delta smaller than this is treated as float noise and not charged to the counter.
 _DELTA_EPSILON = 1e-9
@@ -590,16 +592,25 @@ class LocalGateway:
             for thread_id, task in self._tasks.items()
             if not task.done()
         ]
-        approvals = [
-            {
+        approvals = []
+        for thread_id, suspended in self._suspended.items():
+            details = escalation_details(
+                Escalation(payload=suspended.payload, run_id=suspended.run_id, thread_id=thread_id)
+            )
+            approvals.append(
+                {
                 "thread_id": thread_id,
                 "run_id": suspended.run_id,
                 "status": "awaiting_approval",
                 "requester": suspended.ctx.principal,
                 "environment": suspended.ctx.environment,
-            }
-            for thread_id, suspended in self._suspended.items()
-        ]
+                    "tool": details.tool,
+                    "argv": details.argv,
+                    "rule_id": details.rule_id,
+                    "reason": details.reason,
+                    "timeout_s": details.timeout_s,
+                }
+            )
         return {
             "active_runs": active,
             "pending_approvals": approvals,
@@ -673,6 +684,7 @@ class LocalGateway:
                 prof=prof,
                 baseline_cost=state_total,
                 authoritative_so_far=total_authoritative,
+                payload=interrupt_payload,
             )
             return RunResult(
                 final_text="",

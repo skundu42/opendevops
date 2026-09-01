@@ -2035,6 +2035,9 @@ models-openai = [
 postgres = [
     { name = "psycopg", extra = ["binary"] },
 ]
+scheduler = [
+    { name = "apscheduler" },
+]
 server = [
     { name = "authlib" },
     { name = "fastapi" },
@@ -2061,6 +2064,7 @@ requires-dist = [
     { name = "agentevals", marker = "extra == 'dev'", specifier = "==0.0.9" },
     { name = "aiohttp", marker = "extra == 'slack'" },
     { name = "aiosqlite", marker = "extra == 'checkpoint'" },
+    { name = "apscheduler", marker = "extra == 'scheduler'", specifier = ">=3.10,<4" },
     { name = "apscheduler", marker = "extra == 'slack'", specifier = ">=3.10,<4" },
     { name = "asyncssh", marker = "extra == 'ssh'", specifier = "==2.24.0" },
     { name = "authlib", marker = "extra == 'server'", specifier = ">=1.6,<2" },
@@ -2099,7 +2103,7 @@ requires-dist = [
     { name = "sse-starlette", marker = "extra == 'server'" },
     { name = "typer", specifier = ">=0.15" },
 ]
-provides-extras = ["checkpoint", "dev", "models", "models-bedrock", "models-google", "models-openai", "postgres", "server", "slack", "ssh"]
+provides-extras = ["checkpoint", "dev", "models", "models-bedrock", "models-google", "models-openai", "postgres", "scheduler", "server", "slack", "ssh"]
 
 [[package]]
 name = "openevals"

@@ -7,8 +7,8 @@ approver is recorded in the audit trail. Transport is slack-bolt 1.30.0 **Socket
 
 Driving model — STREAM-IN-PROCESS (mirrors the CLI REPL)
 --------------------------------------------------------
-The adapter holds a gateway (a :class:`~opendevops.gateway.local.LocalGateway` in the shipped
-``start`` path) and drives ``gateway.stream(...)`` for a new message, rendering assistant text and
+The adapter holds a :class:`~opendevops.gateway.server.ServerGateway` in the shipped ``start`` path
+and drives ``gateway.stream(...)`` for a new message, rendering assistant text and
 escalation buttons directly into the Slack thread — exactly the shape of ``cli._drive_turn`` /
 ``cli._consume_stream``. This is the simplest correct + testable choice: no round-trip through the
 LangGraph Server webhook queue, the whole run/resume/escalation loop lives in one process, and
@@ -48,6 +48,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
@@ -57,6 +58,7 @@ from opendevops.gateway import (
     EscalationEvent,
     RunEnd,
     ToolResult,
+    escalation_details,
 )
 
 if TYPE_CHECKING:
@@ -151,40 +153,6 @@ def decision_from_action(
     return {"type": "reject", "message": "rejected via Slack"}
 
 
-def _escalation_argv(escalation: Escalation) -> list[str]:
-    """The escalated command's argv from the interrupt payload (``[]`` if absent/malformed)."""
-    requests = escalation.payload.get("action_requests") or []
-    if requests and isinstance(requests[0], dict):
-        args = requests[0].get("args")
-        if isinstance(args, dict) and isinstance(args.get("argv"), list):
-            return [str(a) for a in args["argv"]]
-    return []
-
-
-def _escalation_review(escalation: Escalation) -> tuple[str, str]:
-    """``(rule_id, reason)`` from the interrupt payload's first review config."""
-    reviews = escalation.payload.get("review_configs") or []
-    if reviews and isinstance(reviews[0], dict):
-        return str(reviews[0].get("rule_id", "?")), str(reviews[0].get("reason", ""))
-    return "?", ""
-
-
-def _escalation_tool_call_id(escalation: Escalation) -> str:
-    """A stable per-escalation correlation id for the buttons.
-
-    The interrupt payload (``policy.middleware``) does not carry the ``tool_call_id`` in its
-    ``action_requests`` entry, so we honour one if a future payload adds it and otherwise fall back
-    to the escalation's ``run_id`` — a stable id unique to this run/escalation, which is all the
-    button needs (resume is routed by ``thread_id``; the correlation id is belt-and-suspenders).
-    """
-    requests = escalation.payload.get("action_requests") or []
-    if requests and isinstance(requests[0], dict):
-        tcid = requests[0].get("tool_call_id") or requests[0].get("id")
-        if tcid:
-            return str(tcid)
-    return escalation.run_id
-
-
 # --------------------------------------------------------------------------------------
 # Block Kit builders (pure — return lists of block dicts)
 # --------------------------------------------------------------------------------------
@@ -196,12 +164,12 @@ def render_escalation_blocks(escalation: Escalation) -> list[dict[str, Any]]:
     Each button's ``value`` carries the agent ``thread_id`` + ``tool_call_id`` (via
     :func:`encode_action_value`) so the action handler resumes the right run.
     """
-    argv, (rule, reason) = _escalation_argv(escalation), _escalation_review(escalation)
-    value = encode_action_value(escalation.thread_id, _escalation_tool_call_id(escalation))
-    command = " ".join(argv) if argv else "(no command)"
-    body = f"*Command:* `{command}`\n*Rule:* `{rule}`"
-    if reason:
-        body += f"\n*Reason:* {reason}"
+    details = escalation_details(escalation)
+    value = encode_action_value(escalation.thread_id, details.tool_call_id)
+    command = " ".join(details.argv) if details.argv else "(no command)"
+    body = f"*Command:* `{command}`\n*Rule:* `{details.rule_id}`"
+    if details.reason:
+        body += f"\n*Reason:* {details.reason}"
     return [
         {
             "type": "header",
@@ -705,8 +673,13 @@ def _action_matcher() -> Any:
     return re.compile(r"^opendevops:escalation:(approve|edit|reject)$")
 
 
-async def start(cfg: AppConfig) -> None:  # pragma: no cover - needs a live websocket
-    """Start the Slack Socket-Mode adapter over a :class:`LocalGateway` (blocks forever).
+async def start(
+    cfg: AppConfig,
+    *,
+    server_url: str | None = None,
+    stop_event: asyncio.Event | None = None,
+) -> None:  # pragma: no cover - needs a live websocket
+    """Start the Slack Socket-Mode adapter over a :class:`ServerGateway` (blocks forever).
 
     Reads the bot + app tokens from the env vars NAMED in ``cfg.slack`` (clear error if unset),
     builds the adapter + Bolt app, and runs the ``AsyncSocketModeHandler``. Not exercised in CI
@@ -716,13 +689,21 @@ async def start(cfg: AppConfig) -> None:  # pragma: no cover - needs a live webs
     # adapter fails with the clear config error rather than an ImportError.
     bot_token = _require_env(cfg.slack.bot_token_env, "bot_token_env")
     app_token = _require_env(cfg.slack.app_token_env, "app_token_env")
+    if cfg.server.api_key_env and not os.environ.get(cfg.server.api_key_env):
+        raise RuntimeError(
+            f"server bearer env var {cfg.server.api_key_env!r} is unset or empty"
+        )
+    if not cfg.principals:
+        raise RuntimeError(
+            "Slack requires at least one principals mapping (Slack user id -> principal)"
+        )
 
     from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
     from slack_sdk.web.async_client import AsyncWebClient
 
-    from opendevops.gateway import LocalGateway
+    from opendevops.gateway import ServerGateway
 
-    gateway = LocalGateway(cfg)
+    gateway = ServerGateway(cfg, url=server_url)
     # AsyncWebClient structurally satisfies SlackClient (same methods, extra typed kwargs); cast so
     # mypy accepts the wider concrete signature against our narrow Protocol.
     client = cast("SlackClient", AsyncWebClient(token=bot_token))
@@ -730,4 +711,21 @@ async def start(cfg: AppConfig) -> None:  # pragma: no cover - needs a live webs
     app = build_bolt_app(adapter, bot_token=bot_token)
     handler = AsyncSocketModeHandler(app, app_token)
     logger.info("starting Slack Socket-Mode adapter (interface=%s)", INTERFACE_SLACK)
-    await handler.start_async()
+    stop = stop_event or asyncio.Event()
+    loop = asyncio.get_running_loop()
+    installed: list[signal.Signals] = []
+    if stop_event is None:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, stop.set)
+                installed.append(sig)
+            except NotImplementedError:
+                pass
+    try:
+        await handler.connect_async()
+        await stop.wait()
+    finally:
+        await handler.close_async()
+        for sig in installed:
+            loop.remove_signal_handler(sig)
+        await gateway.aclose()

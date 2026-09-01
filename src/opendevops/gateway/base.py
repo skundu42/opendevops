@@ -23,6 +23,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from opendevops.tools.scrub import scrub
+
 
 @dataclass
 class RunResult:
@@ -70,6 +72,46 @@ class Escalation:
     run_id: str
     thread_id: str
     type: Literal["escalation"] = "escalation"
+
+
+@dataclass(frozen=True)
+class EscalationDetails:
+    """Sanitized, bounded fields shared by every escalation interface."""
+
+    tool: str
+    argv: list[str]
+    rule_id: str
+    reason: str
+    timeout_s: int | None
+    tool_call_id: str
+
+
+def escalation_details(escalation: Escalation) -> EscalationDetails:
+    """Parse the first action/review pair from an interrupt payload, failing closed."""
+
+    requests = escalation.payload.get("action_requests") or []
+    request: dict[str, Any] = requests[0] if requests and isinstance(requests[0], dict) else {}
+    raw_args = request.get("args")
+    args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
+    raw_values = args.get("argv")
+    raw_argv: list[Any] = raw_values if isinstance(raw_values, list) else []
+    reviews = escalation.payload.get("review_configs") or []
+    review: dict[str, Any] = reviews[0] if reviews and isinstance(reviews[0], dict) else {}
+
+    def clean(value: Any, limit: int) -> str:
+        return scrub(str(value))[0][:limit]
+
+    timeout = review.get("timeout_s")
+    return EscalationDetails(
+        tool=clean(request.get("action") or "unknown", 128),
+        argv=[clean(value, 4096) for value in raw_argv[:128]],
+        rule_id=clean(review.get("rule_id") or "unknown", 256),
+        reason=clean(review.get("reason") or "", 2000),
+        timeout_s=timeout if isinstance(timeout, int) and timeout > 0 else None,
+        tool_call_id=clean(
+            request.get("tool_call_id") or request.get("id") or escalation.run_id, 256
+        ),
+    )
 
 
 @dataclass

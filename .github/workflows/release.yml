@@ -79,6 +79,7 @@ jobs:
           mkdir -p "${bundle_root}/ops"
           cp docker-compose.yml .env.example LICENSE "${bundle_root}/"
           cp -R config "${bundle_root}/config"
+          cp -R scheduler "${bundle_root}/scheduler"
           cp -R ops/caddy ops/vector ops/prometheus ops/grafana "${bundle_root}/ops/"
           sed -i \
             "s|ghcr.io/skundu42/opendevops:latest|ghcr.io/skundu42/opendevops:${VERSION}|g" \

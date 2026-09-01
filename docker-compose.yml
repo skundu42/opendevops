@@ -28,6 +28,7 @@ volumes:
   prometheus-data:
   grafana-data:
   caddy-data:
+  postgres-backups:  # scheduler-created dumps; no automatic retention/deletion
 
 networks:
   agent-net:
@@ -122,6 +123,52 @@ services:
     volumes:
       - ./ops/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
+    networks:
+      - agent-net
+
+  # -- Optional Slack Socket-Mode adapter -----------------------------------------------------
+  slack:
+    profiles: ["slack"]
+    image: ${LANGGRAPH_IMAGE:-ghcr.io/skundu42/opendevops:latest}
+    working_dir: /deploy
+    restart: unless-stopped
+    command: ["opendevops", "slack", "--server-url", "http://caddy:8123"]
+    depends_on:
+      - caddy
+    environment:
+      OPENDEVOPS_CONFIG: /deploy/config/config.yaml
+      LANGGRAPH_API_KEY: ${GATEWAY_TOKEN:?set GATEWAY_TOKEN}
+      OPENDEVOPS_SLACK_BOT_TOKEN: ${OPENDEVOPS_SLACK_BOT_TOKEN:-}
+      OPENDEVOPS_SLACK_APP_TOKEN: ${OPENDEVOPS_SLACK_APP_TOKEN:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    volumes:
+      - ./config:/deploy/config:ro
+    networks:
+      - agent-net
+
+  # -- Optional scheduler: agent jobs, timeout sweep, and backup-first daily hygiene ----------
+  scheduler:
+    profiles: ["scheduler"]
+    image: ${LANGGRAPH_IMAGE:-ghcr.io/skundu42/opendevops:latest}
+    working_dir: /deploy
+    restart: unless-stopped
+    command: ["opendevops", "scheduler", "--server-url", "http://caddy:8123", "--jobs-file", "/deploy/scheduler/jobs.yaml"]
+    depends_on:
+      caddy:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      OPENDEVOPS_CONFIG: /deploy/config/config.yaml
+      LANGGRAPH_API_KEY: ${GATEWAY_TOKEN:?set GATEWAY_TOKEN}
+      OPENDEVOPS_BACKUP_DATABASE_URI: ${OPENDEVOPS_BACKUP_DATABASE_URI:-postgresql://postgres@postgres:5432/postgres?sslmode=disable}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      OPENDEVOPS_BACKUP_DIR: ${OPENDEVOPS_BACKUP_DIR:-/backups}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    volumes:
+      - ./config:/deploy/config:ro
+      - ./scheduler:/deploy/scheduler:ro
+      - postgres-backups:/backups
     networks:
       - agent-net
 

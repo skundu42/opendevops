@@ -9,13 +9,11 @@ Split into a PURE core and a thin live seam:
   execution (fresh thread + ``profile=scheduled`` run under a caller-side timeout) is directly
   testable; only the ``AsyncIOScheduler`` wiring in ``start`` is a live seam.
 
-The escalation-timeout SWEEPER (the enforcement behind ``on_timeout: deny``) lives in
-``ops/maintenance.py`` — see its module docstring — because it reuses that module's documented
-``langgraph_sdk`` SDK-firewall exception to LIST interrupted runs. The scheduler invokes it as the
-``escalation-sweep`` job_type.
+The packaged maintenance module owns backup/spend/prune hygiene and the escalation-timeout
+sweeper; ``ops/maintenance.py`` is only its Typer frontend.
 
-``apscheduler`` ships in the ``slack`` extra; importing this subpackage's ``service`` pulls it in
-lazily (inside ``build_trigger`` / ``start``), so importing the package does not require it.
+``apscheduler`` ships in the ``scheduler`` extra; this subpackage imports it lazily (inside
+``build_trigger`` / ``start``), so importing the package does not require it.
 """
 
 from opendevops.interfaces.scheduler.jobs import (
@@ -34,6 +32,8 @@ from opendevops.interfaces.scheduler.service import (
     JobOutcome,
     SchedulerService,
     build_escalation_sweep_runner,
+    build_hygiene_runner,
+    serve_scheduler,
 )
 
 __all__ = [
@@ -46,8 +46,10 @@ __all__ = [
     "SchedulerService",
     "TriggerSpec",
     "build_escalation_sweep_runner",
+    "build_hygiene_runner",
     "build_trigger",
     "load_jobs",
     "parse_jobs",
     "scheduler_job_kwargs",
+    "serve_scheduler",
 ]

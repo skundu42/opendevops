@@ -75,6 +75,7 @@ from opendevops.gateway.base import (
     RunEnd,
     RunResult,
     enforce_approval_separation,
+    escalation_details,
 )
 from opendevops.gateway.translate import extract_interrupt, final_text, translate_updates
 
@@ -107,6 +108,7 @@ class _Suspended:
     run_id: str
     ctx: dict[str, Any]
     prof: ResolvedProfile
+    payload: dict[str, Any]
 
 
 class ServerGateway:
@@ -432,7 +434,9 @@ class ServerGateway:
         """Build the RunResult from final state; remember the resume context iff it suspended."""
         result = self._result_from_values(run_id, thread_id, values)
         if result.interrupted is not None:
-            self._suspended[thread_id] = _Suspended(run_id=run_id, ctx=ctx, prof=prof)
+            self._suspended[thread_id] = _Suspended(
+                run_id=run_id, ctx=ctx, prof=prof, payload=result.interrupted.payload
+            )
         return result
 
     def _result_from_values(
@@ -545,16 +549,25 @@ class ServerGateway:
                         "updated_at": data.get("updated_at"),
                     }
                 )
-        approvals = [
-            {
+        approvals = []
+        for thread_id, suspended in self._suspended.items():
+            details = escalation_details(
+                Escalation(payload=suspended.payload, run_id=suspended.run_id, thread_id=thread_id)
+            )
+            approvals.append(
+                {
                 "thread_id": thread_id,
                 "run_id": suspended.run_id,
                 "status": "awaiting_approval",
                 "requester": str(suspended.ctx.get("principal") or "unknown"),
                 "environment": str(suspended.ctx.get("environment") or "unknown"),
-            }
-            for thread_id, suspended in self._suspended.items()
-        ]
+                    "tool": details.tool,
+                    "argv": details.argv,
+                    "rule_id": details.rule_id,
+                    "reason": details.reason,
+                    "timeout_s": details.timeout_s,
+                }
+            )
         return {
             "active_runs": active,
             "pending_approvals": approvals,

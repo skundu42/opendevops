@@ -61,6 +61,11 @@ interface PendingApproval {
   run_id: string;
   environment: string;
   requester: string;
+  tool?: string;
+  argv?: string[];
+  rule_id?: string;
+  reason?: string;
+  timeout_s?: number | null;
 }
 
 interface LiveSnapshot {
@@ -121,6 +126,7 @@ type GrantWizardStep = "propose" | "approve" | "activate";
 
 let grantWizardStep: GrantWizardStep = "propose";
 let cachedProposals: CapabilityProposal[] = [];
+let editingApproval: PendingApproval | null = null;
 
 interface ControlPlaneSnapshot {
   revision?: string;
@@ -473,6 +479,13 @@ function renderLive(live: LiveSnapshot = {}): void {
       element("strong", "", `${approval.environment} change`),
       element("p", "", `${shortId(approval.run_id, 12)} · requested by ${approval.requester}`)
     );
+    if (approval.argv) {
+      copy.append(
+        element("p", "approval-command", `${approval.tool || "command"} ${JSON.stringify(approval.argv)}`),
+        element("p", "", `Rule: ${approval.rule_id || "—"} · timeout: ${approval.timeout_s ?? "—"}s`),
+        element("p", "", `Reason: ${approval.reason || "—"}`),
+      );
+    }
     const actions = element("div", "row-actions");
     if (currentRoles.has("approver") || currentRoles.has("admin")) {
       const approve = element("button", "small-action primary", "Approve");
@@ -481,7 +494,10 @@ function renderLive(live: LiveSnapshot = {}): void {
       const reject = element("button", "small-action", "Reject");
       reject.type = "button";
       reject.addEventListener("click", () => resolveApproval(approval.thread_id, "reject"));
-      actions.append(approve, reject);
+      const edit = element("button", "small-action", "Edit argv");
+      edit.type = "button";
+      edit.addEventListener("click", () => openApprovalEditor(approval));
+      actions.append(approve, edit, reject);
     }
     item.append(copy, actions);
     list.append(item);
@@ -1104,6 +1120,38 @@ async function resolveApproval(threadId: string, type: ApprovalDecision): Promis
     window.alert(errorMessage(error));
   }
 }
+
+function openApprovalEditor(approval: PendingApproval): void {
+  editingApproval = approval;
+  byId<HTMLTextAreaElement>("approval-edit-argv").value = JSON.stringify(approval.argv || [], null, 2);
+  setText("approval-edit-feedback", "");
+  byId<HTMLDialogElement>("approval-edit-dialog").showModal();
+}
+
+byId<HTMLFormElement>("approval-edit-form").addEventListener("submit", async (event: SubmitEvent) => {
+  event.preventDefault();
+  if (!editingApproval) return;
+  const feedback = byId("approval-edit-feedback");
+  try {
+    const argv: unknown = JSON.parse(byId<HTMLTextAreaElement>("approval-edit-argv").value);
+    if (!Array.isArray(argv) || !argv.length || !argv.every((value) => typeof value === "string" && value.length > 0)) {
+      throw new Error("argv must be a non-empty JSON array of non-empty strings");
+    }
+    await mutation(`/dashboard/api/approvals/${encodeURIComponent(editingApproval.thread_id)}`, {
+      decisions: [{ type: "edit", args: { argv } }]
+    });
+    byId<HTMLDialogElement>("approval-edit-dialog").close();
+    editingApproval = null;
+    await refresh();
+  } catch (error: unknown) {
+    feedback.textContent = errorMessage(error);
+  }
+});
+
+byId<HTMLButtonElement>("approval-edit-cancel").addEventListener("click", () => {
+  byId<HTMLDialogElement>("approval-edit-dialog").close();
+  editingApproval = null;
+});
 
 async function proposalAction(proposalId: string, action: ProposalAction): Promise<void> {
   try {

@@ -60,6 +60,7 @@ class CustomBuildHook(BuildHookInterface):
         template_sources = [
             (root / "config", Path("config")),
             (root / "ops" / "k8s", Path("ops/k8s")),
+            (root / "scheduler", Path("scheduler")),
         ]
         for source_root, destination_root in template_sources:
             for source in source_root.rglob("*"):

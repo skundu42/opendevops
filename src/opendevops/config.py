@@ -651,7 +651,7 @@ class Principal(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    principal: str
+    principal: str = Field(min_length=1)
     profile: str = "interactive"
     roles: list[DashboardRole] = ["operator"]
 
@@ -701,7 +701,7 @@ class SchedulerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     jobs_file: Path = Path("scheduler/jobs.yaml")
-    principal: str = "scheduler"
+    principal: str = Field(default="scheduler", min_length=1)
 
     @field_validator("jobs_file", mode="after")
     @classmethod

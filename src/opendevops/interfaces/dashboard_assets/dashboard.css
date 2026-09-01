@@ -1675,6 +1675,41 @@ td small {
   font-size: 10px;
 }
 
+.approval-command {
+  overflow-wrap: anywhere;
+  color: var(--ink) !important;
+}
+
+#approval-edit-dialog {
+  width: min(620px, 92vw);
+  padding: 24px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+#approval-edit-dialog::backdrop {
+  background: rgba(22, 40, 62, 0.45);
+}
+
+#approval-edit-dialog h2 {
+  margin-top: 0;
+}
+
+#approval-edit-dialog label,
+#approval-edit-dialog textarea {
+  display: block;
+  width: 100%;
+}
+
+#approval-edit-dialog textarea {
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 12px;
+  font-family: var(--data);
+}
+
 .row-actions {
   display: flex;
   align-items: center;

@@ -29,12 +29,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import signal
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from opendevops.interfaces.scheduler.jobs import JobSpec, scheduler_job_kwargs
+from opendevops.interfaces.scheduler.jobs import JobSpec, load_jobs, scheduler_job_kwargs
+from opendevops.interfaces.scheduler.maintenance import (
+    require_pg_dump_16,
+    run_daily_hygiene,
+    validate_backup_settings,
+)
 from opendevops.observability.otel import observe_operation, span
 
 if TYPE_CHECKING:
@@ -230,24 +238,101 @@ def _log_outcome(outcome: JobOutcome) -> None:  # pragma: no cover - trivial log
         )
 
 
-def build_escalation_sweep_runner(  # pragma: no cover - live seam (out-of-wheel ops tool)
+def build_escalation_sweep_runner(
     client: Any, *, assistant_id: str = "devops"
 ) -> JobTypeRunner:
     """A ``job_type`` runner that runs the escalation-timeout SWEEPER over a ``langgraph_sdk`` seam.
 
     Register the result under ``"escalation-sweep"`` in :class:`SchedulerService`'s ``job_types`` so
-    the scheduler drives it. The sweeper itself lives in the out-of-wheel ``ops/maintenance.py`` (it
-    reuses that module's documented ``langgraph_sdk`` SDK-firewall exception to LIST + resume-reject
-    interrupted runs) and is imported lazily here so the shipped package never depends on ``ops``.
+    the scheduler drives it. The sweeper lives in the shipped maintenance module and uses the
+    scheduler's SDK client to list and resume-reject interrupted runs.
 
     The production sweeper resumes via the SDK client directly — NOT ``gateway.resume_interrupt`` —
     because a fresh sweeper process never suspended those runs, so it holds no in-memory suspended
     record to resume through the gateway. The single-process strongest-pin test does use the gateway
     (valid there because the same instance suspended the run).
     """
-    from ops.maintenance import sweep_timed_out_escalations
+    from opendevops.interfaces.scheduler.maintenance import sweep_timed_out_escalations
 
     async def _run(spec: JobSpec) -> None:
         await sweep_timed_out_escalations(client, assistant_id=assistant_id, dry_run=False)
 
     return _run
+
+
+def build_hygiene_runner(client: Any, cfg: Any, *, principal: str) -> JobTypeRunner:
+    """Build the daily backup/spend/prune runner from deployment environment."""
+    database_uri = os.environ.get("OPENDEVOPS_BACKUP_DATABASE_URI", "")
+    backup_dir = Path(os.environ.get("OPENDEVOPS_BACKUP_DIR", "/backups"))
+    validate_backup_settings(database_uri, backup_dir, dict(os.environ))
+    require_pg_dump_16()
+
+    async def _run(spec: JobSpec) -> None:
+        await run_daily_hygiene(
+            client,
+            cfg,
+            principal=principal,
+            database_uri=database_uri,
+            backup_dir=backup_dir,
+        )
+
+    return _run
+
+
+async def serve_scheduler(
+    cfg: Any,
+    *,
+    server_url: str | None = None,
+    jobs_file: Path | None = None,
+    stop_event: asyncio.Event | None = None,
+    client: Any = None,
+) -> None:  # pragma: no cover - live process seam
+    """Run the scheduler until SIGINT/SIGTERM, then close it cleanly."""
+    from langgraph_sdk import get_client
+
+    from opendevops.gateway import ServerGateway
+
+    url = server_url or cfg.server.url
+    if not url:
+        raise ValueError("server URL is required (set server.url or pass --server-url)")
+    if cfg.server.api_key_env and not os.environ.get(cfg.server.api_key_env):
+        raise ValueError(f"server bearer env var {cfg.server.api_key_env!r} is unset or empty")
+    specs = load_jobs(jobs_file or cfg.scheduler.jobs_file)
+    unknown = sorted(
+        {spec.job_type for spec in specs if spec.job_type}
+        - {"hygiene", "escalation-sweep"}
+    )
+    if unknown:
+        raise ValueError(f"unregistered scheduler job_type(s): {unknown}")
+    if client is None:
+        api_key = os.environ.get(cfg.server.api_key_env) if cfg.server.api_key_env else None
+        client = get_client(url=url, api_key=api_key)
+    gateway = ServerGateway(cfg, client=client, url=url)
+    job_types: dict[str, JobTypeRunner] = {
+        "escalation-sweep": build_escalation_sweep_runner(client),
+    }
+    if any(spec.job_type == "hygiene" for spec in specs):
+        job_types["hygiene"] = build_hygiene_runner(
+            client, cfg, principal=cfg.scheduler.principal
+        )
+    service = SchedulerService(
+        gateway, specs, job_types=job_types, principal=cfg.scheduler.principal
+    )
+    stop = stop_event or asyncio.Event()
+    loop = asyncio.get_running_loop()
+    installed: list[signal.Signals] = []
+    if stop_event is None:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, stop.set)
+                installed.append(sig)
+            except NotImplementedError:
+                pass
+    try:
+        service.start()
+        await stop.wait()
+    finally:
+        service.shutdown()
+        for sig in installed:
+            loop.remove_signal_handler(sig)
+        await gateway.aclose()

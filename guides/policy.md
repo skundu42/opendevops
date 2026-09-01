@@ -1,5 +1,9 @@
 # The policy engine
 
+Installed packs are enabled packs. If a deployment does not configure a pack's credential family,
+remove that pack file explicitly; `opendevops config check` reports credential coverage and trusted
+executable failures instead of treating unused credential-gated packs as dormant.
+
 Every tool call the model makes passes through `PolicyMiddleware`
 (`src/opendevops/policy/middleware.py`). The engine is **default-deny, fail-closed, layered**:
 global denies in `base.yaml`, allows only in per-tool-family packs, per-environment overlays that
