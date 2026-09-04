@@ -5,6 +5,24 @@ and uses Git tags prefixed with `v`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-04
+
+### Added
+
+- Slack Socket Mode and scheduler CLI services with opt-in Compose profiles.
+- Packaged scheduler maintenance with atomic PostgreSQL backups before thread pruning.
+- Transient, scrubbed pending-command details for dashboard approver/admin sessions.
+- Aggregated configuration preflight checks and optional live server/executor probes.
+- Operational metrics for policy denials, daily spend/caps, and scheduler success timestamps.
+- Dependency readiness endpoint and shared Redis webhook deduplication across workers.
+
+### Changed
+
+- Service mode requires Redis through `REDIS_URI` or `budgets.daily.redis_url`.
+- Installed policy packs require their credentials and trusted executables; remove unused packs.
+
+See [docs/releases/v0.3.0.md](docs/releases/v0.3.0.md).
+
 ## [0.2.1] - 2026-08-11
 
 ### Fixed
@@ -79,3 +97,5 @@ See [docs/releases/v0.1.1.md](docs/releases/v0.1.1.md).
 [0.2.0]: https://github.com/skundu42/opendevops/releases/tag/v0.2.0
 [0.1.1]: https://github.com/skundu42/opendevops/releases/tag/v0.1.1
 [0.1.0]: https://github.com/skundu42/opendevops/releases/tag/v0.1.0
+
+[0.3.0]: https://github.com/skundu42/opendevops/releases/tag/v0.3.0

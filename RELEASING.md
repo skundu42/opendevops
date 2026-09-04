@@ -46,8 +46,8 @@ Published versions and container tags are never replaced.
 3. Commit the release change to `main`, then create and push an annotated or signed tag:
 
    ```sh
-   git tag -s v0.2.1
-   git push origin main v0.2.1
+   git tag -s v0.3.0
+   git push origin main v0.3.0
    ```
 
 4. Follow the `Release` workflow until all required jobs complete. The workflow creates the GitHub
@@ -55,10 +55,10 @@ Published versions and container tags are never replaced.
 5. Verify the release:
 
    ```sh
-   gh attestation verify opendevops-0.2.1-py3-none-any.whl \
+   gh attestation verify opendevops-0.3.0-py3-none-any.whl \
      --repo skundu42/opendevops
    sha256sum -c SHA256SUMS
-   docker buildx imagetools inspect ghcr.io/skundu42/opendevops:0.2.1
+   docker buildx imagetools inspect ghcr.io/skundu42/opendevops:0.3.0
    ```
 
 If a release job fails, fix the release workflow or source and publish a new version. Do not move
@@ -85,12 +85,12 @@ available before pushing the tag.
 Preferred install from the published package:
 
 ```sh
-uv tool install "opendevops[checkpoint,ssh]==0.2.1"
+uv tool install "opendevops[checkpoint,ssh]==0.3.0"
 ```
 
 GitHub Release wheel (when installing a specific artifact directly):
 
 ```sh
 uv tool install \
-  'opendevops[checkpoint,ssh] @ https://github.com/skundu42/opendevops/releases/download/v0.2.1/opendevops-0.2.1-py3-none-any.whl'
+  'opendevops[checkpoint,ssh] @ https://github.com/skundu42/opendevops/releases/download/v0.3.0/opendevops-0.3.0-py3-none-any.whl'
 ```
