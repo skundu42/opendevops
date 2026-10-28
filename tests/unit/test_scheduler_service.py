@@ -147,6 +147,170 @@ async def test_command_job_error_is_captured_not_propagated() -> None:
     assert "model exploded" in (outcome.error or "")
 
 
+@pytest.mark.parametrize(
+    ("error", "budget_stop"),
+    [
+        ("run cancelled", None),
+        (None, {"kind": "daily_usd", "limit": 1.0}),
+        (None, {}),
+    ],
+)
+async def test_unsuccessful_run_result_does_not_record_success(
+    error: str | None, budget_stop: dict[str, Any] | None
+) -> None:
+    result = _ok_result()
+    result.error = error
+    result.budget_stop = budget_stop
+    recorder = AsyncMock()
+    svc = SchedulerService(
+        StubGateway(result=result),  # type: ignore[arg-type]
+        [],
+        success_recorder=recorder,
+    )
+
+    outcome = await svc.run_job(_cmd_spec())
+
+    assert outcome.status == "error"
+    assert outcome.run_id == result.run_id
+    assert outcome.error
+    if error is not None:
+        assert outcome.error == error
+    else:
+        assert "budget" in outcome.error
+    recorder.assert_not_awaited()
+
+
+async def test_thread_creation_failure_is_recorded() -> None:
+    gw = StubGateway(result=_ok_result())
+    gw.create_thread = AsyncMock(side_effect=RuntimeError("server unavailable"))
+    recorder = AsyncMock()
+    svc = SchedulerService(gw, [], success_recorder=recorder)  # type: ignore[arg-type]
+
+    outcome = await svc.run_job(_cmd_spec())
+
+    assert outcome.status == "error"
+    assert outcome.thread_id is None
+    assert outcome.error == "server unavailable"
+    assert not gw.run_calls
+    recorder.assert_not_awaited()
+
+
+async def test_thread_creation_is_bounded_by_job_timeout() -> None:
+    gw = StubGateway(result=_ok_result())
+    gw.create_thread = AsyncMock(side_effect=asyncio.Event().wait)
+    svc = SchedulerService(gw, [])  # type: ignore[arg-type]
+
+    outcome = await asyncio.wait_for(svc.run_job(_cmd_spec(timeout_s=1)), timeout=2)
+
+    assert outcome.status == "timeout"
+    assert outcome.thread_id is None
+    assert not gw.run_calls
+    assert not gw.cancelled
+
+
+async def test_timeout_records_cancellation_failure() -> None:
+    gw = StubGateway(block=True)
+    gw.cancel = AsyncMock(side_effect=RuntimeError("cancel unavailable"))
+    svc = SchedulerService(gw, [])  # type: ignore[arg-type]
+
+    outcome = await svc.run_job(_cmd_spec(timeout_s=1))
+
+    assert outcome.status == "timeout"
+    assert outcome.thread_id == "thread-1"
+    assert "timeout_s=1" in (outcome.error or "")
+    assert "cancel unavailable" in (outcome.error or "")
+    gw.cancel.assert_awaited_once_with("thread-1")
+
+
+async def test_timeout_cleanup_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def stalled_cancel(thread_id: str) -> None:
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("opendevops.interfaces.scheduler.service._CANCEL_TIMEOUT_S", 0.01)
+    gw = StubGateway(block=True)
+    gw.cancel = AsyncMock(side_effect=stalled_cancel)
+    svc = SchedulerService(gw, [])  # type: ignore[arg-type]
+
+    outcome = await asyncio.wait_for(svc.run_job(_cmd_spec(timeout_s=1)), timeout=2)
+
+    assert outcome.status == "timeout"
+    assert "cancellation failed: TimeoutError" in (outcome.error or "")
+
+
+async def test_gateway_cancellation_result_does_not_hide_job_timeout() -> None:
+    async def run_until_cancelled(*args: Any, **kwargs: Any) -> RunResult:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            # Both real gateways translate cancellation into a RunResult.
+            result = _ok_result()
+            result.error = "run cancelled"
+            result.budget_stop = {"kind": "cancelled"}
+            return result
+        raise AssertionError("run should have been cancelled")
+
+    gw = StubGateway()
+    gw.run = AsyncMock(side_effect=run_until_cancelled)
+    recorder = AsyncMock()
+    svc = SchedulerService(gw, [], success_recorder=recorder)  # type: ignore[arg-type]
+
+    outcome = await svc.run_job(_cmd_spec(timeout_s=1))
+
+    assert outcome.status == "timeout"
+    assert gw.cancelled == ["thread-1"]
+    recorder.assert_not_awaited()
+
+
+async def test_scheduler_shutdown_cancellation_is_not_converted_to_job_error() -> None:
+    started = asyncio.Event()
+
+    async def blocking_run(*args: Any, **kwargs: Any) -> RunResult:
+        started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("run should have been cancelled")
+
+    gw = StubGateway()
+    gw.run = AsyncMock(side_effect=blocking_run)
+    svc = SchedulerService(gw, [])  # type: ignore[arg-type]
+    task = asyncio.create_task(svc.run_job(_cmd_spec()))
+    await started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.parametrize("stage", ["create_thread", "run"])
+async def test_scheduler_shutdown_propagates_when_gateway_swallows_cancellation(stage: str) -> None:
+    started = asyncio.Event()
+
+    async def complete_on_cancel(*args: Any, **kwargs: Any) -> str | RunResult:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            if stage == "create_thread":
+                return "thread-1"
+            result = _ok_result()
+            result.error = "run cancelled"
+            return result
+        raise AssertionError("gateway should have been cancelled")
+
+    gw = StubGateway(result=_ok_result())
+    setattr(gw, stage, AsyncMock(side_effect=complete_on_cancel))
+    recorder = AsyncMock()
+    svc = SchedulerService(gw, [], success_recorder=recorder)  # type: ignore[arg-type]
+    task = asyncio.create_task(svc.run_job(_cmd_spec()))
+    await started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    recorder.assert_not_awaited()
+    if stage == "create_thread":
+        assert not gw.run_calls
+
+
 # --------------------------------------------------------------------------------------
 # job_type job: dispatch + timeout + error + unknown
 # --------------------------------------------------------------------------------------

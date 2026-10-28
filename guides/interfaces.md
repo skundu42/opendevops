@@ -16,7 +16,7 @@ uv run opendevops chat [--environment staging|prod] [--profile <name>] [--princi
 - `/cost` — session and daily spend; `/quit` `/exit` `/q` — leave.
 - **Ctrl-C cancels the in-flight run** via the gateway (audited, graceful) without killing the
   REPL.
-- Other subcommands: `opendevops version`, `opendevops config check [--live]`,
+- Other subcommands: `opendevops version`, `opendevops config check [--live] [--json]`,
   `opendevops audit verify --dir <dir>`, and the `opendevops config *-grant` lifecycle.
 
 ### Escalations in the CLI

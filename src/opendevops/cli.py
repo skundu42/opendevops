@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import getpass
+import json
 import os
 import sys
+from dataclasses import asdict
 from importlib import resources
 from importlib.resources.abc import Traversable
 from pathlib import Path
@@ -141,19 +143,24 @@ def init_workspace(
 @config_app.command("check")
 def config_check(
     live: bool = typer.Option(False, "--live", help="Probe server and remote executor health."),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write a machine-readable report to stdout."
+    ),
 ) -> None:
     """Run aggregated offline checks and optional authenticated health probes."""
-    from opendevops.preflight import run_live_preflight, run_offline_preflight
+    from opendevops.preflight import PreflightReport, run_live_preflight, run_offline_preflight
 
     try:
         cfg = load_config()
     except Exception as exc:  # noqa: BLE001 - surface any load/validation failure to the user
-        err_console.print("[bold red]FAILURES[/bold red]")
-        err_console.print(f"  - configuration schema: {exc}")
-        raise typer.Exit(code=1) from exc
-    report = run_offline_preflight(cfg)
-    if live:
-        report.merge(asyncio.run(run_live_preflight(cfg)))
+        report = PreflightReport(failures=[f"configuration schema: {exc}"])
+    else:
+        report = run_offline_preflight(cfg)
+        if live:
+            report.merge(asyncio.run(run_live_preflight(cfg)))
+    if json_output:
+        sys.stdout.write(json.dumps({"ok": report.ok, **asdict(report)}) + "\n")
+        raise typer.Exit(code=0 if report.ok else 1)
     if report.successes:
         console.print("[bold green]SUCCESSES[/bold green]")
         for item in report.successes:

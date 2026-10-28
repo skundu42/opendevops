@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -30,6 +31,7 @@ from graph.helpers import MODELS, budgets
 from opendevops.audit import AuditLogger
 from opendevops.audit.schema import EventType
 from opendevops.config import AppConfig
+from opendevops.gateway.base import RunResult
 from opendevops.interfaces import webapp
 from opendevops.interfaces.webapp import (
     _MAX_ALERTS_PER_REQUEST,
@@ -73,7 +75,11 @@ def _make_cfg(**server_overrides: Any) -> AppConfig:
 def _stub_gateway() -> AsyncMock:
     gw = AsyncMock()
     gw.create_thread = AsyncMock(return_value="ignored-thread-id")
-    gw.run = AsyncMock(return_value=None)
+    gw.run = AsyncMock(
+        return_value=RunResult(
+            final_text="Done", run_id="run-1", cost_usd_state=0.0, cost_usd_authoritative=0.0
+        )
+    )
     return gw
 
 
@@ -447,6 +453,48 @@ async def test_alertmanager_dedup_same_fingerprint_starts_one_run(
     gw.run.assert_awaited_once()
 
 
+@pytest.mark.parametrize(
+    ("error", "budget_stop", "expected_status"),
+    [
+        (None, None, "ok"),
+        ("provider failed with sensitive details", None, "error"),
+        (None, {"reason": "run_cost_cap"}, "budget_stop"),
+        ("wall clock exceeded", {"reason": "wall_clock"}, "error"),
+    ],
+)
+async def test_webhook_run_reports_terminal_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+    error: str | None,
+    budget_stop: dict[str, Any] | None,
+    expected_status: str,
+) -> None:
+    monkeypatch.setenv(_TOKEN_ENV, _TOKEN)
+    gw = _stub_gateway()
+    gw.run.return_value.error = error
+    gw.run.return_value.budget_stop = budget_stop
+    operations: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        webapp,
+        "observe_operation",
+        lambda operation, duration, status, attributes: operations.append((operation, status)),
+    )
+    app = create_app(_make_cfg(alertmanager_token_env=_TOKEN_ENV), gw)
+    completed = AsyncMock(wraps=app.state.live_telemetry.completed)
+    app.state.live_telemetry.completed = completed
+    async with _client(app) as client:
+        resp = await client.post(
+            "/webhooks/alertmanager", headers=_bearer(_TOKEN), json=_am_payload()
+        )
+        await _drain(app)
+
+    assert resp.status_code == 202
+    snapshot = await app.state.live_telemetry.snapshot()
+    assert snapshot["executor_errors"] == (0 if expected_status == "ok" else 1)
+    assert snapshot["active_runs"] == []
+    assert ("gateway", expected_status) in operations
+    assert "sensitive details" not in str(completed.call_args)
+
+
 async def test_redis_dedup_is_shared_and_expiring() -> None:
     redis = fakeredis.aioredis.FakeRedis(server=fakeredis.FakeServer())
     first = _RedisDeduplicator(redis)
@@ -763,6 +811,62 @@ async def test_alertmanager_fanout_capped_and_dropped_counted(
     assert _counter(metrics.text, "alertmanager", "dropped") == float(over)
     # ... and logged.
     assert any("capped" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.parametrize("route", ["alertmanager", "github", "run-complete"])
+@pytest.mark.parametrize("declared_length", [None, "1", "invalid"])
+async def test_webhook_body_limit_stops_reading_oversized_stream(
+    monkeypatch: pytest.MonkeyPatch, route: str, declared_length: str | None
+) -> None:
+    monkeypatch.setenv(_TOKEN_ENV, _TOKEN)
+    monkeypatch.setenv(_GH_ENV, _GH_SECRET)
+    gw = _stub_gateway()
+    app = create_app(
+        _make_cfg(alertmanager_token_env=_TOKEN_ENV, github_webhook_secret_env=_GH_ENV), gw
+    )
+    headers = _bearer(_TOKEN)
+    if declared_length is not None:
+        headers["Content-Length"] = declared_length
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b"x" * _MAX_BODY_BYTES
+        yield b"x"
+        raise AssertionError("the body must not be consumed after exceeding the limit")
+
+    async with _client(app) as client:
+        resp = await client.post(f"/webhooks/{route}", headers=headers, content=chunks())
+
+    assert resp.status_code == 413
+    assert resp.json() == {"detail": "request body too large"}
+    gw.create_thread.assert_not_awaited()
+    gw.run.assert_not_awaited()
+
+
+async def test_github_accepts_signed_stream_at_body_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(_GH_ENV, _GH_SECRET)
+    gw = _stub_gateway()
+    app = create_app(_make_cfg(github_webhook_secret_env=_GH_ENV), gw)
+    payload = _gh_payload()
+    payload["padding"] = ""
+    raw = json.dumps(payload).encode()
+    payload["padding"] = "x" * (_MAX_BODY_BYTES - len(raw))
+    raw = json.dumps(payload).encode()
+    assert len(raw) == _MAX_BODY_BYTES
+    headers = {
+        "X-Hub-Signature-256": _gh_sign(_GH_SECRET, raw),
+        "X-GitHub-Event": "workflow_run",
+    }
+
+    async def chunks() -> AsyncIterator[bytes]:
+        for start in range(0, len(raw), 65536):
+            yield raw[start : start + 65536]
+
+    async with _client(app) as client:
+        resp = await client.post("/webhooks/github", headers=headers, content=chunks())
+        await _drain(app)
+
+    assert resp.status_code == 202
+    gw.run.assert_awaited_once()
 
 
 async def test_alertmanager_oversized_body_413(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -10,9 +10,9 @@ Per job execution
 -----------------
 * a ``command`` job → a fresh thread (``gateway.create_thread()``) then
   ``gateway.run(..., profile="scheduled", interface="scheduled", environment=<job env>)`` wrapped in
-  a caller-side ``asyncio.wait_for`` at the job's ``timeout_s``. The gateway's own wall-clock also
-  bounds the run — the caller-side timer is the scheduled-run **belt**: on timeout we cancel the
-  thread and RECORD a ``timeout`` outcome (never swallow it).
+  a caller-side ``asyncio.timeout`` covering both steps at the job's ``timeout_s``. The gateway's
+  own wall-clock also bounds the run — the caller-side timer is the scheduled-run **belt**:
+  on timeout we cancel the thread and RECORD a ``timeout`` outcome (never swallow it).
 * a ``job_type`` job → a registered non-agent runner (``hygiene`` mirrors ``ops/maintenance.py``,
   ``escalation-sweep`` runs the timeout sweeper). Same caller-side timeout + outcome recording.
 
@@ -58,6 +58,8 @@ SCHEDULED_INTERFACE = "scheduled"
 # The synthetic principal a scheduled run is attributed to (audit ``principal.user`` + the
 # per-principal daily budget scope). Not a human — the scheduler acts on its own behalf.
 DEFAULT_SCHEDULED_PRINCIPAL = "scheduler"
+# Bound the best-effort cleanup after the job deadline so an unavailable server cannot wedge a job.
+_CANCEL_TIMEOUT_S = 5.0
 
 # A job_type runner: an async callable taking the JobSpec, doing its side effect, returning nothing.
 JobTypeRunner = Callable[[JobSpec], Awaitable[Any]]
@@ -72,8 +74,9 @@ class JobOutcome:
 
     * ``ok`` — the job completed. For a ``command`` job ``run_id`` is the run it drove.
     * ``escalated`` — a ``command`` run SUSPENDED on a policy escalation (parked for the sweeper).
-    * ``timeout`` — the job exceeded its ``timeout_s`` and was cancelled.
-    * ``error`` — the job runner raised (captured, not propagated).
+    * ``timeout`` — the job exceeded its ``timeout_s``; cancellation is attempted if a thread
+      exists.
+    * ``error`` — the job runner raised or returned an error/budget stop.
     """
 
     job_id: str
@@ -146,41 +149,71 @@ class SchedulerService:
 
     async def _run_command_job(self, spec: JobSpec) -> JobOutcome:
         """A fresh thread + a scheduled ``gateway.run`` bounded by the caller-side ``timeout_s``."""
-        thread_id = await self._gateway.create_thread()
+        thread_id: str | None = None
         assert spec.command is not None  # guaranteed by JobSpec validation
+        task = asyncio.current_task()
+        assert task is not None
+        initial_cancellations = task.cancelling()
+        deadline = asyncio.timeout(spec.timeout_s)
         try:
-            result = await asyncio.wait_for(
-                self._gateway.run(
+            async with deadline:
+                thread_id = await self._gateway.create_thread()
+                if deadline.expired():
+                    raise TimeoutError
+                if task.cancelling() > initial_cancellations:
+                    raise asyncio.CancelledError
+                result = await self._gateway.run(
                     thread_id,
                     spec.command,
                     profile=SCHEDULED_PROFILE,
                     principal=self._principal,
                     interface=SCHEDULED_INTERFACE,
                     environment=spec.environment,
-                ),
-                timeout=spec.timeout_s,
-            )
-        except TimeoutError:
-            # The caller-side belt fired: cancel the in-flight run and RECORD the timeout.
-            await self._gateway.cancel(thread_id)
-            return JobOutcome(
-                job_id=spec.id,
-                status="timeout",
-                thread_id=thread_id,
-                error=f"exceeded timeout_s={spec.timeout_s}",
-            )
+                )
         except Exception as exc:  # noqa: BLE001 - one bad job must not tear down the scheduler loop
+            if task.cancelling() > initial_cancellations:
+                raise asyncio.CancelledError from exc
+            if isinstance(exc, TimeoutError):
+                return await self._command_timeout(spec, thread_id)
             logger.exception("scheduled command job %r failed", spec.id)
             return JobOutcome(job_id=spec.id, status="error", thread_id=thread_id, error=str(exc))
 
-        status: JobStatus = "escalated" if result.interrupted is not None else "ok"
+        # The timeout context removes its own cancellation request. Any remaining new request is
+        # external (for example scheduler shutdown), even if the gateway caught CancelledError.
+        if task.cancelling() > initial_cancellations:
+            raise asyncio.CancelledError
+        # Gateways translate CancelledError into RunResult; the deadline still took effect even
+        # when that prevents the timeout context from raising TimeoutError.
+        if deadline.expired():
+            return await self._command_timeout(spec, thread_id)
+
+        error = result.error
+        status: JobStatus
+        if error is not None or result.budget_stop is not None:
+            status = "error"
+            if error is None:
+                kind = (result.budget_stop or {}).get("kind", "unknown")
+                error = f"run stopped by budget: {kind}"
+        else:
+            status = "escalated" if result.interrupted is not None else "ok"
         return JobOutcome(
             job_id=spec.id,
             status=status,
             thread_id=thread_id,
             run_id=result.run_id,
-            error=result.error,
+            error=error,
         )
+
+    async def _command_timeout(self, spec: JobSpec, thread_id: str | None) -> JobOutcome:
+        """Preserve the timeout outcome even when remote cancellation fails."""
+        error = f"exceeded timeout_s={spec.timeout_s}"
+        if thread_id is not None:
+            try:
+                await asyncio.wait_for(self._gateway.cancel(thread_id), timeout=_CANCEL_TIMEOUT_S)
+            except Exception as exc:  # noqa: BLE001 - cleanup must not hide the original timeout
+                logger.warning("could not cancel scheduled job %r", spec.id, exc_info=True)
+                error += f"; cancellation failed: {str(exc) or type(exc).__name__}"
+        return JobOutcome(job_id=spec.id, status="timeout", thread_id=thread_id, error=error)
 
     async def _run_job_type(self, spec: JobSpec) -> JobOutcome:
         """Dispatch a ``job_type`` job to its registered runner, bounded by ``timeout_s``."""

@@ -453,6 +453,7 @@ def create_app(
             await app.state.live_telemetry.queued(thread_id, principal, interface)
             run_id: str | None = None
             operation_status = "error"
+            terminal_error: str | None = None
             try:
                 with span(
                     "opendevops.webhook_run",
@@ -473,14 +474,23 @@ def create_app(
                         environment=cfg.server.webhook_environment,
                     )
                     run_id = result.run_id
-                    operation_status = "interrupted" if result.interrupted else "ok"
+                    if result.error is not None:
+                        operation_status = "error"
+                        terminal_error = "run failed"
+                    elif result.budget_stop is not None:
+                        operation_status = "budget_stop"
+                        terminal_error = "budget stopped"
+                    else:
+                        operation_status = "interrupted" if result.interrupted else "ok"
             except Exception as exc:  # noqa: BLE001 - background failures are projected, not leaked
                 logger.exception("background webhook run failed for thread %s", thread_id)
                 await app.state.live_telemetry.completed(
                     thread_id, run_id, error=type(exc).__name__
                 )
             else:
-                await app.state.live_telemetry.completed(thread_id, run_id)
+                # The gateway can return failures instead of raising. Project only a fixed
+                # status message: provider error text may contain sensitive request details.
+                await app.state.live_telemetry.completed(thread_id, run_id, error=terminal_error)
             finally:
                 observe_operation(
                     "gateway",
@@ -723,9 +733,8 @@ def _final_answer_text(payload: dict[str, Any]) -> str:
 async def _read_body(request: Request) -> bytes:
     """Read the raw body, rejecting an oversized one with 413 (counted ``error``).
 
-    Defense-in-depth behind Caddy: a declared ``Content-Length`` over the cap is rejected before
-    the body is read at all; the post-read length check catches a lying/absent header. Simple by
-    design — Caddy and the daily budget are the real bulkheads.
+    A declared ``Content-Length`` over the cap is rejected before the body is read. The streaming
+    check also bounds buffering when the header is absent, malformed, or understates the size.
     """
     declared = request.headers.get("content-length")
     if declared is not None:
@@ -733,11 +742,13 @@ async def _read_body(request: Request) -> bytes:
             if int(declared) > _MAX_BODY_BYTES:
                 raise WebhookError(413, _ERROR, "request body too large")
         except ValueError:
-            pass  # malformed Content-Length — fall through to the post-read guard
-    raw = await request.body()
-    if len(raw) > _MAX_BODY_BYTES:
-        raise WebhookError(413, _ERROR, "request body too large")
-    return raw
+            pass  # malformed Content-Length — fall through to the streaming guard
+    raw = bytearray()
+    async for chunk in request.stream():
+        if len(raw) + len(chunk) > _MAX_BODY_BYTES:
+            raise WebhookError(413, _ERROR, "request body too large")
+        raw.extend(chunk)
+    return bytes(raw)
 
 
 async def _read_json(request: Request) -> dict[str, Any]:

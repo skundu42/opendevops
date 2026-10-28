@@ -242,7 +242,11 @@ async def run_live_preflight(cfg: AppConfig) -> PreflightReport:
     if cfg.executor.mode == "remote" and cfg.executor.urls is not None:
         from opendevops.tools.executor import _build_remote_http_client
 
-        client = _build_remote_http_client(cfg)
+        try:
+            client = _build_remote_http_client(cfg)
+        except Exception as exc:  # noqa: BLE001 - report invalid TLS/client setup with other checks
+            _failure(report, "remote executor live probe setup", exc)
+            return report
         try:
             urls = {
                 getattr(channels, channel).rstrip("/")

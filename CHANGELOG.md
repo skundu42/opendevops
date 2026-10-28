@@ -5,6 +5,33 @@ and uses Git tags prefixed with `v`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-28
+
+### Added
+
+- Read-only GitHub repository and release inspection with `gh repo view|list` and
+  `gh release view|list`, using the existing read-token scope and flag restrictions.
+- `opendevops config check --json` for CI and automation, including schema failures and optional
+  live probe results with a failure exit status.
+
+### Fixed
+
+- Scheduled and webhook runs no longer report success when the gateway returns an error or
+  budget stop.
+- Scheduler deadlines include thread creation and remain effective when the gateway converts
+  cancellation into a result. Cancellation cleanup is bounded and cannot hide a timeout.
+- Webhook body limits stop reading oversized streams even with missing or incorrect
+  `Content-Length` headers.
+- Live preflight reports remote executor TLS/client setup failures instead of crashing.
+
+### Changed
+
+- Common execution wrappers, including `timeout`, `nice`, `nohup`, `stdbuf`, `time`, and
+  `busybox`, now match the explicit interpreter deny rule for clearer audit records. These
+  commands were already denied by default.
+
+See [docs/releases/v0.4.0.md](docs/releases/v0.4.0.md).
+
 ## [0.3.0] - 2026-09-04
 
 ### Added
@@ -99,3 +126,4 @@ See [docs/releases/v0.1.1.md](docs/releases/v0.1.1.md).
 [0.1.0]: https://github.com/skundu42/opendevops/releases/tag/v0.1.0
 
 [0.3.0]: https://github.com/skundu42/opendevops/releases/tag/v0.3.0
+[0.4.0]: https://github.com/skundu42/opendevops/releases/tag/v0.4.0
