@@ -281,6 +281,7 @@ See [budgets](budgets.md) for what enforces each number.
 ```sh
 uv run opendevops config check
 uv run opendevops config check --live  # also probe server and remote executor health
+uv run opendevops config check --json  # structured output for CI and automation
 ```
 
 The offline check groups every discoverable success, warning, and failure: runtime invariants,
@@ -289,3 +290,7 @@ trusted executables or remote signing/TLS, and scheduler jobs. Missing optional 
 secrets and PostgreSQL 16 `pg_dump` are warnings until that service starts. `--live` uses the
 configured bearer and mTLS settings but never calls a model provider. Run it after every config
 change; the core preflight also runs at agent construction.
+
+`--json` writes one JSON object to stdout with `ok`, `successes`, `warnings`, and `failures`.
+It includes configuration-load errors and can be combined with `--live`. Both output modes exit
+with status 1 when any check fails and status 0 otherwise; warnings alone do not fail a check.

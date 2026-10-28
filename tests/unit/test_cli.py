@@ -9,6 +9,7 @@ against a real chain (built with :class:`AuditLogger`) and a tampered copy of it
 from __future__ import annotations
 
 import copy
+import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from opendevops import cli
+from opendevops import cli, preflight
 from opendevops.audit.logger import AuditLogger
 from opendevops.audit.schema import EventType
 from opendevops.config import AppConfig
@@ -89,6 +90,83 @@ def test_config_check_rejects_empty_context_allowlist(
     assert result.exit_code == 1
     assert "config INVALID" in result.output
     assert "allowed_contexts is empty" in result.output
+
+
+@pytest.mark.parametrize("failures", [[], ["missing executable: kubectl"]])
+def test_config_check_json_report_and_exit_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failures: list[str]
+) -> None:
+    cfg = _valid_cfg(tmp_path, allowed_contexts=["kind-opendevops"])
+    monkeypatch.setattr(cli, "load_config", lambda: cfg)
+    report = preflight.PreflightReport(
+        successes=["runtime invariants"], warnings=["Slack is not configured"], failures=failures
+    )
+    monkeypatch.setattr(preflight, "run_offline_preflight", lambda _cfg: report)
+
+    result = runner.invoke(cli.app, ["config", "check", "--json"])
+
+    assert result.exit_code == (1 if failures else 0)
+    assert json.loads(result.stdout) == {
+        "ok": not failures,
+        "successes": ["runtime invariants"],
+        "warnings": ["Slack is not configured"],
+        "failures": failures,
+    }
+    assert result.stderr == ""
+
+
+def test_config_check_json_reports_schema_error_without_running_probes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_load() -> AppConfig:
+        raise ValueError("invalid [server] configuration")
+
+    monkeypatch.setattr(cli, "load_config", fail_load)
+    monkeypatch.setattr(
+        preflight, "run_offline_preflight", lambda _cfg: pytest.fail("invalid config checked")
+    )
+    monkeypatch.setattr(
+        preflight, "run_live_preflight", lambda _cfg: pytest.fail("invalid config probed")
+    )
+
+    result = runner.invoke(cli.app, ["config", "check", "--json", "--live"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "ok": False,
+        "successes": [],
+        "warnings": [],
+        "failures": ["configuration schema: invalid [server] configuration"],
+    }
+    assert result.stderr == ""
+
+
+def test_config_check_json_includes_live_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _valid_cfg(tmp_path, allowed_contexts=["kind-opendevops"])
+    monkeypatch.setattr(cli, "load_config", lambda: cfg)
+    monkeypatch.setattr(
+        preflight,
+        "run_offline_preflight",
+        lambda _cfg: preflight.PreflightReport(successes=["runtime invariants"]),
+    )
+
+    async def live_report(actual_cfg: AppConfig) -> preflight.PreflightReport:
+        assert actual_cfg is cfg
+        return preflight.PreflightReport(failures=["server unavailable"])
+
+    monkeypatch.setattr(preflight, "run_live_preflight", live_report)
+
+    result = runner.invoke(cli.app, ["config", "check", "--live", "--json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "ok": False,
+        "successes": ["runtime invariants"],
+        "warnings": [],
+        "failures": ["server unavailable"],
+    }
 
 
 # -- audit verify --------------------------------------------------------------------------

@@ -78,7 +78,7 @@ spent $0.0841 (run) / $0.34 (today)
 
 ```sh
 # Install the published package; no repository clone or frontend build is needed.
-uv tool install "opendevops[checkpoint,ssh]==0.3.0"
+uv tool install "opendevops[checkpoint,ssh]==0.4.0"
 
 mkdir opendevops-workspace
 opendevops init opendevops-workspace
@@ -114,7 +114,7 @@ Continue with the [step-by-step getting-started guide](guides/getting-started.md
 | `opendevops chat` | streaming REPL with environment, profile and principal selection |
 | `opendevops slack [--server-url URL]` | Slack Socket-Mode service over LangGraph Server |
 | `opendevops scheduler [--server-url URL] [--jobs-file PATH]` | scheduled agent and maintenance service |
-| `opendevops config check [--live]` | aggregated offline validation; optionally probe server/executors |
+| `opendevops config check [--live] [--json]` | aggregated validation, optional live probes, and JSON output for CI |
 | `opendevops config grants` | list the control-plane revision and capability proposals |
 | `opendevops config propose-grant` | propose a typed, expiring dangerous capability |
 | `opendevops config approve-grant` | approve a proposal (requester separation in prod) |
@@ -286,9 +286,9 @@ Grafana, and the authenticated dashboard:
 
 ```sh
 curl -fLO \
-  https://github.com/skundu42/opendevops/releases/download/v0.3.0/opendevops-deploy-0.3.0.tar.gz
-tar -xzf opendevops-deploy-0.3.0.tar.gz
-cd opendevops-0.3.0
+  https://github.com/skundu42/opendevops/releases/download/v0.4.0/opendevops-deploy-0.4.0.tar.gz
+tar -xzf opendevops-deploy-0.4.0.tar.gz
+cd opendevops-0.4.0
 cp .env.example .env
 # Fill every required blank in .env.
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 from pathlib import Path
 
+import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -12,6 +13,7 @@ from cryptography.x509.oid import NameOID
 from tests.unit.test_executor_service import make_cfg
 
 from opendevops.config import ExecutorTlsConfig
+from opendevops.preflight import run_live_preflight
 from opendevops.tools.executor import _build_remote_http_client
 
 
@@ -70,3 +72,25 @@ def test_build_remote_http_client_with_mtls(tmp_path: Path) -> None:
     assert isinstance(cfg.executor.tls, ExecutorTlsConfig)
     client = _build_remote_http_client(cfg)
     assert client is not None
+
+
+@pytest.mark.asyncio
+async def test_live_preflight_reports_missing_tls_file(tmp_path: Path) -> None:
+    cfg = make_cfg(
+        str(tmp_path),
+        mode="remote",
+        urls={
+            "staging": {"ro": "https://s-ro", "rw": "https://s-rw"},
+            "prod": {"ro": "https://p-ro", "rw": "https://p-rw"},
+        },
+        signing_key_env="AGENT_KEY",
+        tls={"ca_file": str(tmp_path / "missing-ca.pem")},
+    )
+    cfg.server.url = None
+
+    report = await run_live_preflight(cfg)
+
+    assert not report.ok
+    assert len(report.failures) == 1
+    assert report.failures[0].startswith("remote executor live probe setup:")
+    assert "LangGraph Server live probe skipped: server.url is unset" in report.warnings

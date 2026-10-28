@@ -11,7 +11,7 @@ version: 1
 metadata:
   name: base
   owner: opendevops
-  updated: "2026-07-18"
+  updated: "2026-10-28"
 acknowledged_default_deny: []
 
 rules:
@@ -38,6 +38,18 @@ rules:
           - xargs
           - find
           - env
+          - timeout
+          - gtimeout
+          - nice
+          - nohup
+          - stdbuf
+          - gstdbuf
+          - time
+          - busybox
+          - chroot
+          - unshare
+          - setsid
+          - flock
           - eval
           - watch
           - expect

@@ -128,7 +128,8 @@ config/policy/
 ### What `base.yaml` denies, and why
 
 - **Interpreters / exec-wrappers / net tools** (`bash`, `python3`, `awk`, `sed`, `xargs`, `find`,
-  `env`, `curl`, `ssh`, `sudo`, …): would re-open the arbitrary-exec surface the argv-only design
+  `env`, `timeout`, `nice`, `nohup`, `stdbuf`, `time`, `busybox`, `curl`, `ssh`, `sudo`, …):
+  would re-open the arbitrary-exec surface the argv-only design
   deletes. Redundant with default-deny — kept explicit for audit clarity.
 - **Credential/identity overrides**: `kubectl --kubeconfig/--token/--server/--as`,
   `helm --kube-*`, `gh --hostname`, `aws --endpoint-url`,
@@ -144,6 +145,23 @@ config/policy/
   kubeconfig (which contains only allowed contexts) as the backstop when `--context` is omitted.
 - **Subagents and compaction**: every `task` target except the named `log-summarizer`;
   `compact_conversation`; and the deepagents built-in shell `execute` tool.
+
+### GitHub repository and release inspection
+
+The `gh-read` pack permits `gh repo view|list` and `gh release view|list` in staging and
+production, using the configured read-only GitHub token. Repository visibility is bounded by
+that token's access; `targets.github.write_repos` continues to constrain writes only.
+
+```sh
+gh repo view octo-org/staging-app --json nameWithOwner,defaultBranchRef
+gh repo list octo-org --limit 20 --json nameWithOwner
+gh release list --repo octo-org/staging-app --limit 10
+gh release view v0.4.0 --repo octo-org/staging-app --json tagName,publishedAt
+```
+
+Repository/release mutations, repository cloning, release downloads, browser-opening `--web`,
+and `--hostname` overrides remain denied. The existing flag allowlist also supports `--jq`
+for selecting fields from JSON output; it is not expanded by these read commands.
 
 ## Code hooks
 
